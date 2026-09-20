@@ -320,13 +320,12 @@ tpbot = {
 local char = string.char
 local i2c_write = microbit.i2c.write
 
-local function send(command, params)
-  i2c_write(32, "\255\249"..char(command)..
-    char(string.len(params))..params)
+local function send(s)
+  i2c_write(32, s)
 end
 
 function tpbot.set_car_light(r, g, b)
-  send(48, char(r)..char(g)..char(b))
+  send("\032"..char(r)..char(g)..char(b))
 end
 
 local function abs(x, n)
@@ -336,7 +335,7 @@ end
 local function set_motors_speed(left, right)
   local l, d = abs(left, 1)
   local r, e = abs(right, 2)
-  send(16, char(l)..char(r)..char(d + e))
+  send("\001"..char(l)..char(r)..char(d + e))
 end
 
 tpbot.set_motors_speed = set_motors_speed
@@ -357,27 +356,6 @@ function tpbot.get_distance()
   pulse_us(t, 1, 10)
   local r = time_pulse_us(e, 1, 25000)
   return r and r * 0.01715
-end
-
-local function hl(x)
-  local l = x % 256
-  local h = (x - l) / 256
-  return char(h)..char(l)
-end
-
-function tpbot.run_distance(mm)
-  if mm ~= 0 then
-    local d, f = abs(mm, 3)
-    send(65, hl(d)..char(f))
-  end
-end
-
-function tpbot.turn(deg)
-  if deg ~= 0 then
-    local d, f = abs(deg, 1)
-    local hl = hl(d)
-    send(66, hl..hl..char(f + 1))
-  end
 end
 
 local function button(value, btn)
