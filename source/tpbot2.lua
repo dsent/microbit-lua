@@ -1,5 +1,5 @@
+-- TPBot Edu library
 -- Based on https://github.com/elecfreaks/pxt-TPBot/blob/master/V2.ts
-
 local getPin = microbit.io.getPin
 
 tpbot = {
@@ -8,10 +8,10 @@ tpbot = {
 }
 
 local char = string.char
-local write = microbit.i2c.write
+local i2c_write = microbit.i2c.write
 
 local function send(command, params)
-  write(32, "\255\249"..char(command)..
+  i2c_write(32, "\255\249"..char(command)..
     char(string.len(params))..params)
 end
 
@@ -23,10 +23,18 @@ local function abs(x, n)
   return math.abs(x), x < 0 and n or 0
 end
 
-function tpbot.set_motors_speed(left, right)
+local function set_motors_speed(left, right)
   local l, d = abs(left, 1)
   local r, e = abs(right, 2)
   send(16, char(l)..char(r)..char(d + e))
+end
+
+tpbot.set_motors_speed = set_motors_speed
+
+function robot_move(left, right, time)
+  set_motors_speed(left, right)
+  microbit.sleep(1000 * time)
+  set_motors_speed(0, 0)
 end
 
 local read_digital = microbit.io.getDigitalValue
@@ -60,4 +68,16 @@ function tpbot.turn(deg)
     local hl = hl(d)
     send(66, hl..hl..char(f + 1))
   end
+end
+
+function turn(h)
+  h = h % 12
+  if 6 < h then
+    h = h - 12
+  end
+  tpbot.turn(-30 * h)
+end
+
+function straight(l)
+  tpbot.run_distance(110 * l)
 end

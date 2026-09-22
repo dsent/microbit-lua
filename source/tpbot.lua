@@ -1,3 +1,4 @@
+-- TPBot Classic library
 local getPin = microbit.io.getPin
 
 tpbot = {
@@ -6,10 +7,10 @@ tpbot = {
 }
 
 local char = string.char
-local write = microbit.i2c.write
+local i2c_write = microbit.i2c.write
 
 local function send(s)
-  write(32, s)
+  i2c_write(32, s)
 end
 
 function tpbot.set_car_light(r, g, b)
@@ -20,10 +21,18 @@ local function abs(x, n)
   return math.abs(x), x < 0 and n or 0
 end
 
-function tpbot.set_motors_speed(left, right)
+local function set_motors_speed(left, right)
   local l, d = abs(left, 1)
   local r, e = abs(right, 2)
   send("\001"..char(l)..char(r)..char(d + e))
+end
+
+tpbot.set_motors_speed = set_motors_speed
+
+function robot_move(left, right, time)
+  set_motors_speed(left, right)
+  microbit.sleep(1000 * time)
+  set_motors_speed(0, 0)
 end
 
 local read_digital = microbit.io.getDigitalValue
