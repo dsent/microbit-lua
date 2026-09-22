@@ -15,9 +15,16 @@ and compile it as the main payload of the firmware. It builds upon
 API to the Lua runtime.
 
 When the board is powered on then the Lua VM is initialized and the
-firmware payload (the `source/lua-script.lua` file) is evaluated. This
-payload can be replaced by the `hextract` script without recompiling
-the firmware image.
+firmware payload is evaluated. The payload is `source/lua-script.lua`
+with one robot library put in place of its `--@ROBOT_LIBRARY@` line:
+`source/tpbot.lua` for the TPBot Classic, `source/tpbot2.lua` for the
+TPBot Edu. The two boards speak different I2C formats, and the Edu
+board alone drives a distance and turns an angle, so
+`tpbot.run_distance`, `tpbot.turn` and the `straight` and `turn`
+helpers built on them are in the Edu library only. Everything else —
+the REPL, the serial session, the radio link and the buttons — is
+shared. This payload can be replaced by the `hextract` script without
+recompiling the firmware image.
 
 The hextract tool requires a known layout of the firmware. For that we
 need to edit the linker script, but that lives in the
@@ -41,6 +48,22 @@ included `Dockerfile`:
 
 The current directory will be shared with the container under
 `/workspace`.
+
+### Choosing the robot
+
+`./build.py --robot edu` builds for the TPBot Edu and `./build.py
+--robot classic` for the TPBot Classic; `edu` is what you get when you
+say nothing. Run it twice to have both firmwares:
+
+```shell
+./build.py --robot edu
+./build.py --robot classic
+```
+
+Each build writes `MICROBIT.hex`, and keeps a copy of it as
+`MICROBIT-edu.hex` or `MICROBIT-classic.hex` along with the matching
+`.buildinfo`. `MICROBIT.hex` is whichever robot you built last, so
+flash the board from the named copy when both are around.
 
 ### Dependencies
 

@@ -392,32 +392,64 @@ target_compile_options(lua PRIVATE
     -fno-exceptions
 )
 
-target_link_libraries(${CODAL_OUTPUT_NAME}
-  lua
-  ${CMAKE_BINARY_DIR}/lua-script.o
-)
-
 # ----------------------
 # Link in the lua script
 # ----------------------
 
+# One firmware drives one robot. ROBOT says which library goes into the
+# payload beside the shared script; ./build.py --robot sets it. The
+# robot's name is in the generated file names, so that a build after a
+# switch cannot pick up the other robot's payload.
+set(ROBOT "edu" CACHE STRING "The robot this firmware drives: edu or classic")
+set_property(CACHE ROBOT PROPERTY STRINGS edu classic)
+
+if(ROBOT STREQUAL "edu")
+    set(ROBOT_LIBRARY ${CMAKE_SOURCE_DIR}/source/tpbot2.lua)
+elseif(ROBOT STREQUAL "classic")
+    set(ROBOT_LIBRARY ${CMAKE_SOURCE_DIR}/source/tpbot.lua)
+else()
+    message(FATAL_ERROR "ROBOT is '${ROBOT}'; it can be edu or classic")
+endif()
+message("${BoldBlue}Driving the TPBot ${ROBOT} (${ROBOT_LIBRARY})${ColourReset}")
+
+set(LUA_PAYLOAD source/lua-script-${ROBOT}.lua)
+set(LUA_SCRIPT_OBJ ${CMAKE_BINARY_DIR}/lua-script-${ROBOT}.o)
+
 add_custom_command(
-    OUTPUT ${CMAKE_BINARY_DIR}/lua-script.o
+    OUTPUT ${CMAKE_BINARY_DIR}/${LUA_PAYLOAD}
+    COMMAND ${CMAKE_COMMAND}
+            -DSCRIPT=${CMAKE_SOURCE_DIR}/source/lua-script.lua
+            -DLIBRARY=${ROBOT_LIBRARY}
+            -DPAYLOAD=${CMAKE_BINARY_DIR}/${LUA_PAYLOAD}
+            -P ${CMAKE_SOURCE_DIR}/utils/cmake/lua-payload.cmake
+    DEPENDS ${CMAKE_SOURCE_DIR}/source/lua-script.lua
+            ${ROBOT_LIBRARY}
+            ${CMAKE_SOURCE_DIR}/utils/cmake/lua-payload.cmake
+    COMMENT "Putting the TPBot ${ROBOT} library in the Lua payload"
+)
+
+add_custom_command(
+    OUTPUT ${LUA_SCRIPT_OBJ}
     COMMAND arm-none-eabi-objcopy
             -I binary
             -O elf32-littlearm
             -B arm
             # if it remains in the .data section, then it gets copied to RAM
             --rename-section .data=.lua_script,alloc,load,readonly,data,contents
-            source/lua-script.lua
-            ${CMAKE_BINARY_DIR}/lua-script.o
-    DEPENDS ${CMAKE_SOURCE_DIR}/source/lua-script.lua
+            ${LUA_PAYLOAD}
+            ${LUA_SCRIPT_OBJ}
+    DEPENDS ${CMAKE_BINARY_DIR}/${LUA_PAYLOAD}
     # it's needed to avoid the symbols encoding the absolute path; i.e. unpredictable
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/
 )
 
 add_custom_target(lua_script_obj
-    DEPENDS ${CMAKE_BINARY_DIR}/lua-script.o
+    DEPENDS ${LUA_SCRIPT_OBJ}
+)
+
+target_link_libraries(${CODAL_OUTPUT_NAME}
+  lua
+  ${LUA_SCRIPT_OBJ}
 )
 
 add_dependencies(${CODAL_OUTPUT_NAME} lua_script_obj)
