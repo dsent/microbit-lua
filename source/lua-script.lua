@@ -23,45 +23,18 @@ local serial = {
   eventAfterAsync = uBit.serial.eventAfterAsync,
 }
 
-local ble_uart = nil
-if uBit.ble and uBit.ble.uart then
-  ble_uart = {
-    send = uBit.ble.uart.send,
-    getCharAsync = uBit.ble.uart.getCharAsync,
-    eventAfterAsync = uBit.ble.uart.eventAfterAsync,
-  }
-end
-
-local function serial_write(s)
+-- Output goes wherever the session being served takes it.
+-- The serial session names no other way out, so it falls to
+-- the port.
+local function write(s)
+  local session = active_session
+  local out = session and session.transport.send
+  if out then return out(s) end
   for c in string.gmatch(s, ".") do
     if c == "\n" then
       serial.send("\r")
     end
     serial.send(c)
-  end
-end
-
-local function ble_write(s)
-  if ble_uart then
-    ble_uart.send(s)
-  end
-end
-
--- Output routing: print()/io.write() are shared globals that both the REPL
--- engine and arbitrary user code call, and their output must go back to the
--- session that issued the command. The destination can't be passed lexically:
--- user chunks compile against a shared env, and event handlers
--- (microbit.handler[...]) run with no session at all. So each session
--- saves/restores itself as `active_session` around its event processing, and
--- write() routes to that session's transport, falling back to serial when no
--- session is active.
-local active_session = nil
-
-local function write(s)
-  if active_session then
-    active_session.transport.write(s)
-  else
-    serial_write(s)
   end
 end
 
@@ -277,17 +250,9 @@ local function make_session(transport)
 end
 
 local serial_session = make_session({
-  write = serial_write,
   crlf_before_result = true,
   getChar = serial.getCharAsync,
   arm = function() serial.eventAfterAsync(1) end
-})
-
-local ble_session = make_session({
-  write = ble_write,
-  crlf_before_result = false,
-  getChar = ble_uart and ble_uart.getCharAsync,
-  arm = function() if ble_uart then ble_uart.eventAfterAsync(1) end end
 })
 
 local handler = { }
@@ -312,7 +277,9 @@ local keypress = {
   ["\127"] = backspace
 }
 
-handler[microbit.DEVICE_ID_SERIAL] = function(value)
+local typed_here = ""
+
+local function port_to_console(value)
   if value == microbit.CODAL_SERIAL_EVT_HEAD_MATCH then
     serial_session.run(function()
       local c = serial_session.transport.getChar()
@@ -321,7 +288,7 @@ handler[microbit.DEVICE_ID_SERIAL] = function(value)
         local input = keypress[c]
         if input then
           if #echo > 0 then
-            serial_write(echo)
+            write(echo)
             echo = ""
           end
           input()
@@ -332,72 +299,97 @@ handler[microbit.DEVICE_ID_SERIAL] = function(value)
         c = serial_session.transport.getChar()
       end
       if #echo > 0 then
-        serial_write(echo)
+        write(echo)
       end
       serial_session.transport.arm()
     end)
   end
 end
 
--- BLE UART input is framed: [2-byte big-endian length][payload bytes].
--- Payload is raw Lua source and may contain newlines. On a complete
--- frame we hand it to the shared submit loop, which uses compile
--- detection for multi-line continuation.
-local ble_parser = { state = "len_hi" }
-local BLE_MAX_FRAME = 1024
-local ble_greeted = false
+handler[microbit.DEVICE_ID_SERIAL] = port_to_console
 
-local function ble_feed(c)
-  local b = string.byte(c)
-  local st = ble_parser.state
-  if st == "len_hi" then
-    ble_parser.len_hi = b
-    ble_parser.state = "len_lo"
-  elseif st == "len_lo" then
-    local n = ble_parser.len_hi * 256 + b
-    if n == 0 then
-      ble_parser.state = "len_hi"
-      if not ble_greeted then
-        ble_greeted = true
-        write("micro:bit BLE REPL (Lua 5.1)\r\n")
-      end
-      ble_session.submit("")
-    elseif n > BLE_MAX_FRAME then
-      ble_parser.state = "len_hi"
-    else
-      ble_parser.remaining = n
-      ble_parser.payload = ""
-      ble_parser.state = "payload"
-    end
-  elseif st == "payload" then
-    ble_parser.payload = ble_parser.payload .. c
-    ble_parser.remaining = ble_parser.remaining - 1
-    if ble_parser.remaining == 0 then
-      ble_parser.state = "len_hi"
-      ble_session.submit(ble_parser.payload)
-    end
+-- TPBot Edu library
+-- Based on https://github.com/elecfreaks/pxt-TPBot/blob/master/V2.ts
+local getPin = microbit.io.getPin
+
+tpbot = {
+  pin_t = getPin(16),
+  pin_e = getPin(15)
+}
+
+local char = string.char
+local i2c_write = microbit.i2c.write
+
+local function send(command, params)
+  i2c_write(32, "\255\249"..char(command)..
+    char(string.len(params))..params)
+end
+
+function tpbot.set_car_light(r, g, b)
+  send(48, char(r)..char(g)..char(b))
+end
+
+local function abs(x, n)
+  return math.abs(x), x < 0 and n or 0
+end
+
+local function set_motors_speed(left, right)
+  local l, d = abs(left, 1)
+  local r, e = abs(right, 2)
+  send(16, char(l)..char(r)..char(d + e))
+end
+
+tpbot.set_motors_speed = set_motors_speed
+
+function robot_move(left, right, time)
+  set_motors_speed(left, right)
+  microbit.sleep(1000 * time)
+  set_motors_speed(0, 0)
+end
+
+local read_digital = microbit.io.getDigitalValue
+local pulse_us = microbit.io.pulseUs
+local time_pulse_us = microbit.io.getPulseUs
+
+function tpbot.get_distance()
+  local e, t = tpbot.pin_e, tpbot.pin_t
+  read_digital(e)
+  pulse_us(t, 1, 10)
+  local r = time_pulse_us(e, 1, 25000)
+  return r and r * 0.01715
+end
+
+local function hl(x)
+  local l = x % 256
+  local h = (x - l) / 256
+  return char(h)..char(l)
+end
+
+function tpbot.run_distance(mm)
+  if mm ~= 0 then
+    local d, f = abs(mm, 3)
+    send(65, hl(d)..char(f))
   end
 end
 
-if microbit.MICROBIT_ID_BLE_UART then
-  handler[microbit.MICROBIT_ID_BLE_UART] = function(value)
-    if value == microbit.MICROBIT_UART_S_EVT_HEAD_MATCH then
-      ble_session.run(function()
-        local c = ble_session.transport.getChar()
-        while c do
-          ble_feed(c)
-          c = ble_session.transport.getChar()
-        end
-        ble_session.transport.arm()
-      end)
-    end
+function tpbot.turn(deg)
+  if deg ~= 0 then
+    local d, f = abs(deg, 1)
+    local hl = hl(d)
+    send(66, hl..hl..char(f + 1))
   end
+end
 
-  handler[microbit.MICROBIT_ID_BLE] = function(value)
-    if value == microbit.MICROBIT_BLE_EVT_DISCONNECTED then
-      ble_greeted = false
-    end
+function turn(h)
+  h = h % 12
+  if 6 < h then
+    h = h - 12
   end
+  tpbot.turn(-30 * h)
+end
+
+function straight(l)
+  tpbot.run_distance(110 * l)
 end
 
 local function button(value, btn)
@@ -427,6 +419,113 @@ function on_event(source, value, timestamp)
   end
 end
 
+
+-- A REPL over a radio link, and the other end of it.
+--
+-- Both turn the radio on themselves; the group is the one
+-- every micro:bit starts in. A board that calls again — one
+-- that was reset, or lost the link — is taken as it comes,
+-- and the session starts over for it.
+--
+-- listen(name) waits for that board to call, then serves it:
+-- what arrives over the link is typed into a session of its
+-- own, and what the session says goes back the same way.
+--
+-- connect(name, timeout) calls, then carries the port over:
+-- what is typed here goes out, what comes back is printed.
+
+local radio_session = make_session({
+  crlf_before_result = false,
+  send = function(text) microbit.radio.tx(text) end
+})
+
+
+-- A piece of the link, as much or as little as arrived: what
+-- stands before a line ending is entered, what follows it
+-- waits for the rest to come.
+local function typed(piece)
+  local at = string.find(piece, "[\r\n]")
+  while at do
+    radio_session.buffer =
+      radio_session.buffer .. piece:sub(1, at - 1)
+    radio_session.submit("")
+    piece = piece:sub(at + 1)
+    at = string.find(piece, "[\r\n]")
+  end
+  radio_session.buffer = radio_session.buffer .. piece
+end
+
+--- A fresh session for a caller that has just arrived
+local function greet()
+  radio_session.buffer = ""
+  radio_session.run(radio_session.prompt)
+end
+
+function listen(name)
+  microbit.radio.enable()
+  while microbit.radio.listen() ~= name do end
+  greet()
+  while true do
+    if microbit.radio.answered() then greet() end
+    local piece = microbit.radio.rx()
+    if piece then
+      radio_session.run(function() typed(piece) end)
+    end
+    microbit.sleep(5)
+  end
+end
+
+-- Whatever has been typed since the last look
+local function typing()
+  local chars = { }
+  local c = serial.getCharAsync()
+  while c do
+    chars[#chars + 1] = c
+    c = serial.getCharAsync()
+  end
+  return table.concat(chars)
+end
+
+-- Whoever has the port serves it: the console's own session
+-- to start with, the link once connect() has opened one.
+-- connect puts the other one in place; nothing asks which.
+-- A line at a time goes over the link: tx waits to be
+-- answered, and a character each would spend that wait while
+-- the next ones pile up in the port. So the typing is echoed
+-- as it comes and held until its line is whole.
+local function port_to_link(value)
+  if value == microbit.CODAL_SERIAL_EVT_HEAD_MATCH then
+    local text = typing()
+    serial.eventAfterAsync(1)
+    write(text)
+    typed_here = typed_here .. text
+    local at = string.find(typed_here, "[\r\n]")
+    while at do
+      microbit.radio.tx(typed_here:sub(1, at))
+      typed_here = typed_here:sub(at + 1)
+      at = string.find(typed_here, "[\r\n]")
+    end
+  end
+end
+
+--- What the link says goes to the port
+local function link_to_port()
+  local piece = microbit.radio.rx()
+  if piece then write(piece) end
+end
+
+function connect(name, timeout)
+  microbit.radio.enable()
+  if not microbit.radio.connect(name, timeout) then
+    print("Connection timed out.")
+    return
+  end
+  print(name .. " connected.")
+  typed_here = ""
+  handler[microbit.DEVICE_ID_SERIAL] = port_to_link
+  handler[microbit.DEVICE_ID_RADIO] = link_to_port
+end
+
 -- Script-level setup (runs once before the main fiber
 -- is released):
 -- show prompt, initialise the serial RX buffer, and arm
@@ -437,6 +536,3 @@ end
 serial_session.prompt()
 serial.getCharAsync()
 serial.eventAfterAsync(1)
-if ble_uart then
-  ble_uart.eventAfterAsync(1)
-end

@@ -22,12 +22,15 @@ struct LuaMeta {
 extern const LuaMeta __lua_meta;
 
 #include "MicroBit.h"
+#if CONFIG_ENABLED(DEVICE_BLE)
 #include "MicroBitBLEManager.h"
 #include "MicroBitUARTService.h"
+#endif
 #include "codal-lua.h"
 
 MicroBit uBit;
 
+#if CONFIG_ENABLED(DEVICE_BLE)
 // UART service (Nordic UART over BLE)
 MicroBitUARTService *uart;
 
@@ -40,6 +43,7 @@ void onBLEDisconnected(MicroBitEvent)
 {
     uBit.display.print("D");  // Disconnected
 }
+#endif
 
 static int lua_panic_handler(lua_State *L) {
     (void)L;
@@ -49,6 +53,7 @@ static int lua_panic_handler(lua_State *L) {
     }
 }
 
+#if CONFIG_ENABLED(DEVICE_BLE)
 void setup_ble_uart_service() {
     // Create UART service over BLE. The Lua REPL owns all RX/TX handling:
     // it arms a per-char head-match (eventAfter) and parses length-prefixed
@@ -68,6 +73,7 @@ void setup_ble_uart_service() {
         onBLEDisconnected
     );
 }
+#endif
 
 int main() {
     uBit.init();
@@ -76,7 +82,9 @@ int main() {
     // before the REPL drain fiber catches up. 254 is the uint8_t API maximum.
     uBit.serial.setRxBufferSize(254);
 
+#if CONFIG_ENABLED(DEVICE_BLE)
     setup_ble_uart_service();
+#endif
 
     DMESG("main speaking");
 
