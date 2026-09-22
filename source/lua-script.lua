@@ -225,9 +225,7 @@ local function make_session(transport)
   end
   function s.submit(text)
     s.buffer = s.buffer .. text .. "\n"
-    if s.transport.crlf_before_result then
-      write("\r\n")
-    end
+    write(s.transport.before_result)
     local chunk, err, incomplete = compile(s.buffer)
     if not incomplete then
       if chunk then
@@ -250,7 +248,7 @@ local function make_session(transport)
 end
 
 local serial_session = make_session({
-  crlf_before_result = true,
+  before_result = "\r\n",
   getChar = serial.getCharAsync,
   arm = function() serial.eventAfterAsync(1) end
 })
@@ -279,30 +277,32 @@ local keypress = {
 
 local typed_here = ""
 
+-- Everything the port has, in one pass: a key acts, anything
+-- else joins the line. The echo waits behind a key, so what
+-- is shown keeps the order it was typed in.
+local function from_port()
+  local session = serial_session
+  local c = session.transport.getChar()
+  local echo = ""
+  while c do
+    local key = keypress[c]
+    if key then
+      if #echo > 0 then write(echo) end
+      echo = ""
+      key()
+    else
+      session.buffer = session.buffer .. c
+      echo = echo .. c
+    end
+    c = session.transport.getChar()
+  end
+  if #echo > 0 then write(echo) end
+  session.transport.arm()
+end
+
 local function port_to_console(value)
   if value == microbit.CODAL_SERIAL_EVT_HEAD_MATCH then
-    serial_session.run(function()
-      local c = serial_session.transport.getChar()
-      local echo = ""
-      while c do
-        local input = keypress[c]
-        if input then
-          if #echo > 0 then
-            write(echo)
-            echo = ""
-          end
-          input()
-        else
-          serial_session.buffer = serial_session.buffer .. c
-          echo = echo .. c
-        end
-        c = serial_session.transport.getChar()
-      end
-      if #echo > 0 then
-        write(echo)
-      end
-      serial_session.transport.arm()
-    end)
+    serial_session.run(from_port)
   end
 end
 
@@ -435,7 +435,7 @@ end
 -- what is typed here goes out, what comes back is printed.
 
 local radio_session = make_session({
-  crlf_before_result = false,
+  before_result = "",
   send = function(text) microbit.radio.tx(text) end
 })
 
