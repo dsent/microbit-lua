@@ -308,8 +308,11 @@ end
 
 handler[microbit.DEVICE_ID_SERIAL] = port_to_console
 
--- TPBot Edu library
--- Based on https://github.com/elecfreaks/pxt-TPBot/blob/master/V2.ts
+-- TPBot library, for the TPBot Edu and the TPBot Classic
+-- Based on https://github.com/elecfreaks/pxt-TPBot (V2.ts for
+-- the Edu, V1.ts for the Classic). Like it, every motor and
+-- light call sends both robots' commands; each robot ignores
+-- the other's.
 local getPin = microbit.io.getPin
 
 tpbot = {
@@ -320,23 +323,49 @@ tpbot = {
 local char = string.char
 local i2c_write = microbit.i2c.write
 
+-- Only ever write to the robot: a TPBot Classic that is read
+-- from holds the bus until it is switched off and on.
+local function to_robot(s)
+  if not pcall(i2c_write, 32, s) then
+    error("The robot does not answer. Check that it is " ..
+      "switched on, or switch it off and on again.", 0)
+  end
+end
+
 local function send(command, params)
-  i2c_write(32, "\255\249"..char(command)..
+  to_robot("\255\249"..char(command)..
     char(string.len(params))..params)
 end
 
 function tpbot.set_car_light(r, g, b)
-  send(48, char(r)..char(g)..char(b))
+  local rgb = char(r)..char(g)..char(b)
+  send(48, rgb)
+  to_robot("\032"..rgb)
 end
 
 local function abs(x, n)
   return math.abs(x), x < 0 and n or 0
 end
 
+-- A TPBot Classic has been seen letting a wheel creep on after
+-- a forward move, when stopped with its reverse bit clear; with
+-- the bit set it stays still, so a stopped wheel gets the bit.
 local function set_motors_speed(left, right)
   local l, d = abs(left, 1)
   local r, e = abs(right, 2)
   send(16, char(l)..char(r)..char(d + e))
+  if l < 1 then d = 1 end
+  if r < 1 then e = 2 end
+  to_robot("\001"..char(l)..char(r)..char(d + e))
+end
+
+-- Whether a robot answers: an empty write, which both TPBots
+-- take alike, so it cannot tell which one it is.
+function robot_info()
+  if pcall(i2c_write, 32, "") then
+    return { connected = true, robot = "TPBot" }
+  end
+  return { connected = false }
 end
 
 tpbot.set_motors_speed = set_motors_speed
