@@ -411,9 +411,19 @@ target_compile_options(lua PRIVATE
     -fno-exceptions
 )
 
+# The Lua script this firmware carries, relative to the project root:
+# source/lua-script.lua for the TPBot Edu, source/lua-script-classic.lua
+# for the TPBot Classic. build.py builds one firmware for each.
+set(LUA_SCRIPT "source/lua-script.lua" CACHE STRING
+    "Lua script embedded in the firmware, relative to the project root")
+# Each script gets an object of its own, so switching scripts never
+# links the one built before
+get_filename_component(LUA_SCRIPT_NAME ${LUA_SCRIPT} NAME_WE)
+set(LUA_SCRIPT_OBJ ${CMAKE_BINARY_DIR}/${LUA_SCRIPT_NAME}.o)
+
 target_link_libraries(${CODAL_OUTPUT_NAME}
   lua
-  ${CMAKE_BINARY_DIR}/lua-script.o
+  ${LUA_SCRIPT_OBJ}
 )
 
 # ----------------------
@@ -421,22 +431,22 @@ target_link_libraries(${CODAL_OUTPUT_NAME}
 # ----------------------
 
 add_custom_command(
-    OUTPUT ${CMAKE_BINARY_DIR}/lua-script.o
+    OUTPUT ${LUA_SCRIPT_OBJ}
     COMMAND arm-none-eabi-objcopy
             -I binary
             -O elf32-littlearm
             -B arm
             # if it remains in the .data section, then it gets copied to RAM
             --rename-section .data=.lua_script,alloc,load,readonly,data,contents
-            source/lua-script.lua
-            ${CMAKE_BINARY_DIR}/lua-script.o
-    DEPENDS ${CMAKE_SOURCE_DIR}/source/lua-script.lua
+            ${LUA_SCRIPT}
+            ${LUA_SCRIPT_OBJ}
+    DEPENDS ${CMAKE_SOURCE_DIR}/${LUA_SCRIPT}
     # it's needed to avoid the symbols encoding the absolute path; i.e. unpredictable
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/
 )
 
 add_custom_target(lua_script_obj
-    DEPENDS ${CMAKE_BINARY_DIR}/lua-script.o
+    DEPENDS ${LUA_SCRIPT_OBJ}
 )
 
 add_dependencies(${CODAL_OUTPUT_NAME} lua_script_obj)

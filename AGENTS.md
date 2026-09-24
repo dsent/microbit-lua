@@ -2,7 +2,9 @@
 
 ## Build
 - Use `python3 build.py --clean` as the entry point (not cmake directly)
-- Outputs `MICROBIT.hex` and `MICROBIT.bin` in the project root (`build/` holds the ELF + map)
+- Builds one firmware per robot into the project root: `MICROBIT-edu.hex`/`.bin`
+  (`source/lua-script.lua`) and `MICROBIT-classic.hex`/`.bin` (`source/lua-script-classic.lua`);
+  `MICROBIT.hex`/`.bin` are the Edu build (`build/` holds the ELF + map)
 - Dependencies are pinned via `"branches"` in `codal.json`: each key is the repo URL to
   clone from (may be a fork) and each value the ref (SHA or branch). Entries are matched
   to `target.json` dependencies by repo NAME — same semantics in the CMake fresh-clone
