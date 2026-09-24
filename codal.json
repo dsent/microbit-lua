@@ -32,6 +32,12 @@
 	// approximate.
 	// ! Must do a clean build after changing it: ./build.py --clean
 	"LUA_NUMBER_IS_FLOAT": 1,
+	// How long an I2C transfer may wait for the bus, in loop turns (codal-nrf52's
+	// default of 1000000 is about 14 s in all). A switched-off TPBot Edu holds
+	// the bus, so every robot command waits this long before it fails; this
+	// makes it about 5 s.
+	// ! Must do a clean build after changing it: ./build.py --clean
+	"NRF52I2C_TIMEOUT10US": 300000,
 	// Whether to compile in the BLE services.
 	// ! Must do a clean build after changing it: ./build.py --clean
         "DEVICE_BLE": 0,
