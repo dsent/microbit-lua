@@ -42,16 +42,6 @@ def print_build_id(root=None):
                                          info["sha"][:7], flags))
     print("Full commit id: " + info["sha"])
 
-def device_name(root="."):
-    """The name the build gives its output files, e.g. MICROBIT."""
-    codal = read_json(root + "/codal.json")
-    targetdir = codal['target']['name']
-    try:
-        target = read_json(root + "/libraries/" + targetdir + "/target.json")
-        return target["device"]
-    except Exception:
-        return targetdir
-
 def write_buildinfo(root=None, output_dir="."):
     if root is None:
         root = os.getcwd()
@@ -59,7 +49,13 @@ def write_buildinfo(root=None, output_dir="."):
     if info is None:
         print("Warning: cannot determine git commit id, skipping buildinfo.")
         return
-    device = device_name(root)
+    codal = read_json(root + "/codal.json")
+    targetdir = codal['target']['name']
+    try:
+        target = read_json(root + "/libraries/" + targetdir + "/target.json")
+        device = target["device"]
+    except Exception:
+        device = targetdir
     path = os.path.join(output_dir, device + ".buildinfo")
     with open(path, "w") as f:
         f.write("commit=" + info["sha"] + "\n")
@@ -68,16 +64,13 @@ def write_buildinfo(root=None, output_dir="."):
         f.write("built=" + time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()) + "\n")
     print("Wrote " + path)
 
-def build(clean, verbose = False, parallelism = 10, cmake_args = ""):
+def build(clean, verbose = False, parallelism = 10):
     # Use Ninja on Windows, or if available in any other OS
     use_ninja = shutil.which("ninja") is not None or platform.system() == "Windows"
 
-    if cmake_args:
-        cmake_args = " " + cmake_args
-
     if use_ninja:
         # configure
-        system("cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo -G \"Ninja\"" + cmake_args)
+        system("cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo -G \"Ninja\"")
 
         if clean:
             system("ninja clean")
@@ -89,7 +82,7 @@ def build(clean, verbose = False, parallelism = 10, cmake_args = ""):
             system("ninja -j {}".format(parallelism))
     else:
         # configure
-        system("cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo -G \"Unix Makefiles\"" + cmake_args)
+        system("cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo -G \"Unix Makefiles\"")
 
         if clean:
             system("make clean")

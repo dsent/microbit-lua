@@ -15,12 +15,9 @@ and compile it as the main payload of the firmware. It builds upon
 API to the Lua runtime.
 
 When the board is powered on then the Lua VM is initialized and the
-firmware payload is evaluated: `source/lua-script.lua` for the TPBot
-Edu, or `source/lua-script-classic.lua` for the original TPBot, the
-TPBot Classic. The two scripts differ only in the robot's motor and
-light commands, and in the Edu-only `run_distance`, `turn` and
-`straight`. This payload can be replaced by the `hextract` script
-without recompiling the firmware image.
+firmware payload (the `source/lua-script.lua` file) is evaluated. This
+payload can be replaced by the `hextract` script without recompiling
+the firmware image.
 
 The hextract tool requires a known layout of the firmware. For that we
 need to edit the linker script, but that lives in the
@@ -36,12 +33,8 @@ included `Dockerfile`:
 1) Build the container image:
    `podman build --platform linux/amd64 -t microbit -f Dockerfile .`
 
-2) Build the firmwares (from the project root):
+2) Build the firmware (from the project root):
    `podman run --tty --rm --volume "$(pwd)":/workspace --workdir /workspace microbit -c ./build.py`
-
-   This builds one firmware per robot: `MICROBIT-edu.hex` for the
-   TPBot Edu and `MICROBIT-classic.hex` for the TPBot Classic. The Edu
-   build is also written as `MICROBIT.hex`.
 
 3) Alternatively, you can start a shell and work inside the container:
    `podman run --tty --rm --interactive --volume "$(pwd)":/workspace --workdir /workspace microbit`
@@ -62,18 +55,16 @@ is not a fast-forward.
 ## Flashing
 
 The Microbit board exposes a pendrive-like interface. Mount it like
-any other pendrive and copy the firmware for your robot to it:
-`MICROBIT-edu.hex` for the TPBot Edu, `MICROBIT-classic.hex` for the
-TPBot Classic. While flashing, the orange led next to the USB connector
-will be blinking fast. A few seconds later the firmware is
-automatically started.
+any other pendrive and just copy the `MICROBIT.hex` file to it. While
+flashing, the orange led next to the USB connector will be blinking
+fast. A few seconds later the firmware is automatically started.
 
 To avoid manually mounting the drive, you can use this on an typical
 Linux:
 
 ```shell
 udisksctl mount -b $(lsblk -o NAME,LABEL | awk '$2=="MICROBIT"{print "/dev/"$1}') && \
-  cp MICROBIT-edu.hex /run/media/${USER}/MICROBIT/
+  cp MICROBIT.hex /run/media/${USER}/MICROBIT/
 ```
 
 
