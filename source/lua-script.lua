@@ -359,10 +359,12 @@ local function set_motors_speed(left, right)
   to_robot("\001"..char(l)..char(r)..char(d + e))
 end
 
--- Whether a robot answers: an empty write, which both TPBots
--- take alike, so it cannot tell which one it is.
+-- Whether a robot answers a command neither one acts on: the
+-- Edu's status query, which the Classic ignores. Both answer it
+-- alike, so it cannot tell which one it is. (A switched-off Edu
+-- seems to take an empty write.)
 function robot_info()
-  if pcall(i2c_write, 32, "") then
+  if pcall(i2c_write, 32, "\255\249\160\1\0") then
     return { connected = true, robot = "TPBot" }
   end
   return { connected = false }
