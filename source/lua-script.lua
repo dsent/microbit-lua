@@ -318,20 +318,21 @@ end
 -- A TPBot Classic has been seen letting a wheel creep on after
 -- a forward move, when stopped with its reverse bit clear; with
 -- the bit set it stays still, so a stopped wheel gets the bit.
--- Both frames are built before either goes out, and started
--- says whether one did: until the Edu's frame is taken, neither
--- robot has moved.
-local started = false
+-- Both frames are built before either goes out. unanswered
+-- says the Edu's frame went to the bus and no robot took it,
+-- so no robot moved and none would hear a stop either.
+local unanswered = false
 local function set_motors_speed(left, right)
-  started = false
+  unanswered = false
   local l, d = abs(left, 1)
   local r, e = abs(right, 2)
   local edu = char(l)..char(r)..char(d + e)
   if l < 1 then d = 1 end
   if r < 1 then e = 2 end
   local classic = "\001"..char(l)..char(r)..char(d + e)
+  unanswered = true
   send(16, edu)
-  started = true
+  unanswered = false
   to_robot(classic)
 end
 
@@ -363,8 +364,8 @@ end
 tpbot.set_motors_speed = set_motors_speed
 
 -- The motors never start without a time to stop after, and the
--- stop is tried whenever a motor may have started, even when
--- something failed on the way.
+-- stop is tried whenever a motor may be running, even when
+-- something failed on the way: always, unless no robot answered.
 local MAX_SECONDS = 3600
 
 function robot_move(left, right, time)
@@ -378,7 +379,7 @@ function robot_move(left, right, time)
     microbit.sleep(1000 * time)
   end)
   local stopped, stop_err = true, nil
-  if moved or started then
+  if moved or not unanswered then
     stopped, stop_err = pcall(stop_motors)
   end
   if not moved then error(err, 0) end
