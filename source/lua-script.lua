@@ -502,10 +502,10 @@ end
 
 function listen(name)
   microbit.radio.enable()
-  while microbit.radio.listen() ~= name do end
+  microbit.radio.listen(name)
   greet()
   while true do
-    if microbit.radio.answered() then greet() end
+    if microbit.radio.answered(name) then greet() end
     local piece = microbit.radio.rx()
     if piece then
       radio_session.run(function() typed(piece) end)

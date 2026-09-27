@@ -913,10 +913,14 @@ extern MicroBitUARTService *uart;
 #define RADIO_FRAME    29
 #define RADIO_BODY     (RADIO_FRAME - RADIO_HEAD)
 
-#define RADIO_HELLO    1
-#define RADIO_WELCOME  2
-#define RADIO_DATA     3
-#define RADIO_ACK      4
+/* Kinds of frame. Other software on the same group starts its
+ * packets with small numbers too (MakeCode's packet types run
+ * from 0 up), so these sit where nothing else puts a first
+ * byte, and a stray packet is not read as one of ours. */
+#define RADIO_HELLO    0xA1
+#define RADIO_WELCOME  0xA2
+#define RADIO_DATA     0xA3
+#define RADIO_ACK      0xA4
 
 #define RADIO_TRIES    8
 #define RADIO_WAIT     30
@@ -1003,6 +1007,40 @@ static void radio_open(uint8_t link, const char *peer)
     radio_peer[RADIO_NAME] = 0;
 }
 
+/* The answer to a HELLO, if this is it. A WELCOME names both
+ * ends, the one it goes to and the one it comes from, so a
+ * frame that only happens to share a kind and a link number
+ * with it, from some other board on the air, is not taken for
+ * one. hello is the call: the board called, then this one. */
+static bool radio_welcomed(uint8_t link, const char *hello)
+{
+    uint8_t body[RADIO_BODY];
+    int len;
+
+    if (!radio_take(RADIO_WELCOME, link, NULL, NULL, body, &len))
+        return false;
+    return len == RADIO_NAME * 2
+        && memcmp(body, hello + RADIO_NAME, RADIO_NAME) == 0
+        && memcmp(body + RADIO_NAME, hello, RADIO_NAME) == 0;
+}
+
+/* A board's friendly name from a Lua argument. Names are five
+ * letters, and the frames carry exactly five, so anything else
+ * is a mistake in the call, said at once. */
+static const char *radio_name(lua_State *L, int arg)
+{
+    size_t len;
+    const char *name = luaL_checklstring(L, arg, &len);
+    luaL_argcheck(L, len == RADIO_NAME, arg, "a board name is five letters");
+    return name;
+}
+
+/* The same, where the name may be left out */
+static const char *radio_opt_name(lua_State *L, int arg)
+{
+    return lua_isnoneornil(L, arg) ? NULL : radio_name(L, arg);
+}
+
 /* Call once, then wait a moment for the answer */
 static bool radio_called(uint8_t link, const char *hello)
 {
@@ -1010,29 +1048,36 @@ static bool radio_called(uint8_t link, const char *hello)
     radio_put(RADIO_HELLO, link, 0, hello, RADIO_NAME * 2);
     until = uBit.systemTime() + RADIO_WAIT;
     while (uBit.systemTime() < until) {
-        if (radio_take(RADIO_WELCOME, link, NULL, NULL,
-                       NULL, NULL)) return true;
+        if (radio_welcomed(link, hello)) return true;
         uBit.sleep(1);
     }
     return false;
 }
 
-/* A HELLO addressed to this board: answer it and take the
- * link it names. Any link it replaces is dropped — the other
- * end has started over, which is how a reset board finds its
- * way back. */
-static bool radio_called_us(void)
+/* A HELLO addressed to this board, from the board it waits
+ * for, or from any if it waits for none: answer it and take
+ * the link it names. A call from anyone else is left
+ * unanswered, so the caller does not think it got through.
+ * Any link the call replaces is dropped: the other end has
+ * started over, which is how a reset board finds its way
+ * back. */
+static bool radio_called_us(const char *from)
 {
     const char *us = microbit_friendly_name();
     uint8_t body[RADIO_BODY];
+    char welcome[RADIO_NAME * 2];
     uint8_t link;
     int len;
 
     if (!radio_take(RADIO_HELLO, 0, &link, NULL, body, &len)
         || len != RADIO_NAME * 2
         || memcmp(body, us, RADIO_NAME) != 0) return false;
+    if (from && memcmp(body + RADIO_NAME, from, RADIO_NAME) != 0)
+        return false;
     radio_open(link, (char *)body + RADIO_NAME);
-    radio_put(RADIO_WELCOME, link, 0, NULL, 0);
+    memcpy(welcome, body + RADIO_NAME, RADIO_NAME);
+    memcpy(welcome + RADIO_NAME, us, RADIO_NAME);
+    radio_put(RADIO_WELCOME, link, 0, welcome, RADIO_NAME * 2);
     return true;
 }
 
@@ -1103,7 +1148,7 @@ static bool radio_one(const char *body, int len)
                     return 1;						\
                   })							\
 /* connect(friendlyName, timeout_ms) -> boolean */			\
-    F(connect,    { const char *them = luaL_checkstring(L, 1);		\
+    F(connect,    { const char *them = radio_name(L, 1);		\
                     int timeout = luaL_optint(L, 2, RADIO_TIMEOUT);	\
                     char hello[RADIO_NAME * 2];				\
                     uint8_t link = (uint8_t)(uBit.random(255) + 1);	\
@@ -1121,8 +1166,10 @@ static bool radio_one(const char *body, int len)
                     lua_pushboolean(L, 0);				\
                     return 1;						\
                   })							\
-/* listen() -> friendlyName of whoever connected */			\
-    F(listen,     { while (!radio_called_us()) uBit.sleep(1);		\
+/* listen([name]) -> friendlyName of whoever connected; with a
+ * name, only that board is answered */				\
+    F(listen,     { const char *from = radio_opt_name(L, 1);		\
+                    while (!radio_called_us(from)) uBit.sleep(1);	\
                     lua_pushstring(L, radio_peer);			\
                     return 1;						\
                   })							\
@@ -1170,9 +1217,10 @@ static bool radio_one(const char *body, int len)
                     lua_pushlstring(L, (const char *)body, len);	\
                     return 1;						\
                   })							\
-/* answered() -> friendlyName if somebody has just called
- * again, or nil */							\
-    F(answered,   { if (radio_called_us()) {				\
+/* answered([name]) -> friendlyName if somebody, or with a
+ * name that board, has just called again, or nil */		\
+    F(answered,   { const char *from = radio_opt_name(L, 1);		\
+                    if (radio_called_us(from)) {			\
                       lua_pushstring(L, radio_peer);			\
                     } else {						\
                       lua_pushnil(L);					\
