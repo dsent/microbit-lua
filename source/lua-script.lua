@@ -345,10 +345,20 @@ end
 
 tpbot.set_motors_speed = set_motors_speed
 
+-- The motors never start without a time to stop after, and the
+-- stop is tried even when something fails on the way.
 function robot_move(left, right, time)
-  set_motors_speed(left, right)
-  microbit.sleep(1000 * time)
-  set_motors_speed(0, 0)
+  if type(time) ~= "number" or not (time >= 0) then
+    error("robot_move needs how many seconds to drive, " ..
+      "such as robot_move(50, 50, 1).", 0)
+  end
+  local moved, err = pcall(function()
+    set_motors_speed(left, right)
+    microbit.sleep(1000 * time)
+  end)
+  local stopped, stop_err = pcall(set_motors_speed, 0, 0)
+  if not moved then error(err, 0) end
+  if not stopped then error(stop_err, 0) end
 end
 
 local read_digital = microbit.io.getDigitalValue
