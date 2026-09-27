@@ -9,3 +9,8 @@
   path (`find_dependency_override`) and `build.py --update`. Update those SHAs to bump.
 - `build.py --clean` only wipes `build/`; `libraries/` is reused as-is. Run
   `./build.py --update` after changing pins (the build warns if a 40-hex pin differs).
+- Patches to the Lua sources apply once each, keyed on text they add
+  (`lua_patch` in `CMakeLists.txt`), so an existing `libraries/lua-5.1.5` picks up
+  a new one on the next build.
+- `bash tests/lua-number-tests.sh` tests `source/lua-number.c` on the host; it
+  needs only `cc`.

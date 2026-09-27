@@ -362,24 +362,36 @@ if(NOT EXISTS ${LUA_DIR})
     )
 endif()
 
-# Make LUA_NUMBER overridable (LUA_NUMBER_IS_FLOAT) and add float-tuned number
-# formatting/parsing. Applied in place because lua.h includes luaconf.h by
-# quoted include, so a shadow header cannot take precedence. The content guard
-# makes this a no-op once libraries/ has already been patched (it survives a
-# clean build). To be replaced by a commit in the Lua fork.
-set(LUACONF "${LUA_SRC_DIR}/luaconf.h")
-file(READ "${LUACONF}" _luaconf)
-string(FIND "${_luaconf}" "LUA_NUMBER_IS_FLOAT" _luaconf_patched)
-if(_luaconf_patched EQUAL -1)
-    execute_process(
-        COMMAND patch --forward --batch "${LUACONF}"
-                "${CMAKE_SOURCE_DIR}/source/luaconf-float.patch"
-        RESULT_VARIABLE _luaconf_patch_rc
-    )
-    if(NOT _luaconf_patch_rc EQUAL 0)
-        message(FATAL_ERROR "Failed to patch luaconf.h (${_luaconf_patch_rc})")
+# Patches to the Lua sources, applied in place because lua.h includes
+# luaconf.h by quoted include, so a shadow header cannot take precedence. Each
+# is applied once: MARKER is text the patch adds, so a file that has it is left
+# alone (libraries/ survives a clean build). To be replaced by commits in the
+# Lua fork.
+function(lua_patch FILE PATCH MARKER)
+    file(READ "${LUA_SRC_DIR}/${FILE}" _text)
+    string(FIND "${_text}" "${MARKER}" _found)
+    if(_found EQUAL -1)
+        execute_process(
+            COMMAND patch --forward --batch "${LUA_SRC_DIR}/${FILE}"
+                    "${CMAKE_SOURCE_DIR}/source/${PATCH}"
+            RESULT_VARIABLE _rc
+        )
+        if(NOT _rc EQUAL 0)
+            message(FATAL_ERROR "Failed to patch ${FILE} (${_rc})")
+        endif()
     endif()
-endif()
+endfunction()
+
+# Make LUA_NUMBER overridable (LUA_NUMBER_IS_FLOAT) and add float-tuned number
+# formatting/parsing.
+lua_patch(luaconf.h luaconf-float.patch "LUA_NUMBER_IS_FLOAT")
+# Numbers become text in source/lua-number.c: this build's sprintf has no
+# float support.
+lua_patch(luaconf.h luaconf-number-text.patch "luai_number2str")
+lua_patch(lstrlib.c lstrlib-number-text.patch "luai_numformat")
+# Application sources build at -O2; this file is 1.3 KB smaller at -Os.
+set_source_files_properties("${CMAKE_SOURCE_DIR}/source/lua-number.c"
+    PROPERTIES COMPILE_OPTIONS "-Os")
 
 set(LUA_CORE_SOURCES
     lapi.c lcode.c ldebug.c ldo.c ldump.c lfunc.c lgc.c llex.c lmem.c

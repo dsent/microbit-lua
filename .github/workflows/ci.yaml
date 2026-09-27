@@ -59,3 +59,16 @@ jobs:
 
       - name: Run hextract tests
         run: bash tests/hextract-tests.sh
+
+  number-text:
+    name: "numbers as text (host)"
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          show-progress: false
+
+      - name: Run number-to-text tests
+        run: bash tests/lua-number-tests.sh
