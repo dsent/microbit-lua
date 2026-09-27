@@ -7,8 +7,9 @@
 // luaconf.h sends lua_number2str here, and string.format sends its %e, %f
 // and %g items here.
 //
-// The digits come from double arithmetic: the first 14 significant digits
-// are exact, as in Lua's own %.14g, and any further ones print as 0. A halfway case rounds to
+// The digits come from double arithmetic, which carries 14 significant
+// digits, as Lua's own %.14g does: any further ones print as 0, and in rare
+// cases the 14th rounds the other way from printf. A halfway case rounds to
 // even, as printf does.
 
 #include <math.h>
