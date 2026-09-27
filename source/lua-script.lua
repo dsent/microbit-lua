@@ -318,13 +318,30 @@ end
 -- A TPBot Classic has been seen letting a wheel creep on after
 -- a forward move, when stopped with its reverse bit clear; with
 -- the bit set it stays still, so a stopped wheel gets the bit.
+-- Both frames are built before either goes out, and started
+-- says whether one did: until the Edu's frame is taken, neither
+-- robot has moved.
+local started = false
 local function set_motors_speed(left, right)
+  started = false
   local l, d = abs(left, 1)
   local r, e = abs(right, 2)
-  send(16, char(l)..char(r)..char(d + e))
+  local edu = char(l)..char(r)..char(d + e)
   if l < 1 then d = 1 end
   if r < 1 then e = 2 end
-  to_robot("\001"..char(l)..char(r)..char(d + e))
+  local classic = "\001"..char(l)..char(r)..char(d + e)
+  send(16, edu)
+  started = true
+  to_robot(classic)
+end
+
+-- Each robot's stop goes out on its own, so one that fails does
+-- not keep the other from being tried.
+local function stop_motors()
+  local edu, err = pcall(send, 16, "\0\0\0")
+  local classic, classic_err = pcall(to_robot, "\001\0\0\003")
+  if not edu then error(err, 0) end
+  if not classic then error(classic_err, 0) end
 end
 
 -- Whether a robot answers a command neither one acts on: the
@@ -346,17 +363,24 @@ end
 tpbot.set_motors_speed = set_motors_speed
 
 -- The motors never start without a time to stop after, and the
--- stop is tried even when something fails on the way.
+-- stop is tried whenever a motor may have started, even when
+-- something failed on the way.
+local MAX_SECONDS = 3600
+
 function robot_move(left, right, time)
-  if type(time) ~= "number" or not (time >= 0) then
-    error("robot_move needs how many seconds to drive, " ..
-      "such as robot_move(50, 50, 1).", 0)
+  if type(time) ~= "number"
+    or not (time >= 0 and time <= MAX_SECONDS) then
+    error("robot_move needs how many seconds to drive, from 0 " ..
+      "to " .. MAX_SECONDS .. ", such as robot_move(50, 50, 1).", 0)
   end
   local moved, err = pcall(function()
     set_motors_speed(left, right)
     microbit.sleep(1000 * time)
   end)
-  local stopped, stop_err = pcall(set_motors_speed, 0, 0)
+  local stopped, stop_err = true, nil
+  if moved or started then
+    stopped, stop_err = pcall(stop_motors)
+  end
   if not moved then error(err, 0) end
   if not stopped then error(stop_err, 0) end
 end
