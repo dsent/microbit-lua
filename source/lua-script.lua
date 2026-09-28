@@ -164,7 +164,10 @@ function print(...)
 end
 
 collectgarbage("setpause", 100)
-print("micro:bit\nLua 5.1 REPL")
+-- microbit.version is missing from a firmware older than this script,
+-- which the Compy's tools can put into one
+local version = microbit.version and microbit.version() or "unknown"
+print("micro:bit\nLua 5.1 REPL\nfirmware " .. version)
 
 local function execute(chunk)
   local results = { pcall(chunk) }

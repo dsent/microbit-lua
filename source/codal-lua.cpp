@@ -21,6 +21,16 @@ extern MicroBit uBit;
 // lives.
 I2C &i2c = uBit.i2c;
 
+// The version build.py derives from git: the commit, "-drift" when the tree
+// differed from it, "unknown" outside git. It sits in the image after a fixed
+// mark, so a tool reading a hex file can find which firmware the file holds.
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "unknown"
+#endif
+#define FIRMWARE_VERSION_MARK "microbit-lua firmware "
+extern "C" __attribute__((used))
+const char firmware_version_mark[] = FIRMWARE_VERSION_MARK FIRMWARE_VERSION;
+
 #define LUA_MICROBIT_FUNCTIONS						\
     F(reset,      { uBit.reset();					\
                     return 0;						\
@@ -48,6 +58,10 @@ I2C &i2c = uBit.i2c;
                     return 1;						\
                   })							\
     F(friendlyName, { lua_pushstring(L, microbit_friendly_name());	\
+                    return 1;						\
+                  })							\
+    F(version,    { lua_pushstring(L, firmware_version_mark		\
+                                   + sizeof FIRMWARE_VERSION_MARK - 1);	\
                     return 1;						\
                   })							\
     F(stackUsage, { lua_pushinteger(L, (lua_Integer)stack_probe_peak());	\

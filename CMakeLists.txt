@@ -392,6 +392,16 @@ lua_patch(lstrlib.c lstrlib-number-text.patch "luai_numformat")
 # Application sources build at -O2; this file is 1.3 KB smaller at -Os.
 set_source_files_properties("${CMAKE_SOURCE_DIR}/source/lua-number.c"
     PROPERTIES COMPILE_OPTIONS "-Os")
+# The version microbit.version() reports, which build.py derives from git
+# and hands over in the environment. Only codal-lua.cpp takes it, so a new
+# version rebuilds the application's own few sources, not the CODAL
+# libraries.
+set(FIRMWARE_VERSION "$ENV{FIRMWARE_VERSION}")
+if("${FIRMWARE_VERSION}" STREQUAL "")
+    set(FIRMWARE_VERSION "unknown")
+endif()
+set_property(SOURCE "${CMAKE_SOURCE_DIR}/source/codal-lua.cpp" APPEND
+    PROPERTY COMPILE_DEFINITIONS "FIRMWARE_VERSION=\"${FIRMWARE_VERSION}\"")
 
 set(LUA_CORE_SOURCES
     lapi.c lcode.c ldebug.c ldo.c ldump.c lfunc.c lgc.c llex.c lmem.c
