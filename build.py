@@ -55,17 +55,22 @@ parser.add_option('--firmware-version', dest='firmware_version', action="store_t
 def firmware_version():
     """The version the firmware reports: the commit it is built from, as git
     describes it, with "-drift" when a tracked file differs from that commit.
-    FIRMWARE_VERSION in the environment is taken as given, for a build where
-    git cannot see the checkout, such as a container given only the
-    directory of a submodule. Outside git it is "unknown"."""
+    A FIRMWARE_VERSION in the environment, when not empty, is taken as given,
+    for a build where git cannot see the checkout, such as a container given
+    only the directory of a submodule. Outside git, or in a copy of the
+    sources that git sees only as part of another repository, it is
+    "unknown"."""
     given = os.environ.get("FIRMWARE_VERSION")
     if given:
         return given
+    here = os.path.dirname(os.path.abspath(__file__))
+    def git(*arguments):
+        return subprocess.check_output(["git"] + list(arguments), cwd=here,
+                                       stderr=subprocess.DEVNULL).decode().strip()
     try:
-        return subprocess.check_output(
-            ["git", "describe", "--always", "--dirty=-drift"],
-            cwd=os.path.dirname(os.path.abspath(__file__)),
-            stderr=subprocess.DEVNULL).decode().strip()
+        if os.path.realpath(git("rev-parse", "--show-toplevel")) != os.path.realpath(here):
+            return "unknown"
+        return git("describe", "--always", "--dirty=-drift")
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
 

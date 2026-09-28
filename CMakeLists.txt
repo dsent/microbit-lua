@@ -400,6 +400,11 @@ set(FIRMWARE_VERSION "$ENV{FIRMWARE_VERSION}")
 if("${FIRMWARE_VERSION}" STREQUAL "")
     set(FIRMWARE_VERSION "unknown")
 endif()
+# It becomes a C string through a CMake list, so it keeps to characters
+# neither of them reads specially.
+if(NOT FIRMWARE_VERSION MATCHES "^[A-Za-z0-9._+/-]+$")
+    message(FATAL_ERROR "FIRMWARE_VERSION may hold only letters, digits and . _ + / -")
+endif()
 set_property(SOURCE "${CMAKE_SOURCE_DIR}/source/codal-lua.cpp" APPEND
     PROPERTY COMPILE_DEFINITIONS "FIRMWARE_VERSION=\"${FIRMWARE_VERSION}\"")
 

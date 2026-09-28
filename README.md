@@ -65,11 +65,12 @@ firmware 86c8e16
 
 `build.py` derives it from git at build time: the commit `git describe
 --always --dirty=-drift` names, `-drift` marking a tracked file that
-differs from that commit, or `unknown` outside git.
+differs from that commit, or `unknown` outside this repository's git.
 `./build.py --firmware-version` prints it without building. A
-`FIRMWARE_VERSION` set in the environment is taken as given; a
-container needs one when git cannot see the checkout from inside it,
-as for a submodule mounted on its own:
+`FIRMWARE_VERSION` in the environment, when not empty, is taken as
+given; it may hold letters, digits and `. _ + / -`. A container needs
+one when git cannot see the checkout from inside it, as for a
+submodule mounted on its own:
 
 ```
 podman run --tty --rm --volume "$(pwd)":/workspace --workdir /workspace \
