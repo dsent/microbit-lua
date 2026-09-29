@@ -5,6 +5,10 @@ require("microbit.serial")
 -- the inlined TPBot library below uses these at load
 require("microbit.io")
 require("microbit.i2c")
+-- in the global microbit from the start, as the lessons use them
+require("microbit.accelerometer")
+require("microbit.compass")
+require("microbit.radio")
 
 local heart = {
   width = 10,
@@ -289,13 +293,15 @@ handler[microbit.DEVICE_ID_SERIAL] = port_to_console
 -- Based on https://github.com/elecfreaks/pxt-TPBot (V2.ts for
 -- the Edu, V1.ts for the Classic). Like it, every motor and
 -- light call sends both robots' commands; each robot ignores
--- the other's.
+-- the other's. The sonar is the tpbot module's, in C:
+-- get_distance times the echo by polling, since getPulseUs
+-- floods the event handler with PulseIn events. The rest is
+-- here, and require("tpbot") gives this same table.
 local getPin = microbit.io.getPin
 
-tpbot = {
-  pin_t = getPin(16),
-  pin_e = getPin(15)
-}
+tpbot = require("tpbot")
+tpbot.pin_t = getPin(16)
+tpbot.pin_e = getPin(15)
 
 local char = string.char
 local i2c_write = microbit.i2c.write
@@ -395,18 +401,6 @@ function robot_move(left, right, time)
   if not stopped then error(stop_err, 0) end
 end
 
-local read_digital = microbit.io.getDigitalValue
-local pulse_us = microbit.io.pulseUs
-local time_pulse_us = microbit.io.getPulseUs
-
-function tpbot.get_distance()
-  local e, t = tpbot.pin_e, tpbot.pin_t
-  read_digital(e)
-  pulse_us(t, 1, 10)
-  local r = time_pulse_us(e, 1, 25000)
-  return r and r * 0.01715
-end
-
 local function hl(x)
   local l = x % 256
   local h = (x - l) / 256
@@ -433,11 +427,11 @@ function turn(h)
   if 6 < h then
     h = h - 12
   end
-  require("tpbot2").turn(-30 * h)
+  tpbot.turn(-30 * h)
 end
 
 function straight(l)
-  require("tpbot2").run_distance(110 * l)
+  tpbot.run_distance(110 * l)
 end
 
 local function button(value, btn)
