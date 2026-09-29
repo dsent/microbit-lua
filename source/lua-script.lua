@@ -1,4 +1,10 @@
-local uBit = microbit
+local uBit = require("microbit")
+require("microbit.audio")
+require("microbit.display")
+require("microbit.serial")
+-- the inlined TPBot library below uses these at load
+require("microbit.io")
+require("microbit.i2c")
 
 local heart = {
   width = 10,
@@ -427,11 +433,11 @@ function turn(h)
   if 6 < h then
     h = h - 12
   end
-  tpbot.turn(-30 * h)
+  require("tpbot2").turn(-30 * h)
 end
 
 function straight(l)
-  tpbot.run_distance(110 * l)
+  require("tpbot2").run_distance(110 * l)
 end
 
 local function button(value, btn)
@@ -504,6 +510,7 @@ local function greet()
 end
 
 function listen(name)
+  require("microbit.radio")
   microbit.radio.enable()
   microbit.radio.listen(name)
   greet()
@@ -557,6 +564,7 @@ local function link_to_port()
 end
 
 function connect(name, timeout)
+  require("microbit.radio")
   microbit.radio.enable()
   if not microbit.radio.connect(name, timeout) then
     print("Connection timed out.")

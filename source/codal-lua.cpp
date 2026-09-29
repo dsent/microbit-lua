@@ -12,6 +12,7 @@ extern "C" {
 #include "MicroBit.h"
 #include "Event.h"
 #include "I2C.h"
+#include "neopixel.h"
 #include "stack-probe.h"
 
 extern MicroBit uBit;
@@ -905,6 +906,182 @@ extern MicroBitUARTService *uart;
 #define LUA_I2C_COUNT 2
 
 
+// Robot boards take their commands as bytes over I2C at address 32.
+
+static uint8_t robot_byte(lua_State *L, int narg, int value) {
+  luaL_argcheck(L, 0 <= value && value <= 255, narg, "out of range");
+  return (uint8_t)value;
+}
+
+static int robot_send(lua_State *L, uint8_t *data, int length) {
+  if (i2c.write(32, data, length) != MICROBIT_OK)
+    return luaL_error(L, "i2c write error");
+  return 0;
+}
+
+static void robot_read(lua_State *L, uint8_t *data, int length) {
+  if (i2c.read(32, data, length) != MICROBIT_OK)
+    luaL_error(L, "i2c read error");
+}
+
+// Width in microseconds of the next high pulse on pin, -1 on timeout.
+// Polled: getPulseUs floods the Lua event handler with PulseIn ticks.
+static int pulse_width(Pin &pin, uint32_t timeout) {
+  uint64_t start = system_timer_current_time_us();
+  while (pin.getDigitalValue() == 0)
+    if (system_timer_current_time_us() - start > timeout) return -1;
+  uint64_t rise = system_timer_current_time_us();
+  while (pin.getDigitalValue() == 1)
+    if (system_timer_current_time_us() - start > timeout) return -1;
+  return system_timer_current_time_us() - rise;
+}
+
+// TPBot Classic; sonar trigger on P16, echo on P15.
+
+#define LUA_TPBOT_FUNCTIONS						\
+    F(set_car_light, {							\
+                    uint8_t data[4];					\
+                    data[0] = 32;					\
+                    data[1] = robot_byte(L, 1, luaL_checkint(L, 1));	\
+                    data[2] = robot_byte(L, 2, luaL_checkint(L, 2));	\
+                    data[3] = robot_byte(L, 3, luaL_checkint(L, 3));	\
+                    return robot_send(L, data, 4);			\
+                  })							\
+    F(set_motors_speed, {						\
+                    int left = luaL_checkint(L, 1);			\
+                    int right = luaL_checkint(L, 2);			\
+                    uint8_t data[4];					\
+                    data[0] = 1;					\
+                    data[1] = robot_byte(L, 1, abs(left));		\
+                    data[2] = robot_byte(L, 2, abs(right));		\
+                    data[3] = (left < 0) + 2 * (right < 0);		\
+                    return robot_send(L, data, 4);			\
+                  })							\
+    F(get_distance, {							\
+                    Pin &trigger = uBit.io.pin[16];			\
+                    Pin &echo = uBit.io.pin[15];			\
+                    trigger.setDigitalValue(1);				\
+                    system_timer_wait_us(10);				\
+                    trigger.setDigitalValue(0);				\
+                    int width = pulse_width(echo, 25000);		\
+                    if (width < 0)					\
+                      lua_pushnil(L);					\
+                    else						\
+                      lua_pushnumber(L, width * 0.01715f);		\
+                    return 1;						\
+                  })
+
+// TPBot 2 (TPBot Edu) frames a command as 255, 249, its code, the number
+// of parameters, then the parameters. Its sonar is the TPBot Classic one.
+static void tpbot2_header(uint8_t *data, int code, int count) {
+  data[0] = 255;
+  data[1] = 249;
+  data[2] = code;
+  data[3] = count;
+}
+
+#define LUA_TPBOT2_FUNCTIONS						\
+    F(set_car_light, {							\
+                    uint8_t data[7];					\
+                    tpbot2_header(data, 48, 3);				\
+                    data[4] = robot_byte(L, 1, luaL_checkint(L, 1));	\
+                    data[5] = robot_byte(L, 2, luaL_checkint(L, 2));	\
+                    data[6] = robot_byte(L, 3, luaL_checkint(L, 3));	\
+                    return robot_send(L, data, 7);			\
+                  })							\
+    F(set_motors_speed, {						\
+                    int left = luaL_checkint(L, 1);			\
+                    int right = luaL_checkint(L, 2);			\
+                    uint8_t data[7];					\
+                    tpbot2_header(data, 16, 3);				\
+                    data[4] = robot_byte(L, 1, abs(left));		\
+                    data[5] = robot_byte(L, 2, abs(right));		\
+                    data[6] = (left < 0) + 2 * (right < 0);		\
+                    return robot_send(L, data, 7);			\
+                  })							\
+    F(run_distance, {							\
+                    int mm = luaL_checkint(L, 1);			\
+                    if (mm == 0)					\
+                      return 0;						\
+                    int d = abs(mm);					\
+                    uint8_t data[7];					\
+                    tpbot2_header(data, 65, 3);				\
+                    data[4] = robot_byte(L, 1, d / 256);		\
+                    data[5] = d % 256;					\
+                    data[6] = mm < 0 ? 3 : 0;				\
+                    return robot_send(L, data, 7);			\
+                  })							\
+    F(turn, {								\
+                    int deg = luaL_checkint(L, 1);			\
+                    if (deg == 0)					\
+                      return 0;						\
+                    int d = abs(deg);					\
+                    uint8_t data[9];					\
+                    tpbot2_header(data, 66, 5);				\
+                    data[4] = robot_byte(L, 1, d / 256);		\
+                    data[5] = d % 256;					\
+                    data[6] = data[4];					\
+                    data[7] = data[5];					\
+                    data[8] = deg < 0 ? 2 : 1;				\
+                    return robot_send(L, data, 9);			\
+                  })
+
+// Nezha 2 takes 8-byte commands: 255, 249, the motor (argument 1), then
+// five bytes.
+static int nezha2_send(lua_State *L, int b3, int b4, int b5, int b6, int b7) {
+  uint8_t data[8];
+  data[0] = 255;
+  data[1] = 249;
+  data[2] = robot_byte(L, 1, luaL_checkint(L, 1));
+  data[3] = b3;
+  data[4] = b4;
+  data[5] = b5;
+  data[6] = b6;
+  data[7] = b7;
+  return robot_send(L, data, 8);
+}
+
+#define LUA_NEZHA2_FUNCTIONS						\
+    F(motor_turn, {							\
+                    int amount = luaL_checkint(L, 2);			\
+                    int a = abs(amount);				\
+                    return nezha2_send(L, amount < 0 ? 2 : 1, 112,	\
+                      robot_byte(L, 2, a / 256),			\
+                      robot_byte(L, 3, luaL_checkint(L, 3)), a % 256);	\
+                  })							\
+    F(motor_goto, {							\
+                    int mode = robot_byte(L, 2, luaL_checkint(L, 2));	\
+                    int a = (luaL_checkint(L, 3) % 360 + 360) % 360;	\
+                    return nezha2_send(L, 0, 93, a / 256, mode, a % 256);\
+                  })							\
+    F(motor_reset, {							\
+                    return nezha2_send(L, 0, 29, 0, 245, 0);		\
+                  })							\
+    F(motor_spin, {							\
+                    int speed = luaL_checkint(L, 2);			\
+                    return nezha2_send(L, speed < 0 ? 2 : 1, 96,	\
+                      robot_byte(L, 2, abs(speed)), 245, 0);		\
+                  })							\
+    F(motor_position, {							\
+                    uint8_t p[4];					\
+                    nezha2_send(L, 0, 70, 0, 245, 0);			\
+                    uBit.sleep(4);					\
+                    robot_read(L, p, 4);				\
+                    uint32_t v = p[0] | p[1] << 8 | p[2] << 16 |	\
+                      (uint32_t)p[3] << 24;				\
+                    lua_pushnumber(L, (v % 3600) * 0.1f);		\
+                    return 1;						\
+                  })							\
+    F(motor_speed, {							\
+                    uint8_t s[2];					\
+                    nezha2_send(L, 0, 71, 0, 245, 0);			\
+                    uBit.sleep(3);					\
+                    robot_read(L, s, 2);				\
+                    lua_pushnumber(L, (s[1] * 256 + s[0]) * 0.0926f);	\
+                    return 1;						\
+                  })
+
+
 /*
  * A link over radio datagrams.
  *
@@ -1244,6 +1421,24 @@ static bool radio_one(const char *body, int len)
 
 #define LUA_RADIO_COUNT 13
 
+int digitalRJ[] = { 8, 12, 14, 16 };
+
+#define LUA_PLANETX_FUNCTIONS						\
+   F(getDigitalPin, { int pin = digitalRJ[luaL_checkint(L, 1) - 1];	\
+                    lua_pushlightuserdata(L, &uBit.io.pin[pin]);	\
+                    return 1;						\
+                  })							\
+   F(neopixel_send, {							\
+                    Pin *pin = luaL_checkPin(L, 1);			\
+                    size_t length;					\
+                    const unsigned char *str =	(const unsigned char*)	\
+                      luaL_checklstring(L, 2, &length);			\
+                    codal::neopixel_send_buffer(*pin, str, length);	\
+                    return 0;						\
+                  })
+
+#define LUA_PLANETX_COUNT 2
+
 #define LUA_CODAL_CONSTANTS \
     C(MICROBIT_ID_LOGO) \
     C(DEVICE_ID_BUTTON_A) \
@@ -1298,6 +1493,7 @@ LUA_ACCELEROMETER_FUNCTIONS
 LUA_AUDIO_FUNCTIONS
 LUA_IO_FUNCTIONS
 LUA_SERIAL_FUNCTIONS
+LUA_PLANETX_FUNCTIONS
 #undef F
 
 #if CONFIG_ENABLED(DEVICE_BLE)
@@ -1316,6 +1512,18 @@ LUA_RADIO_FUNCTIONS
 
 #define F(name, body) static int l_i2c_##name(lua_State *L) body
 LUA_I2C_FUNCTIONS
+#undef F
+
+#define F(name, body) static int l_tpbot_##name(lua_State *L) body
+LUA_TPBOT_FUNCTIONS
+#undef F
+
+#define F(name, body) static int l_tpbot2_##name(lua_State *L) body
+LUA_TPBOT2_FUNCTIONS
+#undef F
+
+#define F(name, body) static int l_nezha2_##name(lua_State *L) body
+LUA_NEZHA2_FUNCTIONS
 #undef F
 
 // One entry per public name of an API namespace: a method (func set) or an
@@ -1358,6 +1566,10 @@ static const LuaApi l_serial[] = {
     LUA_SERIAL_FUNCTIONS
     {NULL, NULL, 0}
 };
+static const LuaApi l_planetx[] = {
+    LUA_PLANETX_FUNCTIONS
+    {NULL, NULL, 0}
+};
 #undef F
 
 #if CONFIG_ENABLED(DEVICE_BLE)
@@ -1390,6 +1602,34 @@ static const LuaApi l_i2c[] = {
 };
 #undef F
 
+#define F(name, body) {#name, l_tpbot_##name, 0},
+static const LuaApi l_tpbot[] = {
+    LUA_TPBOT_FUNCTIONS
+    {NULL, NULL, 0}
+};
+#undef F
+
+#define F(name, body) {#name, l_tpbot2_##name, 0},
+static const LuaApi l_tpbot2[] = {
+    LUA_TPBOT2_FUNCTIONS
+    {"get_distance", l_tpbot_get_distance, 0},
+    {NULL, NULL, 0}
+};
+#undef F
+
+#define F(name, body) {#name, l_nezha2_##name, 0},
+static const LuaApi l_nezha2[] = {
+    LUA_NEZHA2_FUNCTIONS
+    {"TURNS", NULL, 1},
+    {"DEGREES", NULL, 2},
+    {"SECONDS", NULL, 3},
+    {"SHORTESTARC", NULL, 1},
+    {"CLOCKWISE", NULL, 2},
+    {"COUNTERCLOCKWISE", NULL, 3},
+    {NULL, NULL, 0}
+};
+#undef F
+
 // Resolve a missing field on an API namespace table. Upvalue 1 is the
 // namespace's LuaApi array. The first matching entry is materialised (a C
 // closure for a method, an integer for a constant) and cached in the table, so
@@ -1414,40 +1654,148 @@ static int l_lazy_index(lua_State *L) {
   return 0;
 }
 
-// Push a namespace table whose entries are populated on first access.
-static void lua_push_namespace(lua_State *L, const LuaApi *api) {
-  lua_newtable(L);
+// Give the table at absolute index idx the lazy __index over api.
+static void lua_set_lazy_index(lua_State *L, int idx, const LuaApi *api) {
   lua_newtable(L);
   lua_pushlightuserdata(L, (void *)api);
   lua_pushcclosure(L, l_lazy_index, 1);
   lua_setfield(L, -2, "__index");
-  lua_setmetatable(L, -2);
+  lua_setmetatable(L, idx);
 }
 
-void register_lua_api(lua_State *L) {
-  // Capture the absolute stack index of the microbit table because leftover
-  // entries from luaopen_* (base, table, string, math) sit below it — a
-  // relative index like -2 would target the wrong table.
-  lua_push_namespace(L, l_microbit);
-  int microbit_idx = lua_gettop(L);
-  lua_pushvalue(L, microbit_idx);
-  lua_setglobal(L, "microbit");
 
-  lua_push_namespace(L, l_display);       lua_setfield(L, microbit_idx, "display");
-  lua_push_namespace(L, l_accelerometer); lua_setfield(L, microbit_idx, "accelerometer");
-  lua_push_namespace(L, l_compass);       lua_setfield(L, microbit_idx, "compass");
-  lua_push_namespace(L, l_audio);         lua_setfield(L, microbit_idx, "audio");
-  lua_push_namespace(L, l_io);            lua_setfield(L, microbit_idx, "io");
-  lua_push_namespace(L, l_serial);        lua_setfield(L, microbit_idx, "serial");
-  lua_push_namespace(L, l_radio);         lua_setfield(L, microbit_idx, "radio");
-  lua_push_namespace(L, l_i2c);           lua_setfield(L, microbit_idx, "i2c");
+// module(), from lua-5.1.5/src/loadlib.c
+
+static void setfenv (lua_State *L) {
+  lua_Debug ar;
+  if (lua_getstack(L, 1, &ar) == 0 ||
+      lua_getinfo(L, "f", &ar) == 0 ||  /* get calling function */
+      lua_iscfunction(L, -1))
+    luaL_error(L, LUA_QL("module") " not called from a Lua function");
+  lua_pushvalue(L, -2);
+  lua_setfenv(L, -2);
+  lua_pop(L, 1);
+}
+
+
+static void dooptions (lua_State *L, int n) {
+  int i;
+  for (i = 2; i <= n; i++) {
+    lua_pushvalue(L, i);  /* get option (a function) */
+    lua_pushvalue(L, -2);  /* module */
+    lua_call(L, 1, 0);
+  }
+}
+
+
+static void modinit (lua_State *L, const char *modname) {
+  const char *dot;
+  lua_pushvalue(L, -1);
+  lua_setfield(L, -2, "_M");  /* module._M = module */
+  lua_pushstring(L, modname);
+  lua_setfield(L, -2, "_NAME");
+  dot = strrchr(modname, '.');  /* look for last dot in module name */
+  if (dot == NULL) dot = modname;
+  else dot++;
+  /* set _PACKAGE as package name (full module name minus last part) */
+  lua_pushlstring(L, modname, dot - modname);
+  lua_setfield(L, -2, "_PACKAGE");
+}
+
+
+/* push the module's table, creating it (and _LOADED[modname]) if needed */
+static void push_module (lua_State *L, const char *modname) {
+  lua_getfield(L, LUA_REGISTRYINDEX, "_LOADED");
+  lua_getfield(L, -1, modname);  /* get _LOADED[modname] */
+  if (!lua_istable(L, -1)) {  /* not found? */
+    lua_pop(L, 1);  /* remove previous result */
+    /* try global variable (and create one if it does not exist) */
+    if (luaL_findtable(L, LUA_GLOBALSINDEX, modname, 1) != NULL)
+      luaL_error(L, "name conflict for module " LUA_QS, modname);
+    lua_pushvalue(L, -1);
+    lua_setfield(L, -3, modname);  /* _LOADED[modname] = new table */
+  }
+  lua_remove(L, -2);  /* remove _LOADED */
+  /* check whether table already has a _NAME field */
+  lua_getfield(L, -1, "_NAME");
+  if (!lua_isnil(L, -1))  /* is table an initialized module? */
+    lua_pop(L, 1);
+  else {  /* no; initialize it */
+    lua_pop(L, 1);
+    modinit(L, modname);
+  }
+}
+
+
+static int ll_module (lua_State *L) {
+  const char *modname = luaL_checkstring(L, 1);
+  int n = lua_gettop(L);  /* number of arguments */
+  push_module(L, modname);
+  lua_pushvalue(L, -1);
+  setfenv(L);
+  dooptions(L, n);
+  return 0;
+}
+
+
+// Modules
+//
+// Nothing is loaded before the embedded script runs. require(name)
+// makes a module from the list below the first time it is asked for:
+// its table is made as module() makes it, so microbit.audio lands in
+// microbit.audio, and gets the lazy __index over the module's API.
+// A parent made on the way (microbit, for microbit.audio) is a plain
+// table; requiring it later gives that same table its API.
+
+typedef struct {
+  const char *name;
+  const LuaApi *api;
+} LuaModule;
+
+static const LuaModule lua_modules[] = {
+  {"microbit",               l_microbit},
+  {"microbit.display",       l_display},
+  {"microbit.accelerometer", l_accelerometer},
+  {"microbit.compass",       l_compass},
+  {"microbit.audio",         l_audio},
+  {"microbit.io",            l_io},
+  {"microbit.serial",        l_serial},
+  {"microbit.i2c",           l_i2c},
+  {"microbit.radio",         l_radio},
 #if CONFIG_ENABLED(DEVICE_BLE)
-  lua_newtable(L);                                 // microbit.ble
-  int ble_idx = lua_gettop(L);
-  lua_push_namespace(L, l_ble_uart);
-  lua_setfield(L, ble_idx, "uart");
-  lua_setfield(L, microbit_idx, "ble");
+  {"microbit.ble.uart",      l_ble_uart},
 #endif
+  {"planetx",                l_planetx},
+  {"tpbot",                  l_tpbot},
+  {"tpbot2",                 l_tpbot2},
+  {"nezha2",                 l_nezha2},
+  {NULL, NULL}
+};
+
+static int l_require(lua_State *L) {
+  const char *name = luaL_checkstring(L, 1);
+  lua_getfield(L, LUA_REGISTRYINDEX, "_LOADED");
+  lua_getfield(L, -1, name);
+  if (lua_toboolean(L, -1)) return 1;
+  const LuaModule *m = lua_modules;
+  while (m->name != NULL && strcmp(m->name, name) != 0) m++;
+  if (m->name == NULL)
+    return luaL_error(L, "module " LUA_QS " not found", name);
+  push_module(L, name);
+  lua_set_lazy_index(L, lua_gettop(L), m->api);
+  return 1;
+}
+
+
+// package, module and require: all there is before the script runs.
+// package.loaded is the registry's _LOADED, which module() relies on.
+void register_lua_modules(lua_State *L) {
+  lua_newtable(L);                                    // package
+  lua_getfield(L, LUA_REGISTRYINDEX, "_LOADED");
+  lua_setfield(L, -2, "loaded");
+  lua_setglobal(L, "package");
+  lua_register(L, "module", ll_module);
+  lua_register(L, "require", l_require);
 }
 
 static lua_State *lua_state;
