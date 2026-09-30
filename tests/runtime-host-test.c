@@ -21,6 +21,7 @@
 #include "lua.h"
 #include "lauxlib.h"
 #include "lualib.h"
+#include "lobject.h"
 #include "lua-events.h"
 #include "lua-modules.h"
 #include "board-alloc.h"
@@ -1301,6 +1302,58 @@ static void a_move_that_fails(void) {
   expect(strstr(said, "=> 42\r\n> ") != NULL, "... and the REPL answers");
 }
 
+// A handler that stops on a number as the heap runs out
+static int stops_on_a_number(lua_State *L) {
+  heap_limit = heap_used;
+  lua_pushinteger(L, 9876543);
+  return lua_error(L);
+}
+
+// Lua's heap, refusing only the message of an error thrown with none
+static void *refuses_the_message(void *ud, void *ptr, size_t old,
+                                 size_t size) {
+  if (size > old
+      && size == sizeof(TString) + sizeof "error in error handling")
+    return NULL;
+  return alloc(ud, ptr, old, size);
+}
+
+// A press, handled with 2 KB of the C stack already in use
+static void press_a_deep(void) {
+  volatile char taken[2048];
+  taken[0] = 0;
+  press_a();
+  (void)taken[0];
+}
+
+// What goes wrong in a handler is shown with nothing taken from Lua's heap,
+// out of the call that ran it: a mistake that is a number, as the heap runs
+// out; and a C stack so full the error is thrown with no message, whose
+// message there is no memory to make
+static void mistakes_out_of_memory(void) {
+  const char *said;
+  fresh();
+  boot("");
+  lua_register(board_L, "on_event", stops_on_a_number);
+  press_a();
+  heap_limit = (size_t)-1;
+  expect(strstr(out, "<error, going on 9876543>") != NULL,
+         "a handler's mistake that is a number is shown as the heap runs out");
+  lua_pushnil(board_L);
+  lua_setglobal(board_L, "on_event");
+  lua_setallocf(board_L, refuses_the_message, NULL);
+  host_cstack_limit = 0;
+  press_a_deep();
+  host_cstack_limit = (size_t)-1;
+  lua_setallocf(board_L, alloc, NULL);
+  expect(strstr(out, "<error, going on error in error handling>") != NULL,
+         "a handler thrown out with no message, and no memory to make one, "
+         "is shown");
+  said = line("6*7");
+  expect(strstr(said, "=> 42\r\n> ") != NULL && panicked == 0,
+         "... and the REPL answers");
+}
+
 // A sleep deep in the stack runs no handlers: their events wait for the
 // call to return
 static void deep_sleeps(void) {
@@ -1377,6 +1430,7 @@ int main(int argc, char **argv) {
   deep_patterns();
   text_only();
   a_move_that_fails();
+  mistakes_out_of_memory();
   deep_sleeps();
   codex_round_nine();
   programs_alone();

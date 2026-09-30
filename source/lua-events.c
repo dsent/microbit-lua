@@ -197,16 +197,32 @@ static int call_handler(lua_State *L) {
   return 0;
 }
 
+// The words of the mistake on top of the stack, made without Lua's heap:
+// out of a protected call, running out of it would have nowhere to go. A
+// string as it is, a number written into text, anything else none.
+static const char *mistake(lua_State *L, char text[LUAI_MAXNUMBER2STR]) {
+  switch (lua_type(L, -1)) {
+  case LUA_TSTRING:
+    return lua_tostring(L, -1);
+  case LUA_TNUMBER:
+    lua_number2str(text, lua_tonumber(L, -1));
+    return text;
+  default:
+    return NULL;
+  }
+}
+
 // A mistake in a handler is shown without waiting for it to scroll by:
 // the call that is running goes on.
 static void handle(LuaEvent e, bool port) {
   bool outer = sleep_handles, outer_port = port_call;
+  char text[LUAI_MAXNUMBER2STR];
   Call c;
   c.e = e;
   c.port_call = port;
   port_call = port;
   if (lua_cpcall(state, call_handler, &c) != 0) {
-    const char *err = lua_tostring(state, -1);
+    const char *err = mistake(state, text);
     if (err)
       lua_events_show_error(err, false);
     lua_pop(state, 1);
@@ -307,9 +323,10 @@ void lua_events_sleep(uint32_t ms) {
 }
 
 void lua_events_boot(lua_State *L) {
+  char text[LUAI_MAXNUMBER2STR];
   lua_call_begin();
   if (lua_pcall(L, 0, 0, 0) != 0) {
-    const char *err = lua_tostring(L, -1);
+    const char *err = mistake(L, text);
     lua_events_show_error("Lua error!", true);
     if (err)
       lua_events_show_error(err, true);
