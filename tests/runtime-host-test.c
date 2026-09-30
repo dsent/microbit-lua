@@ -1689,8 +1689,10 @@ static const char *not_taken(const char *text, int after, char *words,
   snprintf(words, size, "\r\nThe other micro:bit did not answer, so it may "
            "not have got: %s\r\n%sWait until the other micro:bit has "
            "finished. Then press the reset button on the back of this "
-           "micro:bit and connect again. Check what ran, and type again, "
-           "from its first line, any statement that did not run.\r\n",
+           "micro:bit and connect again. If the other micro:bit never "
+           "finishes, or does not connect, press its reset button too and "
+           "start it listening again. Check what ran, and type again, from "
+           "its first line, any statement that did not run.\r\n",
            text,
            after ? "What you typed after it was not sent either.\r\n" : "");
   return words;

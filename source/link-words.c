@@ -20,7 +20,9 @@ int link_words_not_sent(lua_State *L) {
     luaL_addstring(&b, "What you typed after it was not sent either.\n");
   luaL_addstring(&b, "Wait until the other micro:bit has finished. Then "
                  "press the reset button on the back of this micro:bit and "
-                 "connect again. Check what ran, and type again, from its "
+                 "connect again. If the other micro:bit never finishes, or "
+                 "does not connect, press its reset button too and start it "
+                 "listening again. Check what ran, and type again, from its "
                  "first line, any statement that did not run.\n");
   luaL_pushresult(&b);
   return 1;
