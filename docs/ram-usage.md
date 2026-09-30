@@ -56,6 +56,8 @@ The guard panics (`DEVICE_STACK_OVERFLOW`) on overrun, and reducing `__StackSize
 grows the heap, since heap end = `stack_limit()`. Lua's C stack limits
 (`source/lua-cstack.h`) are the region's size, read at run time, less fixed
 margins: 5,888, 6,400 and 4,352 bytes at 8 KB, and 2 KB lower each at 6 KB.
+The linker patches refuse a `__StackSize` below 4 KB, where the margins no
+longer fit; the Compy's own script needs about 7 KB to be read at all.
 
 ### Lua heap (the tunable part)
 
