@@ -3,7 +3,9 @@
 // luai_cstack for the host tests: the C stack in use is measured from the
 // point host_cstack_start() was called, against a limit a test sets. The
 // firmware's limits are for its 8 KB region; the host's frames are larger,
-// and its stack far bigger, so a test chooses its own.
+// and its stack far bigger, so a test chooses its own. Past the limit by
+// more than a level of calls takes, 1 KB here as 512 bytes on the board,
+// even raising the error is too much.
 
 #include <stddef.h>
 #include <stdint.h>
@@ -26,7 +28,7 @@ int luai_cstack(void) {
   size_t used = host_cstack_used();
   if (host_cstack_limit == (size_t)-1)
     return 0;
-  if (used > host_cstack_limit + 512)
+  if (used > host_cstack_limit + 1024)
     return 2;
   return used > host_cstack_limit;
 }

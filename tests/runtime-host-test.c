@@ -1157,6 +1157,36 @@ static void a_full_c_stack(void) {
   expect(strstr(said, "=> 42\r\n> ") != NULL, "... and the REPL answers");
 }
 
+// Coroutines resumed one inside another, each from the one before: the
+// C stack fills as with pcalls, and it stops the same way
+static void deep_coroutines(void) {
+  static const char *const RESUME[] = {
+    "function deeper(n) depth = n "
+    "return coroutine.wrap(function() return deeper(n + 1) end)() end",
+    "function deeper(n) depth = n local co = coroutine.create(deeper) "
+    "local ok, err = coroutine.resume(co, n + 1) "
+    "if not ok then error(err, 0) end end",
+    NULL };
+  const char *said;
+  char what[256];
+  int i;
+  for (i = 0; RESUME[i]; i++) {
+    fresh();
+    boot("");
+    line(RESUME[i]);
+    host_cstack_limit = host_cstack_used() + 40000;
+    said = line("deeper(1)");
+    host_cstack_limit = (size_t)-1;
+    snprintf(what, sizeof what, "%s nested too deep stops with \"C stack "
+             "overflow\", before Lua's own limit of 200 C calls",
+             i == 0 ? "coroutine.wrap" : "coroutine.resume");
+    expect(strstr(said, "C stack overflow") != NULL
+           && strstr(line("depth < 150"), "=> true") != NULL, what);
+  }
+  said = line("6*7");
+  expect(strstr(said, "=> 42\r\n> ") != NULL, "... and the REPL answers");
+}
+
 // A sleep deep in the stack runs no handlers: their events wait for the
 // call to return
 static void deep_sleeps(void) {
@@ -1229,6 +1259,7 @@ int main(int argc, char **argv) {
   what_waiting_costs();
   the_radio_inbox();
   a_full_c_stack();
+  deep_coroutines();
   deep_sleeps();
   codex_round_nine();
   programs_alone();
