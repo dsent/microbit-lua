@@ -24,11 +24,16 @@ typedef struct {
   uint16_t value;
 } LuaEventId;
 
-// L; which event is the port's that the REPL waits for; and the events
-// that are noise to Lua, dropped as they come: n of them, in a list that
-// lives as long as the state.
-void lua_events_open(lua_State *L, LuaEventId port, const LuaEventId *noise,
-                     int n);
+// Which event is the port's that the REPL waits for, and the events that
+// are noise to Lua, dropped as they come
+typedef struct {
+  LuaEventId port;
+  const LuaEventId *noise;
+  int noises;
+} LuaEventsConfig;
+
+// L, and the config, which lives as long as the state
+void lua_events_open(lua_State *L, const LuaEventsConfig *config);
 
 // Whether an event is one of the noise, not worth a fiber
 bool lua_event_is_noise(uint16_t source, uint16_t value);
@@ -55,9 +60,11 @@ void lua_events_boot(lua_State *L);
 // events that wait (see source/lua-events.c).
 void lua_events_sleep(uint32_t ms);
 
-// microbit.eventsDropped() and microbit.eventFallback(f)
+// microbit.eventsDropped(), microbit.eventFallback(f) and
+// microbit.eventLine(n)
 int lua_events_dropped(lua_State *L);
 int lua_events_fallback(lua_State *L);
+int lua_events_line(lua_State *L);
 
 // Supplied by the firmware, or by the host test in its place: a mistake,
 // shown, waiting for it to be seen or not; the time in ms; and a sleep that

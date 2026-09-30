@@ -17,6 +17,8 @@ extern "C" {
 #include "tpbot.h"
 #include "lua-events.h"
 #include "lua-modules.h"
+#include "board-alloc.h"
+#include "radio-inbox.h"
 
 extern MicroBit uBit;
 
@@ -76,6 +78,7 @@ const char firmware_version_mark[] = FIRMWARE_VERSION_MARK FIRMWARE_VERSION;
                   })							\
     F(eventsDropped, { return lua_events_dropped(L); })		\
     F(eventFallback, { return lua_events_fallback(L); })		\
+    F(eventLine,  { return lua_events_line(L); })			\
     F(panic,      { int statusCode = (int)luaL_checkinteger(L, 1);      \
                     microbit_panic(statusCode);				\
                     return 0;						\
@@ -1191,25 +1194,16 @@ static bool radio_take(uint8_t kind, uint8_t link,
     return false;
 }
 
-/* Pieces the far end sent while this end waited on its own
- * to be answered: each answered at once, since the far end
- * may be waiting in the same way, and kept here for rx(). Lua
- * runs one call at a time, so the rx() that would have
- * answered them waits until the tx() that is waiting is
- * done. A piece that finds the inbox full is left unanswered,
- * and the far end sends it again. */
-#define RADIO_INBOX 2
-static uint8_t radio_inbox[RADIO_INBOX][RADIO_BODY];
-static int radio_inbox_len[RADIO_INBOX];
-static int radio_inbox_first = 0;
-static int radio_inbox_count = 0;
+/* Pieces the far end sends while this end waits on its own
+ * wait in source/radio-inbox.c */
+static_assert(RADIO_INBOX_BODY == RADIO_BODY, "a piece fits the inbox");
 
 /* Both ends start a link the same way */
 static void radio_open(uint8_t link, const char *peer)
 {
     radio_link = link;
     radio_held_len = 0;
-    radio_inbox_count = 0;
+    radio_inbox_open();
     radio_out = 0;
     radio_in = 0;
     memcpy(radio_peer, peer, RADIO_NAME);
@@ -1298,16 +1292,13 @@ static void radio_keep(void)
     uint8_t num;
     int len;
 
-    if (radio_inbox_count == RADIO_INBOX
+    if (radio_inbox_full()
         || !radio_take(RADIO_DATA, radio_link, NULL, &num, body, &len))
         return;
     radio_put(RADIO_ACK, radio_link, num, NULL, 0);
     if (num == radio_in) return;
     radio_in = num;
-    int at = (radio_inbox_first + radio_inbox_count) % RADIO_INBOX;
-    memcpy(radio_inbox[at], body, len);
-    radio_inbox_len[at] = len;
-    radio_inbox_count++;
+    radio_inbox_put(body, len);
 }
 
 /* One piece, repeated until the far end answers it */
@@ -1434,13 +1425,8 @@ static bool radio_one(const char *body, int len)
     F(rx,         { uint8_t body[RADIO_BODY];				\
                     uint8_t num;					\
                     int len;						\
-                    if (radio_inbox_count > 0) {			\
-                      int at = radio_inbox_first;			\
-                      radio_inbox_first = (at + 1) % RADIO_INBOX;	\
-                      radio_inbox_count--;				\
-                      lua_pushlstring(L,				\
-                        (const char *)radio_inbox[at],			\
-                        radio_inbox_len[at]);				\
+                    if (radio_inbox_take(body, &len)) {		\
+                      lua_pushlstring(L, (const char *)body, len);	\
                       return 1;						\
                     }							\
                     for (int n = 0; radio_link != 0			\
@@ -1708,6 +1694,15 @@ void register_lua_modules(lua_State *L) {
   lua_modules_open(L, lua_modules);
 }
 
+// The board's heap, for what the firmware makes when first needed
+extern "C" void *board_alloc(size_t size) {
+  return malloc(size);
+}
+
+extern "C" void board_free(void *p) {
+  free(p);
+}
+
 // What source/lua-events.c needs of the board
 extern "C" void lua_events_show_error(const char *message, bool wait) {
   if (wait)
@@ -1774,10 +1769,6 @@ static void on_codal_event(codal::Event e, void *arg) {
   }
 }
 
-// The port's event that the REPL waits for
-static const LuaEventId lua_port_event =
-  { DEVICE_ID_SERIAL, CODAL_SERIAL_EVT_HEAD_MATCH };
-
 // Events that only fill the waiting line: the port saying it has data
 // after every character, or that it is full, and a scroll that has ended.
 // Nothing in the firmware's script reads them.
@@ -1787,9 +1778,15 @@ static const LuaEventId lua_noise_events[] = {
   { DEVICE_ID_DISPLAY, DISPLAY_EVT_ANIMATION_COMPLETE },
 };
 
+// The port's event that the REPL waits for, and the noise
+static const LuaEventsConfig lua_events_config = {
+  { DEVICE_ID_SERIAL, CODAL_SERIAL_EVT_HEAD_MATCH },
+  lua_noise_events,
+  sizeof lua_noise_events / sizeof lua_noise_events[0]
+};
+
 void register_lua_event_listener(lua_State *L) {
-  lua_events_open(L, lua_port_event, lua_noise_events,
-                  sizeof lua_noise_events / sizeof lua_noise_events[0]);
+  lua_events_open(L, &lua_events_config);
   uBit.messageBus.listen(DEVICE_ID_ANY, DEVICE_EVT_ANY,
                          on_codal_event, NULL,
                          MESSAGE_BUS_LISTENER_IMMEDIATE);

@@ -18,10 +18,13 @@
 //   however many events come, but lasts as long as the handlers it runs;
 // - when the running call is over.
 //
-// The line is short and fixed: when it is full the oldest event in it is
+// The line is made the first time an event has to wait, and only for a
+// program that has somewhere to send it: an on_event, or a fallback. Its
+// size is 16 unless microbit.eventLine() says otherwise; 0 drops every
+// event that would have to wait. When it is full the oldest event in it is
 // dropped, and counted (microbit.eventsDropped()). The port's event that
 // the REPL waits for never is: the port is armed for one at a time, so one
-// lost would leave the REPL deaf. It waits apart, one at most, and goes
+// lost would leave the REPL deaf. A flag of its own keeps it, and it goes
 // first when the running call is over; a sleep leaves it waiting, so the
 // lines sent to the REPL run one after another, each after the one before
 // has ended. Events that are only noise to Lua, as the firmware lists
@@ -35,91 +38,111 @@
 
 #include "lua.h"
 #include "lauxlib.h"
+#include "board-alloc.h"
 #include "lua-events.h"
-
-#define WAITING 16
 
 // How long a sleep that handles events sleeps at a time, in ms
 #define SLICE 10
 
+// The waiting line, made the first time an event has to wait for a
+// program that has somewhere to send it, of the size microbit.eventLine()
+// last gave (16 unless it said otherwise).
+typedef struct {
+  int size, first, count;
+  uint32_t dropped;
+  LuaEvent waiting[];
+} Line;
+
 static lua_State *state;
-static LuaEventId port;
-static const LuaEventId *noise;
-static int noises;
+static const LuaEventsConfig *config;
+static Line *line;
+static uint8_t line_size = 16;
 static bool running = false;
 static bool sleep_handles = false;   // the running call's sleeps handle events
-static LuaEvent waiting[WAITING];
-static int first = 0, count = 0;
-static bool port_waiting = false;
-static volatile bool port_missed = false;
-static LuaEvent port_event;
-static uint32_t dropped = 0;
+static bool wants = false;           // there is on_event, or a fallback
+static volatile bool port_waiting = false;
 
 // The registry's key for the handler used when on_event is not a function
 static char fallback_key;
 
-void lua_events_open(lua_State *L, LuaEventId port_id,
-                     const LuaEventId *noise_ids, int n) {
+void lua_events_open(lua_State *L, const LuaEventsConfig *c) {
   state = L;
-  port = port_id;
-  noise = noise_ids;
-  noises = n;
-  running = sleep_handles = port_waiting = port_missed = false;
-  first = count = 0;
-  dropped = 0;
+  config = c;
+  running = sleep_handles = wants = port_waiting = false;
+  board_free(line);
+  line = NULL;
+  line_size = 16;
 }
 
 bool lua_event_is_noise(uint16_t source, uint16_t value) {
   int i;
-  for (i = 0; i < noises; i++)
-    if (noise[i].source == source && noise[i].value == value)
+  for (i = 0; i < config->noises; i++)
+    if (config->noise[i].source == source && config->noise[i].value == value)
       return true;
   return false;
 }
 
+// The port's event carries nothing but that it came, so one flag holds it,
+// set from an interrupt as safely as from a fiber.
 void lua_events_port_missed(void) {
-  port_missed = true;
+  port_waiting = true;
 }
 
 static bool is_port(LuaEvent e) {
-  return e.source == port.source && e.value == port.value;
+  return e.source == config->port.source && e.value == config->port.value;
+}
+
+static Line *make_line(int size) {
+  Line *l = (Line *)board_alloc(sizeof(Line) + size * sizeof(LuaEvent));
+  if (l != NULL) {
+    l->size = size;
+    l->first = l->count = 0;
+    l->dropped = 0;
+  }
+  return l;
+}
+
+// An event onto the line; when it is full, the oldest is dropped
+static void append(Line *l, LuaEvent e) {
+  if (l->count == l->size) {
+    l->dropped++;
+    if (l->size == 0)
+      return;
+    l->first = (l->first + 1) % l->size;
+    l->count--;
+  }
+  l->waiting[(l->first + l->count) % l->size] = e;
+  l->count++;
 }
 
 static void queue_event(LuaEvent e) {
   if (is_port(e)) {
-    port_event = e;
     port_waiting = true;
     return;
   }
-  if (count == WAITING) {
-    first = (first + 1) % WAITING;
-    count--;
-    dropped++;
-  }
-  waiting[(first + count) % WAITING] = e;
-  count++;
+  if (!wants)
+    return;
+  if (line == NULL && (line = make_line(line_size)) == NULL)
+    return;
+  append(line, e);
 }
 
 // The next event to handle. The port's goes first, but never at a
 // sleep: a command's lines follow one another, so the next one waits for
 // the one that sleeps to end.
 static bool next_event(LuaEvent *e, bool port_too) {
-  if (port_missed) {
-    LuaEvent missed = { port.source, port.value, 0 };
-    port_missed = false;
-    port_event = missed;
-    port_waiting = true;
-  }
   if (port_waiting && port_too) {
-    *e = port_event;
+    e->source = config->port.source;
+    e->value = config->port.value;
+    e->timestamp = 0;
     port_waiting = false;
     return true;
   }
-  if (count == 0)
+  if (line == NULL || line->count == 0)
     return false;
-  *e = waiting[first];
-  first = (first + 1) % WAITING;
-  count--;
+  *e = line->waiting[line->first];
+  line->first = (line->first + 1) % line->size;
+  line->count--;
   return true;
 }
 
@@ -185,6 +208,27 @@ static void handle(LuaEvent e, bool port_call) {
   sleep_handles = outer;
 }
 
+static int look_for_on_event(lua_State *L) {
+  lua_pushliteral(L, "on_event");
+  lua_rawget(L, LUA_GLOBALSINDEX);
+  wants = callable(L, -1);
+  return 0;
+}
+
+// Whether a program has somewhere for events to go, looked at only
+// between calls and at safe points, where Lua is this fiber's: until it
+// has, an event that would have to wait is dropped, and no line is made.
+static void look_for_a_handler(void) {
+  if (wants)
+    return;
+  lua_pushlightuserdata(state, &fallback_key);
+  lua_rawget(state, LUA_REGISTRYINDEX);
+  wants = lua_isfunction(state, -1);
+  lua_pop(state, 1);
+  if (!wants && lua_cpcall(state, look_for_on_event, NULL) != 0)
+    lua_pop(state, 1);
+}
+
 void lua_call_begin(void) {
   running = true;
   sleep_handles = true;
@@ -194,6 +238,7 @@ void lua_call_begin(void) {
 void lua_call_end(void) {
   LuaEvent e;
   sleep_handles = false;
+  look_for_a_handler();
   while (next_event(&e, true))
     handle(e, is_port(e));
   running = false;
@@ -215,7 +260,7 @@ void lua_event_arrived(LuaEvent e) {
 // those a handler raises meanwhile wait for the next one, so a sleep ends
 // on time however fast they come.
 static void handle_what_waits(void) {
-  int n = count;
+  int n = line != NULL ? line->count : 0;
   LuaEvent e;
   while (n-- > 0 && next_event(&e, false))
     handle(e, false);
@@ -228,6 +273,7 @@ void lua_events_sleep(uint32_t ms) {
     lua_events_pause(ms);
     return;
   }
+  look_for_a_handler();
   start = lua_events_now();
   for (;;) {
     handle_what_waits();
@@ -256,8 +302,33 @@ void lua_events_boot(lua_State *L) {
 }
 
 int lua_events_dropped(lua_State *L) {
-  lua_pushinteger(L, (lua_Integer)dropped);
+  lua_pushinteger(L, (lua_Integer)(line != NULL ? line->dropped : 0));
   return 1;
+}
+
+// How many events may wait, from 0, where every event that would have to
+// wait is dropped, to 255. A line already made is made anew, keeping its
+// newest events.
+int lua_events_line(lua_State *L) {
+  int n = luaL_checkint(L, 1);
+  luaL_argcheck(L, 0 <= n && n <= 255, 1, "from 0 to 255");
+  line_size = (uint8_t)n;
+  if (line != NULL && line->size != n) {
+    Line *old = line, *made = make_line(n);
+    LuaEvent e;
+    if (made == NULL)
+      return luaL_error(L, "not enough memory");
+    made->dropped = old->dropped;
+    while (old->count > 0) {
+      e = old->waiting[old->first];
+      old->first = (old->first + 1) % old->size;
+      old->count--;
+      append(made, e);
+    }
+    line = made;
+    board_free(old);
+  }
+  return 0;
 }
 
 // The first handler given stays: the firmware's script gives its own.
@@ -270,5 +341,6 @@ int lua_events_fallback(lua_State *L) {
     lua_pushvalue(L, 1);
     lua_rawset(L, LUA_REGISTRYINDEX);
   }
+  wants = true;
   return 0;
 }
