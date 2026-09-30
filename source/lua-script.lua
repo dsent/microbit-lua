@@ -242,9 +242,10 @@ local function make_session(transport)
     s.prompt()
   end
   -- f, with what it says going to this session. Whatever goes wrong in
-  -- it, even showing a result that cannot be shown or running out of
-  -- memory, the line is over, the mistake is said if it can be, and the
-  -- prompt comes back. One pcall here covers the reading of the port,
+  -- it, even showing a result that cannot be shown, or running out of
+  -- memory where Lua's allocator can refuse (on the board CODAL stops
+  -- with 020 first), the line is over, the mistake is said if it can be,
+  -- and the prompt comes back. One pcall here covers the reading of the port,
   -- the line and its result: each pcall more on the way to a command
   -- would cost the C stack about 440 bytes.
   function s.run(f, ...)

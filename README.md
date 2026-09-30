@@ -133,7 +133,7 @@ port. You can also add `DMESG("hello");` lines to your own C++ code.
  - 2: heap allocation info
 
 
-## Stack usage
+## Stack and heap
 
 The firmware always tracks the high-water mark of the shared fiber stack. From
 the REPL:
@@ -147,6 +147,15 @@ With `DMESG_SERIAL_DEBUG` enabled, `main()` also prints
 `STACK <tag>: current=… peak=… region=…` at boot. On the current script the
 deepest user is the Lua parser (~4 KB) parsing the embedded chunk; see
 `docs/ram-usage.md` for the breakdown and sizing guidance.
+
+CODAL stops the board with panic 020 whenever its heap cannot give what is
+asked of it (`DEVICE_PANIC_HEAP_FULL` in the target): Lua's own allocations
+included, a fiber for an event, the event line. So on the board a program
+that fills the heap ends in 020, not in Lua's "not enough memory", and the
+prompt comes back only after a reset. What the firmware does when an
+allocation fails, the error at the prompt, an event counted as dropped, the
+port's event kept, is what the host tests check, with an allocator that can
+refuse.
 
 Lua loads only text: `loadstring` and `load` refuse precompiled code, as
 `string.dump` makes it, whose nesting nothing checks against the C stack.
@@ -209,17 +218,17 @@ that would match deeper stops with "pattern too complex"
 (`microbit.stackCurrent()` says how much is in use now,
 `microbit.stackUsage()` the most since boot). What still waits when the call
 is over is handled then. When the line is full the oldest event in it is
-dropped, as is an event for which there is no memory, for the line or for a
-fiber to carry it; `microbit.eventsDropped()` says how many have been since
-boot.
+dropped, as is an event for which an allocation fails, for the line or for a
+fiber to carry it (see Stack and heap for what the board does then);
+`microbit.eventsDropped()` says how many have been since boot.
 
 The serial port's event the REPL waits for is kept apart and never lost,
-even when the firmware finds no memory for the fiber that would carry it:
-the running call takes it, or with Lua free, the scheduler's next tick hands
-it on again. It goes first when the running call is over, and never at a
-sleep, so the lines sent to the REPL run one after another. The port holds
-254 characters that wait to be read, what is typed while the script at boot
-runs included, and the REPL reads them when it starts.
+even when no fiber can be made to carry it: the running call takes it, or
+with Lua free, the scheduler's next tick hands it on again. It goes first
+when the running call is over, and never at a sleep, so the lines sent to
+the REPL run one after another. The port holds 254 characters that wait to
+be read, what is typed while the script at boot runs included, and the REPL
+reads them when it starts.
 
 `robot_move`'s own wait handles nothing: a button pressed while the robot
 drives is handled when the move is over.
@@ -234,13 +243,13 @@ once, before anything else happens. The board then handles events with the
 Lua's own `print` writes to stdout, which goes nowhere on this board; the
 firmware's script puts its own in its place, writing to the serial port.
 
-Whatever goes wrong on the way from a line to its result, the prompt comes
-back and the port is armed. The REPL keeps `loadstring`, `setfenv`, `pcall`,
-`string.gmatch`, `microbit.serial.eventAfterAsync` and `microbit.eventRepl`
-of its own for that; a line that takes away another global it uses can stop
-what the REPL shows, and the global can be put back from the prompt. The
-firmware arms the port itself after an `on_event` that fails on the port's
-event.
+Whatever goes wrong on the way from a line to its result, short of CODAL's
+heap running out (see Stack and heap), the prompt comes back and the port is
+armed. The REPL keeps `loadstring`, `setfenv`, `pcall`, `string.gmatch`,
+`microbit.serial.eventAfterAsync` and `microbit.eventRepl` of its own for
+that; a line that takes away another global it uses can stop what the REPL
+shows, and the global can be put back from the prompt. The firmware arms the
+port itself after an `on_event` that fails on the port's event.
 
 
 ## TPBot

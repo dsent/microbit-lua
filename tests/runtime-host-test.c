@@ -855,7 +855,8 @@ static void the_repl_always_comes_back(void) {
     snprintf(what, sizeof what, "the prompt comes back after %s", BAD[i]);
     expect(armed && strstr(said, "42\r\n> ") != NULL, what);
   }
-  // A result too big to show: the heap runs out showing it
+  // A result too big to show: the heap runs out showing it. The host's
+  // allocator refuses; on the board CODAL stops with 020 first
   fresh();
   boot("");
   line("t = {} for i = 1, 2000 do t[i] = i end");
@@ -864,7 +865,7 @@ static void the_repl_always_comes_back(void) {
   said = line("t");
   heap_limit = (size_t)-1;
   expect(strstr(said, "not enough memory") != NULL,
-         "a result too big for the heap says so");
+         "a result too big for the host's heap says so");
   said = line("print(6*7)");
   expect(armed && strstr(said, "42\r\n> ") != NULL,
          "... and the prompt comes back after it");
