@@ -901,7 +901,9 @@ extern MicroBitUARTService *uart;
 #define LUA_I2C_FUNCTIONS						\
     F(read,       { int address = luaL_checkint(L, 1);			\
                     int length = luaL_checkint(L, 2);			\
-                    char data[length];					\
+                    luaL_argcheck(L, length >= 0, 2, "from 0 up");	\
+                    /* on Lua's heap: the C stack has no room to spare */ \
+                    char *data = (char *)lua_newuserdata(L, length);	\
                     if(i2c.read(address, data, length) == MICROBIT_OK){	\
                       lua_pushlstring(L, data, length);			\
                       return 1;						\
