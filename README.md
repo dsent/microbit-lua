@@ -212,11 +212,12 @@ is over is handled then. When the line is full the oldest event in it is
 dropped; `microbit.eventsDropped()` says how many have been since boot.
 
 The serial port's event the REPL waits for is kept apart and never lost,
-even when the firmware finds no memory for the fiber that would carry it. It
-goes first when the running call is over, and never at a sleep, so the lines
-sent to the REPL run one after another. The port holds 254 characters that
-wait to be read, what is typed while the script at boot runs included, and
-the REPL reads them when it starts.
+even when the firmware finds no memory for the fiber that would carry it:
+the running call takes it, or with Lua free, the scheduler's next tick hands
+it on again. It goes first when the running call is over, and never at a
+sleep, so the lines sent to the REPL run one after another. The port holds
+254 characters that wait to be read, what is typed while the script at boot
+runs included, and the REPL reads them when it starts.
 
 `robot_move`'s own wait handles nothing: a button pressed while the robot
 drives is handled when the move is over.

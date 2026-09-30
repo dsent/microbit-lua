@@ -62,7 +62,7 @@ static lua_State *state;
 static const LuaEventsConfig *config;
 static Line *line;
 static uint8_t line_size = 16;
-static bool running = false;
+static volatile bool running = false;
 static bool sleep_handles = false;   // the running call's sleeps handle events
 static bool port_call = false;       // the port's event is being handled
 static bool wants = false;           // there is on_event, or a fallback
@@ -92,6 +92,17 @@ bool lua_event_is_noise(uint16_t source, uint16_t value) {
 // set from an interrupt as safely as from a fiber.
 void lua_events_port_missed(void) {
   port_waiting = true;
+}
+
+// A port's event that waits with no call to take it: it came while Lua
+// was free, and no fiber could be made to carry it. Taken, the firmware
+// hands it on as it came. Safe to call from an interrupt: while Lua runs,
+// the call that runs takes it.
+bool lua_events_take_stranded_port(void) {
+  if (!port_waiting || running)
+    return false;
+  port_waiting = false;
+  return true;
 }
 
 static bool is_port(LuaEvent e) {

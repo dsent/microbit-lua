@@ -42,6 +42,10 @@ bool lua_event_is_noise(uint16_t source, uint16_t value);
 // waiting. Safe to call from an interrupt.
 void lua_events_port_missed(void);
 
+// Whether the port's event waits while Lua is free, with no call to take
+// it; true takes it, to be handed on again. Safe to call from an interrupt.
+bool lua_events_take_stranded_port(void);
+
 // An event, from a fiber of its own: handled now, or when Lua is free.
 void lua_event_arrived(LuaEvent e);
 

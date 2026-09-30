@@ -1354,6 +1354,39 @@ static void mistakes_out_of_memory(void) {
          "... and the REPL answers");
 }
 
+// The scheduler's tick, as the firmware takes it: a port's event that
+// waits while Lua is free is handed on again
+static void tick(void) {
+  if (lua_events_take_stranded_port())
+    post(ID_SERIAL, HEAD_MATCH);
+}
+
+// A line typed at the idle prompt, whose port event found no fiber: the
+// next tick brings it to the REPL
+static void a_port_event_stranded(void) {
+  const char *said;
+  size_t before;
+  fresh();
+  boot("");
+  before = strlen(out);
+  type_and_miss_the_port();
+  tick();
+  expect(strstr(out + before, "6*7\r\r\n=> 42\r\n> ") != NULL && armed,
+         "a port event that found no fiber while Lua was free is handed on "
+         "at the next tick");
+  said = line("6*8");
+  expect(strstr(said, "=> 48\r\n> ") != NULL, "... and the REPL answers");
+  // while a call runs, the call takes it, and the tick leaves it
+  fresh();
+  boot("");
+  line("microbit.handler[1] = function() microbit.sleep(20) end");
+  plan(type_and_miss_the_port);
+  plan(tick);
+  press_a();
+  expect(count(out, "6*7\r\r\n=> 42") == 1,
+         "... and one that waits for a running call is handed on once");
+}
+
 // A sleep deep in the stack runs no handlers: their events wait for the
 // call to return
 static void deep_sleeps(void) {
@@ -1431,6 +1464,7 @@ int main(int argc, char **argv) {
   text_only();
   a_move_that_fails();
   mistakes_out_of_memory();
+  a_port_event_stranded();
   deep_sleeps();
   codex_round_nine();
   programs_alone();

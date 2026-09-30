@@ -1762,13 +1762,11 @@ static void lua_event_handler_fiber(void *arg) {
 // internal noise — no Lua script ever handles them — but every one would
 // otherwise spawn a Lua fiber (two heap allocations plus a lua_pcall).
 // Filtering removes ~99% of the per-tick/per-char fiber traffic.
-static void on_codal_event(codal::Event e, void *arg) {
-  (void)arg;
-  if (e.source == DEVICE_ID_SCHEDULER || e.source == DEVICE_ID_COMPONENT ||
-      e.source == DEVICE_ID_NOTIFY || e.source == DEVICE_ID_NOTIFY_ONE)
-    return;
-  if (lua_event_is_noise(e.source, e.value))
-    return;
+//
+// The scheduler's tick is also the time to try again with the port's
+// event, when it found no fiber while Lua was free: the port is armed for
+// one event at a time, so nothing else would bring the REPL what was typed.
+static void hand_on(codal::Event e) {
   codal::Event *copy = new codal::Event(e);
   if (create_fiber(lua_event_handler_fiber, copy) == NULL) {
     delete copy;
@@ -1776,6 +1774,22 @@ static void on_codal_event(codal::Event e, void *arg) {
     if (e.source == DEVICE_ID_SERIAL && e.value == CODAL_SERIAL_EVT_HEAD_MATCH)
       lua_events_port_missed();
   }
+}
+
+static void on_codal_event(codal::Event e, void *arg) {
+  (void)arg;
+  if (e.source == DEVICE_ID_SCHEDULER && e.value == DEVICE_SCHEDULER_EVT_TICK
+      && lua_events_take_stranded_port()) {
+    hand_on(codal::Event(DEVICE_ID_SERIAL, CODAL_SERIAL_EVT_HEAD_MATCH,
+                         codal::CREATE_ONLY));
+    return;
+  }
+  if (e.source == DEVICE_ID_SCHEDULER || e.source == DEVICE_ID_COMPONENT ||
+      e.source == DEVICE_ID_NOTIFY || e.source == DEVICE_ID_NOTIFY_ONE)
+    return;
+  if (lua_event_is_noise(e.source, e.value))
+    return;
+  hand_on(e);
 }
 
 // Events that only fill the waiting line: the port saying it has data
