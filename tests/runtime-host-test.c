@@ -1623,6 +1623,19 @@ static void mistakes_named(void) {
          && strstr(out, ":0:") == NULL,
          "a mistake in the stripped script at boot is named \"program\", "
          "with no line");
+  {
+    // One the parser finds names its line: the lines are stripped only
+    // once the script has loaded
+    static const char BAD[] = "x = 1\ny = = 2\n";
+    fresh();
+    boot("");
+    i = luaL_loadbuffer(board_L, BAD, sizeof BAD - 1, "=program");
+    expect(i != 0 && strcmp(lua_tostring(board_L, -1),
+                            "program:2: unexpected symbol near '='") == 0,
+           "a script at boot that does not compile names its line: "
+           "program:2: ...");
+    lua_pop(board_L, 1);
+  }
   fresh();
   boot("");
   said = line("local t t.x = 1");
