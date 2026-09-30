@@ -311,18 +311,19 @@ A piece that finds the inbox full is not taken, and neither is one sent to a
 board that is gone. The board that called then says `The other micro:bit did not
 answer, so it may not have got:` and the line, and drops what was typed after
 it, what reached the port while it tried included: that is shown, and the line
-it begins is dropped up to its line ending. It says so when that held more than
-a line ending, and tells the person what to do: wait until the other board has
-finished, then press the reset button on the board that called and connect
-again. When the other board never finishes, running a command that does not end,
-or does not answer the call, the person resets it too and starts it listening
-again. Then they check what ran, and type again from its first line any
-statement that did not run. The other board may have taken the line and only its
-answers been lost, and may hold a statement not yet finished; the new call
-starts its session over, with that statement and what still waits in its inbox
-gone. The board that called prints what the other board says as it comes, and
-between the lines it sends, so its own inbox does not fill while a paste goes
-out.
+it begins is dropped up to its line ending, Backspace still taking back what
+shows of it. It says so when that held anything but line endings, and tells the
+person what to do: wait until the other board has finished, then press the reset
+button on the board that called and connect again. When the other board never
+finishes, running a command that does not end, or does not answer the call, the
+person resets it too, starts it listening again and connects again; it then
+holds nothing typed before. Then they check what ran, and type again from its
+first line any statement that did not run. The other board may have taken the
+line and only its answers been lost, and may hold a statement not yet finished;
+the new call starts its session over, with that statement and what still waits
+in its inbox gone. The board that called prints what the other board says as it
+comes, and between the lines it sends, so its own inbox does not fill while a
+paste goes out.
 
 The first piece of each message is marked, and `rx()` returns with a piece
 whether it starts a message. The link's REPL is sent whole lines, one to a

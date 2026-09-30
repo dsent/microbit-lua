@@ -21,8 +21,9 @@ int link_words_not_sent(lua_State *L) {
   luaL_addstring(&b, "Wait until the other micro:bit has finished. Then "
                  "press the reset button on the back of this micro:bit and "
                  "connect again. If the other micro:bit never finishes, or "
-                 "does not connect, press its reset button too and start it "
-                 "listening again. Check what ran, and type again, from its "
+                 "does not connect, press its reset button too, start it "
+                 "listening again and connect again: it then has nothing you "
+                 "typed before. Check what ran, and type again, from its "
                  "first line, any statement that did not run.\n");
   luaL_pushresult(&b);
   return 1;
@@ -47,7 +48,14 @@ int link_words_typed(lua_State *L) {
       }
     } else {
       line[at++] = c;
-      shown[n++] = c == '\r' ? '\n' : c;
+      if (c == '\r' || c == '\n') {
+        // as the console shows a line's end, "\r\n" that the port makes
+        // "\r\r\n"
+        memcpy(shown + n, "\r\n", 2);
+        n += 2;
+      } else {
+        shown[n++] = c;
+      }
     }
   }
   lua_pushlstring(L, line, at);

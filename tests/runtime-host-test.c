@@ -1690,9 +1690,10 @@ static const char *not_taken(const char *text, int after, char *words,
            "not have got: %s\r\n%sWait until the other micro:bit has "
            "finished. Then press the reset button on the back of this "
            "micro:bit and connect again. If the other micro:bit never "
-           "finishes, or does not connect, press its reset button too and "
-           "start it listening again. Check what ran, and type again, from "
-           "its first line, any statement that did not run.\r\n",
+           "finishes, or does not connect, press its reset button too, start "
+           "it listening again and connect again: it then has nothing you "
+           "typed before. Check what ran, and type again, from its first "
+           "line, any statement that did not run.\r\n",
            text,
            after ? "What you typed after it was not sent either.\r\n" : "");
   return words;
@@ -1992,6 +1993,32 @@ static void a_call_anew_on_the_same_link(void) {
          "over, and its first line runs");
 }
 
+// The same board calls anew while a statement it began is still open:
+// the new call's session starts with none
+static void far_opens_a_statement(void) {
+  far_says("for i = 1, 2 do\n");
+}
+
+static void far_calls_anew(void) {
+  hello_from("gigat", CALL_NUMBER + 1);
+  board_fibers();
+  radio_link_open(&far_link, LINK, "zezop");
+}
+
+static void a_call_anew_drops_a_statement(void) {
+  fresh();
+  real_link = 1;
+  boot("");
+  far_calls();
+  plan(far_opens_a_statement);
+  plan(far_calls_anew);
+  plan(far_says_the_first_line);
+  line("listen('gigat')");
+  expect(strcmp(far_heard, "> >> > => 22\n> ") == 0,
+         "a board that calls anew while its statement is open starts with "
+         "none, and its first line runs");
+}
+
 // Lines that find the other board's inbox full, one after another, for
 // longer than the piece numbers of the link before went round: the next
 // one is still not taken for one the other board has
@@ -2122,6 +2149,12 @@ static void the_rest_of_a_line(void) {
   on_air = types_part_of_a_line;
   snprintf(said, sizeof said, "%s", line("1+1"));
   far_gone = 0;
+  {
+    size_t before = strlen(out);
+    type_in("\177");
+    expect(strcmp(out + before, "\b \b") == 0,
+           "Backspace takes back what shows of the line being dropped");
+  }
   type_in("ve(50, 50, 1)\r");
   line("2+2");
   expect(strstr(said, "robot_mo") != NULL
@@ -2174,7 +2207,7 @@ static void editing_over_the_link(void) {
   said = out + strlen(out);
   type_in("1+x\1771\r");
   expect(strcmp(far_heard, "1+1\r") == 0
-         && strstr(said, "1+x\b \b1\r\n") != NULL,
+         && strstr(said, "1+x\b \b1\r\r\n") != NULL,
          "Backspace over a link takes back what it shows it does, and the "
          "line's end shows as one");
 }
@@ -2750,6 +2783,7 @@ int main(int argc, char **argv) {
   a_call_repeated();
   another_board_calls();
   a_call_anew_on_the_same_link();
+  a_call_anew_drops_a_statement();
   numbers_that_come_round();
   typing_during_a_loss();
   a_line_at_the_last_moment();

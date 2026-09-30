@@ -18,7 +18,7 @@ int link_words_not_sent(lua_State *L);
 // Typing over a radio link, taken as the console takes it: text typed
 // after sofar makes line, Backspace taking back the last character of a
 // line not yet ended; shown is what the port shows of it, a line ending
-// as one.
+// as the console shows one.
 int link_words_typed(lua_State *L);
 
 #ifdef __cplusplus

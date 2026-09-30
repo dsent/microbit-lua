@@ -6,8 +6,9 @@
 #   (tests/tpbot-reference.lua), call by call;
 # - runtime-host-test: source/lua-script.lua, and programs in its place,
 #   over a stand-in board, with events through source/lua-events.c,
-#   modules through source/lua-modules.c, and radio links through
-#   source/radio-link.c, both ends of them;
+#   modules through source/lua-modules.c, radio links through
+#   source/radio-link.c, both ends of them, and the link's words and
+#   typing through source/link-words.c;
 # - source/radio-link.c, which the fiber carrying the radio's event runs,
 #   built without Lua's headers and calling nothing of Lua's;
 # - cstack-host-test: source/lua-cstack.c, whose limits follow the stack

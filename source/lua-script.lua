@@ -494,7 +494,7 @@ local function port_to_link(value)
     if dropping then
       local ends = find(typed_here, "[\r\n]")
       dropping = not ends
-      typed_here = ends and sub(typed_here, ends + 1) or ""
+      typed_here = ends and sub(typed_here, ends + 1) or typed_here
     end
     local at = find(typed_here, "[\r\n]")
     while at do
@@ -507,8 +507,9 @@ local function port_to_link(value)
         -- begun then
         local rest, shown = line_typed(typed_here, typing())
         write(shown)
-        typed_here = ""
-        dropping = find(rest, "[^\r\n]$") ~= nil
+        -- the line begun, held as it shows, for Backspace, until it ends
+        typed_here = match(rest, "[^\r\n]*$")
+        dropping = typed_here ~= ""
         -- the other board may have the line all the same, when only its
         -- answers were lost, and may hold a statement not yet finished:
         -- a new call starts it over

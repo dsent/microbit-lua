@@ -80,9 +80,10 @@ Steady state (`ran`) was 25,237 B.
 Host estimates of the builds since, on a 32-bit host model of the board's
 Lua (float numbers, 4-byte pointers; its empty state is 2,143 B, as on the
 board): each build's registration reproduced, its API stubbed, its script
-loaded, stripped and run as `main()` does, then collected. Static RAM
-(`.bss` + `.data`) is from each build's link; the firmware as it ships has
-7,144 B of it.
+loaded, stripped and run as `main()` does, then collected. Static RAM in the
+table is `arm-none-eabi-size`'s data + bss for each build's link, a measure
+that takes in the 8 KB `.stack` and leaves out `.data`: the firmware as it
+ships has 14,692 B by it, and 7,144 B in its `.data` and `.bss` sections.
 
 | build | Lua heap after boot | `.bss` + `.data` |
 |---|---:|---:|
