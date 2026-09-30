@@ -3,6 +3,11 @@ require("microbit.audio")
 require("microbit.display")
 local radio = require("microbit.radio")
 local serial = require("microbit.serial")
+-- at the prompt as before require came, for the lessons that use them
+require("microbit.accelerometer")
+require("microbit.compass")
+require("microbit.io")
+require("microbit.i2c")
 require("tpbot")
 
 -- What the REPL cannot do without, taken here so that the prompt comes

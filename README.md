@@ -160,8 +160,8 @@ robot commands `robot_info`, `robot_move`, `turn` and `straight`. The other
 modules are `microbit.accelerometer`, `microbit.compass`, `microbit.audio`,
 `microbit.io`, `microbit.serial`, `microbit.i2c`, `microbit.radio`,
 `planetx`, `tpbot2` and `nezha2`. Requiring a module sends nothing to a
-robot. The firmware's own script requires `microbit` and its `audio`,
-`display`, `radio` and `serial`, and `tpbot`.
+robot. The firmware's own script requires `microbit` and all its
+namespaces above, and `tpbot`, so the prompt has them all.
 
 
 ## Events
@@ -178,7 +178,11 @@ only noise to a program never reach it: the serial port saying it has data,
 or that it is full, and a scroll that has ended.
 
 One Lua call runs at a time. An event that comes while one runs waits in a
-line of 16, in the order the events came. The running call handles the
+line, in the order the events came. The line holds 16 events unless
+`microbit.eventLine(n)` says otherwise (0 drops every event that would have
+to wait); it is made the first time an event has to wait for a program that
+has an `on_event` or a fallback, and a program with neither pays nothing
+for it. The running call handles the
 events that were waiting whenever it enters `microbit.sleep`, and again
 every 10 ms while it sleeps: a program that sets `on_event` and then loops
 with `microbit.sleep` gets each event while it sleeps. A sleep ends on time

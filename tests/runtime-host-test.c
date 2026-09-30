@@ -23,6 +23,8 @@
 #include "lualib.h"
 #include "lua-events.h"
 #include "lua-modules.h"
+#include "board-alloc.h"
+#include "radio-inbox.h"
 #include "tpbot.h"
 
 void lua_strip_debug(lua_State *L);
@@ -34,11 +36,27 @@ enum {
 };
 
 // The events the firmware lists as noise, and its port's event
-static const LuaEventId port_event = { ID_SERIAL, HEAD_MATCH };
 static const LuaEventId noise[] = {
   { ID_SERIAL, DATA_RECEIVED }, { ID_SERIAL, RX_FULL },
   { ID_DISPLAY, ANIMATION_COMPLETE },
 };
+static const LuaEventsConfig events_config = {
+  { ID_SERIAL, HEAD_MATCH }, noise, sizeof noise / sizeof noise[0]
+};
+
+// The board's heap outside Lua's: what was made from it, and how much
+static int board_allocs;
+static size_t board_bytes;
+
+void *board_alloc(size_t size) {
+  board_allocs++;
+  board_bytes += size;
+  return malloc(size);
+}
+
+void board_free(void *p) {
+  free(p);
+}
 
 // The board: what went out of the port and onto the display, in order,
 // what waits to be read from the port, whether the port is armed, and the
@@ -258,6 +276,7 @@ static const LuaApi l_microbit[] = {
   {"version", l_version, 0}, {"friendlyName", l_name, 0},
   {"sleep", l_sleep, 0}, {"eventsDropped", lua_events_dropped, 0},
   {"eventFallback", lua_events_fallback, 0}, {"post", l_post, 0},
+  {"eventLine", lua_events_line, 0},
   {"DEVICE_ID_BUTTON_A", NULL, ID_BUTTON_A},
   {"DEVICE_ID_BUTTON_B", NULL, ID_BUTTON_B},
   {"DEVICE_ID_BUTTON_AB", NULL, ID_BUTTON_AB},
@@ -287,8 +306,12 @@ static const LuaApi l_radio[] = {
 #define X(name, function) {#name, function, 0},
 static const LuaApi l_tpbot[] = { TPBOT_FUNCTIONS {NULL, NULL, 0} };
 #undef X
+static const LuaApi l_none[] = { {NULL, NULL, 0} };
 static const LuaModule modules[] = {
   {"microbit", l_microbit, NULL}, {"microbit.audio", l_audio, NULL},
+  {"microbit.accelerometer", l_none, NULL},
+  {"microbit.compass", l_none, NULL}, {"microbit.io", l_none, NULL},
+  {"microbit.i2c", l_none, NULL},
   {"microbit.display", l_display, NULL}, {"microbit.serial", l_serial, NULL},
   {"microbit.radio", l_radio, NULL},
   {"tpbot", l_tpbot, tpbot_register_globals},
@@ -301,6 +324,8 @@ static void plan(Action a) {
 }
 
 static void fresh(void) {
+  board_allocs = 0;
+  board_bytes = 0;
   pauses_all = 0;
   send_trigger = NULL;
   send_fails = 0;
@@ -357,7 +382,7 @@ static void boot_script(const char *text, size_t length) {
   luaopen_math(L);
   lua_settop(L, 0);
   lua_modules_open(L, modules);
-  lua_events_open(L, port_event, noise, sizeof noise / sizeof noise[0]);
+  lua_events_open(L, &events_config);
   if (luaL_loadbuffer(L, text, length, "embedded")) {
     fprintf(stderr, "%s\n", lua_tostring(L, -1));
     exit(2);
@@ -906,6 +931,7 @@ static void round_two(void) {
   boot_program(
     "local n = 0\n"
     "function on_event(s, v) n = n + 1 microbit.post(1, 3) end\n"
+    "microbit.sleep(0)\n"
     "microbit.post(1, 3)\n"
     "microbit.sleep(100)\n"
     "microbit.display.scroll(n > 0 and n < 50 and 'on time' or 'late')\n");
@@ -925,6 +951,7 @@ static void round_two(void) {
   fresh();
   boot_program(
     "function on_event(s, v) error('oops') end\n"
+    "microbit.sleep(0)\n"
     "microbit.post(1, 3)\n"
     "microbit.sleep(20)\n"
     "microbit.display.scroll('went on')\n");
@@ -1005,6 +1032,83 @@ static void too_long(int signal) {
   exit(1);
 }
 
+// What the guard costs: nothing until an event has to wait for a program
+// that has somewhere to send it
+static void what_waiting_costs(void) {
+  const char *said;
+  char what[128];
+  fresh();
+  boot("");
+  expect(board_allocs == 0, "the firmware's script boots with no line made");
+  said = line("6*7");
+  expect(board_allocs == 0 && strstr(said, "=> 42") != NULL,
+         "... nor does a line typed at the prompt make one");
+  plan(press_a);
+  line("microbit.sleep(50)");
+  snprintf(what, sizeof what,
+           "the first press that waits makes the line: %zu bytes",
+           board_bytes);
+  expect(board_allocs == 1 && strstr(out, "<scroll A>") != NULL, what);
+  plan(press_b);
+  line("microbit.sleep(50)");
+  expect(board_allocs == 1, "... and the next ones use it");
+
+  fresh();
+  plan(press_a);
+  plan(press_b);
+  boot_program("microbit.sleep(50) microbit.sleep(50) "
+               "microbit.display.scroll('done')");
+  expect(board_allocs == 0 && strstr(out, "<scroll done>") != NULL,
+         "a program with no on_event makes no line for its presses");
+
+  fresh();
+  plan(press_a);
+  plan(press_b);
+  boot_program(
+    "local got = 0\n"
+    "function on_event(s, v) got = got + 1 end\n"
+    "microbit.eventLine(0)\n"
+    "microbit.sleep(50)\n"
+    "microbit.display.scroll(got .. ' ' .. microbit.eventsDropped())\n");
+  expect(strstr(out, "<scroll 0 2>") != NULL,
+         "eventLine(0) drops every event that would have to wait");
+
+  fresh();
+  plan(press_a);
+  plan(press_b);
+  boot_program(
+    "local got = 0\n"
+    "function on_event(s, v) got = got + 1 end\n"
+    "microbit.sleep(0)\n"
+    "microbit.eventLine(1)\n"
+    "microbit.sleep(50)\n"
+    "microbit.display.scroll(got .. ' ' .. microbit.eventsDropped())\n");
+  expect(strstr(out, "<scroll 2 0>") != NULL,
+         "eventLine(1) keeps one event that waits at a time");
+}
+
+// The radio's inbox: made when the first link opens, not before
+static void the_radio_inbox(void) {
+  uint8_t body[RADIO_INBOX_BODY];
+  int len = 0, before;
+  fresh();
+  before = board_allocs;
+  expect(radio_inbox_full() && !radio_inbox_take(body, &len)
+         && board_allocs == before,
+         "before any link, the radio keeps nothing and made nothing");
+  radio_inbox_open();
+  expect(board_allocs == before + 1 && !radio_inbox_full(),
+         "the first link makes the inbox");
+  radio_inbox_put((const uint8_t *)"hi", 2);
+  radio_inbox_put((const uint8_t *)"yo", 2);
+  expect(radio_inbox_full(), "... which holds two pieces");
+  expect(radio_inbox_take(body, &len) && len == 2 && body[0] == 'h'
+         && radio_inbox_take(body, &len) && body[0] == 'y'
+         && !radio_inbox_take(body, &len), "... given back in order");
+  radio_inbox_open();
+  expect(board_allocs == before + 1, "a link opened again makes no other");
+}
+
 int main(int argc, char **argv) {
   signal(SIGALRM, too_long);
   alarm(60);
@@ -1021,6 +1125,8 @@ int main(int argc, char **argv) {
   lines_in_turn();
   robot_file();
   round_two();
+  what_waiting_costs();
+  the_radio_inbox();
   programs_alone();
   printf("%d checks, %d failed\n", checks, failures);
   return failures != 0;

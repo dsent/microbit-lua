@@ -30,6 +30,6 @@ cc "${STRICT[@]}" -o "$DIR/tpbot" "$ROOT/tests/tpbot-host-test.c" \
   "$ROOT/source/tpbot.c" "$DIR"/*.o -lm
 cc "${STRICT[@]}" -o "$DIR/runtime" "$ROOT/tests/runtime-host-test.c" \
   "$ROOT/source/tpbot.c" "$ROOT/source/lua-events.c" \
-  "$ROOT/source/lua-modules.c" "$DIR"/*.o -lm
+  "$ROOT/source/lua-modules.c" "$ROOT/source/radio-inbox.c" "$DIR"/*.o -lm
 "$DIR/tpbot" "$ROOT/tests/tpbot-reference.lua"
 "$DIR/runtime" "$ROOT/source/lua-script.lua"

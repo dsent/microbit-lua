@@ -83,7 +83,7 @@ loaded, stripped and run as `main()` does, then collected. Static RAM
 |---|---:|---:|
 | daa2f77, before `require` (TPBot commands in Lua) | 29,080 B | 14,704 B |
 | upstream 1733ccd (`require`, TPBot in C for tpbot2) | 26,191 B | 14,712 B |
-| this firmware | 25,522 B | 14,944 B |
+| this firmware | 26,601 B | 14,736 B |
 
 What moved it, measured the same way:
 
@@ -91,9 +91,13 @@ What moved it, measured the same way:
   (`tests/host-tests.sh`'s own figure, built 32-bit);
 - no `_M`, `_NAME` and `_PACKAGE` in module tables: 532 B less, on
   upstream's script;
-- the event line (16 events of 8 B), the REPL's port slot and the
-  dispatcher's state: 160 B of `.bss`;
-- the radio's inbox of 2 pieces: 68 B of `.bss`.
+- `microbit.accelerometer`, `.compass`, `.io` and `.i2c`, required by the
+  firmware's script so the prompt has them: 1,051 B of heap;
+- the dispatcher's state: 18 B of `.bss`; its line of 16 events is 144 B
+  of the board's heap, made the first time an event has to wait for a
+  program with somewhere to send it;
+- the radio's inbox of 2 pieces: 4 B of `.bss`, and 68 B of the board's
+  heap when the first link opens.
  The same markers on the double build (S1+S2,
 no S6) ended at 30,837 B, so S6 saves a further 5,600 B; against the original
 eager + debug build (`ran` 48,249 B) the three changes save 23,012 B.
