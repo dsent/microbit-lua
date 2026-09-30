@@ -155,13 +155,19 @@ static const uint8_t *luaL_checkimage(lua_State *L, int narg,
   return pixels;
 }
 
+// The most a read may ask for at once, serial or i2c: a buffer the heap
+// cannot give stops the board with panic 020, where this is an argument
+// error.
+#define READ_MAX 4096
+#define READ_RANGE "from 0 to 4096"
+
 // read(n) of a port: up to n bytes, read into a buffer on Lua's heap and
 // returned as a string. CODAL's read(n) puts n bytes on the C stack, below
 // any check (source/lua-cstack.c).
 template <typename Read>
 static int read_into_lua(lua_State *L, Read read) {
   int size = luaL_checkint(L, 1);
-  luaL_argcheck(L, size >= 0, 1, "from 0 up");
+  luaL_argcheck(L, 0 <= size && size <= READ_MAX, 1, READ_RANGE);
   uint8_t *buffer = (uint8_t *)lua_newuserdata(L, size);
   int got = read(buffer, size);
   lua_pushlstring(L, (const char *)buffer, got > 0 ? got : 0);
@@ -959,7 +965,8 @@ extern MicroBitUARTService *uart;
 #define LUA_I2C_FUNCTIONS						\
     F(read,       { int address = luaL_checkint(L, 1);			\
                     int length = luaL_checkint(L, 2);			\
-                    luaL_argcheck(L, length >= 0, 2, "from 0 up");	\
+                    luaL_argcheck(L, 0 <= length && length <= READ_MAX,	\
+                                  2, READ_RANGE);			\
                     /* on Lua's heap: the C stack has no room to spare */ \
                     char *data = (char *)lua_newuserdata(L, length);	\
                     if(i2c.read(address, data, length) == MICROBIT_OK){	\
