@@ -14,7 +14,8 @@
 //   so, a handler always ends before the call it runs in goes on. The
 //   running call is the script at boot, or a command typed at the REPL
 //   (the firmware's own handler of the port's event); a handler's own sleep
-//   handles nothing, so it never nests another. A sleep ends on time
+//   handles nothing, so it never nests another, and nor does a sleep that
+//   is already deep in the stack (SAFE_POINT_STACK). A sleep ends on time
 //   however many events come, but lasts as long as the handlers it runs;
 // - when the running call is over.
 //
@@ -43,6 +44,10 @@
 
 // How long a sleep that handles events sleeps at a time, in ms
 #define SLICE 10
+
+// The deepest a sleep may be, in bytes of C stack in use, and still run
+// handlers: what is left of the 8 KB region, 3 KB, is theirs.
+#define SAFE_POINT_STACK 5120
 
 // The waiting line, made the first time an event has to wait for a
 // program that has somewhere to send it, of the size microbit.eventLine()
@@ -269,7 +274,8 @@ static void handle_what_waits(void) {
 void lua_events_sleep(uint32_t ms) {
   uint32_t start, elapsed;
   bool paused = false;
-  if (!running || !sleep_handles) {
+  if (!running || !sleep_handles
+      || lua_events_stack_used() > SAFE_POINT_STACK) {
     lua_events_pause(ms);
     return;
   }

@@ -190,7 +190,10 @@ however many events come, but lasts as long as the handlers it runs. The
 running call is the script at boot, or a command at the REPL; a handler's
 own `microbit.sleep` handles nothing, so one handler always ends before the
 next starts, and so does a program's own `on_event` when it gets the serial
-port's event. What still waits when the call is over is handled then. When
+port's event. Nor does a sleep that is already more than 5 KB deep in the C
+stack, so the handlers it would run keep 3 KB of the 8 KB stack; their
+events wait for the call to return. A call that goes deeper than 7 KB stops
+with "C stack overflow". What still waits when the call is over is handled then. When
 the line is full the oldest event in it is dropped;
 `microbit.eventsDropped()` says how many have been since boot.
 

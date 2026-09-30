@@ -129,6 +129,13 @@ void lua_events_show_error(const char *message, bool wait) {
     then();
 }
 
+// The stack in use a safe point sees: 0, or what a test says
+static uint32_t stack_used_now;
+
+uint32_t lua_events_stack_used(void) {
+  return stack_used_now;
+}
+
 uint32_t lua_events_now(void) {
   return clock_ms;
 }
@@ -325,6 +332,7 @@ static void plan(Action a) {
 }
 
 static void fresh(void) {
+  stack_used_now = 0;
   board_allocs = 0;
   board_bytes = 0;
   pauses_all = 0;
@@ -1147,6 +1155,27 @@ static void a_full_c_stack(void) {
   expect(strstr(said, "=> 42\r\n> ") != NULL, "... and the REPL answers");
 }
 
+// A sleep deep in the stack runs no handlers: their events wait for the
+// call to return
+static void deep_sleeps(void) {
+  static const char *const shallow[] = {
+    "<sleep>", "<scroll A>", "</sleep>", NULL };
+  static const char *const deep[] = {
+    "<sleep>", "</sleep>", "> ", "<scroll A>", NULL };
+  const char *said;
+  fresh();
+  boot("");
+  stack_used_now = 5000;
+  plan(press_a);
+  said = line("microbit.sleep(50)");
+  expect(in_order(said, shallow), "a sleep 5,000 bytes deep runs handlers");
+  stack_used_now = 5200;
+  plan(press_a);
+  said = line("microbit.sleep(50)");
+  expect(in_order(said, deep) && count(said, "<scroll A>") == 1,
+         "a sleep 5,200 bytes deep leaves them for after the call");
+}
+
 int main(int argc, char **argv) {
   host_cstack_start();
   signal(SIGALRM, too_long);
@@ -1167,6 +1196,7 @@ int main(int argc, char **argv) {
   what_waiting_costs();
   the_radio_inbox();
   a_full_c_stack();
+  deep_sleeps();
   programs_alone();
   printf("%d checks, %d failed\n", checks, failures);
   return failures != 0;

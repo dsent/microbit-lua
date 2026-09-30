@@ -1711,6 +1711,10 @@ extern "C" void lua_events_show_error(const char *message, bool wait) {
     uBit.display.scrollAsync(message);
 }
 
+extern "C" uint32_t lua_events_stack_used(void) {
+  return stack_probe_current();
+}
+
 extern "C" uint32_t lua_events_now(void) {
   return (uint32_t)uBit.systemTime();
 }

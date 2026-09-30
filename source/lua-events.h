@@ -70,6 +70,9 @@ int lua_events_line(lua_State *L);
 // shown, waiting for it to be seen or not; the time in ms; and a sleep that
 // lets other fibers run.
 void lua_events_show_error(const char *message, bool wait);
+
+// The C stack in use, in bytes
+uint32_t lua_events_stack_used(void);
 uint32_t lua_events_now(void);
 void lua_events_pause(uint32_t ms);
 
