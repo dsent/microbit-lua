@@ -9,7 +9,9 @@
 #   modules through source/lua-modules.c;
 # - cstack-host-test: source/lua-cstack.c, whose limits follow the stack
 #   region's size;
-# - wait-audit.sh: every binding that waits looks for on_event first.
+# - wait-audit.sh: every binding that waits looks for on_event first;
+# - lua-patch-test.cmake: the build's lua_patch, which applies each patch
+#   once and takes a file as patched only by the block it adds.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -22,8 +24,8 @@ DIR=$(mktemp -d)
 trap 'rm -rf "$DIR"' EXIT
 tar -xzf "$TARBALL" -C "$DIR"
 LUA="$DIR/lua-5.1.5/src"
-# lua_patch(FILE PATCH "MARKER"), in the order the build applies them
-sed -n 's/^lua_patch(\([^ ]*\) \([^ ]*\) .*/\1 \2/p' "$ROOT/CMakeLists.txt" |
+# lua_patch(FILE PATCH), in the order the build applies them
+sed -n 's/^lua_patch(\([^ ]*\) \([^ )]*\))$/\1 \2/p' "$ROOT/CMakeLists.txt" |
   while read -r file patch; do
     patch --forward --batch --quiet "$LUA/$file" "$ROOT/source/$patch"
   done
@@ -49,3 +51,6 @@ cc "${STRICT[@]}" -o "$DIR/cstack" "$ROOT/tests/cstack-host-test.c" \
   "$ROOT/source/lua-cstack.c"
 "$DIR/cstack"
 bash "$ROOT/tests/wait-audit.sh"
+mkdir "$DIR/patch-test"
+cmake -DROOT="$ROOT" -DWORK="$DIR/patch-test" \
+  -P "$ROOT/tests/lua-patch-test.cmake" | grep -v "^patching file"

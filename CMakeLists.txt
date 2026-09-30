@@ -368,54 +368,39 @@ if(NOT EXISTS ${LUA_DIR})
     )
 endif()
 
-# Patches to the Lua sources, applied in place because lua.h includes
-# luaconf.h by quoted include, so a shadow header cannot take precedence. Each
-# is applied once: MARKER is text the patch adds, so a file that has it is left
-# alone (libraries/ survives a clean build). To be replaced by commits in the
-# Lua fork.
-function(lua_patch FILE PATCH MARKER)
-    file(READ "${LUA_SRC_DIR}/${FILE}" _text)
-    string(FIND "${_text}" "${MARKER}" _found)
-    if(_found EQUAL -1)
-        execute_process(
-            COMMAND patch --forward --batch "${LUA_SRC_DIR}/${FILE}"
-                    "${CMAKE_SOURCE_DIR}/source/${PATCH}"
-            RESULT_VARIABLE _rc
-        )
-        if(NOT _rc EQUAL 0)
-            message(FATAL_ERROR "Failed to patch ${FILE} (${_rc})")
-        endif()
-    endif()
-endfunction()
+# Patches to the Lua sources, each applied once (source/lua-patch.cmake). To be
+# replaced by commits in the Lua fork.
+set(LUA_PATCH_DIR "${CMAKE_SOURCE_DIR}/source")
+include("${CMAKE_SOURCE_DIR}/source/lua-patch.cmake")
 
 # Make LUA_NUMBER overridable (LUA_NUMBER_IS_FLOAT) and add float-tuned number
 # formatting/parsing.
-lua_patch(luaconf.h luaconf-float.patch "LUA_NUMBER_IS_FLOAT")
+lua_patch(luaconf.h luaconf-float.patch)
 # Numbers become text in source/lua-number.c: this build's sprintf has no
 # float support.
-lua_patch(luaconf.h luaconf-number-text.patch "luai_number2str")
-lua_patch(lstrlib.c lstrlib-number-text.patch "luai_numformat")
+lua_patch(luaconf.h luaconf-number-text.patch)
+lua_patch(lstrlib.c lstrlib-number-text.patch)
 # A C stack too full to go deeper is a "C stack overflow" error, as too many
 # nested C calls are: source/lua-cstack.c measures it.
-lua_patch(luaconf.h luaconf-cstack.patch "luai_cstack")
-lua_patch(ldo.c ldo-cstack.patch "luai_cstack")
-lua_patch(lparser.c lparser-cstack.patch "luai_cstack")
-lua_patch(lparser.c lparser-assign-cstack.patch "no enterlevel on the way")
-lua_patch(ldo.c ldo-resume-cstack.patch "the call that resumes it")
-lua_patch(lstrlib.c lstrlib-cstack.patch "pattern too complex")
+lua_patch(luaconf.h luaconf-cstack.patch)
+lua_patch(ldo.c ldo-cstack.patch)
+lua_patch(lparser.c lparser-cstack.patch)
+lua_patch(lparser.c lparser-assign-cstack.patch)
+lua_patch(ldo.c ldo-resume-cstack.patch)
+lua_patch(lstrlib.c lstrlib-cstack.patch)
 # Only text is loaded, so every function's nesting passed the parser's check;
 # string.dump checks its own walk through them.
-lua_patch(ldo.c ldo-text-only.patch "only text")
-lua_patch(ldump.c ldump-cstack.patch "luai_cstack")
+lua_patch(ldo.c ldo-text-only.patch)
+lua_patch(ldump.c ldump-cstack.patch)
 # The message of an error thrown with none, made at the start as the one
 # for running out of memory is.
-lua_patch(lstate.c lstate-errerr.patch "error in error handling")
+lua_patch(lstate.c lstate-errerr.patch)
 # An error in a chunk with no line info, the script at boot once stripped,
 # names the chunk with no ":0".
-lua_patch(ldebug.c ldebug-no-line.patch "no line info")
-lua_patch(lauxlib.c lauxlib-no-line.patch "whose chunk has no line info")
+lua_patch(ldebug.c ldebug-no-line.patch)
+lua_patch(lauxlib.c lauxlib-no-line.patch)
 # A smaller string buffer on the C stack, so the check leaves more of it.
-lua_patch(luaconf.h luaconf-buffer.patch "leaves that check more")
+lua_patch(luaconf.h luaconf-buffer.patch)
 # Application sources build at -O2; this file is 1.3 KB smaller at -Os.
 set_source_files_properties("${CMAKE_SOURCE_DIR}/source/lua-number.c"
     PROPERTIES COMPILE_OPTIONS "-Os")
