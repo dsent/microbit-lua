@@ -510,8 +510,8 @@ local function port_to_link(value)
         typed_here = ""
         dropping = find(rest, "[^\r\n]$") ~= nil
         -- the other board may have the line all the same, when only its
-        -- answers were lost; whether it waits for the rest of a statement
-        -- shows once what it says has come
+        -- answers were lost, and may hold a statement not yet finished:
+        -- a new call starts it over
         write(not_sent_words(sub(line, 1, -2), find(rest, "[^\r\n]") ~= nil))
         return
       end

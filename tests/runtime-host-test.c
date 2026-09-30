@@ -1687,10 +1687,10 @@ static void serving_a_link(void) {
 static const char *not_taken(const char *text, int after, char *words,
                              size_t size) {
   snprintf(words, size, "\r\nThe other micro:bit did not answer, so it may "
-           "not have got: %s\r\n%sIt may still be running a command. Once "
-           "it has finished, if the last thing it showed is >>, press the "
-           "reset button on the back of this micro:bit and connect again. "
-           "Then check whether the line ran before you type it again.\r\n",
+           "not have got: %s\r\n%sWait until the other micro:bit has "
+           "finished. Then press the reset button on the back of this "
+           "micro:bit and connect again. Check what ran, and type again, "
+           "from its first line, any statement that did not run.\r\n",
            text,
            after ? "What you typed after it was not sent either.\r\n" : "");
   return words;
@@ -2130,33 +2130,22 @@ static void the_rest_of_a_line(void) {
          "to its line's end; the next line goes");
 }
 
-// The other board shows ">> " while this one tries a line
-static void far_prompts_open(void) {
-  far_says(">> ");
-}
-
 // A line that did not go after one that opened a statement, the other
-// board's ">> " coming only after the words: the words say what to do
-// when it shows, and it shows after them
+// board's answers to both lost: the words say to start over all the same
 static void a_loss_in_an_open_statement(void) {
-  const char *said, *words;
+  char words[512];
+  const char *said;
   fresh();
   real_link = 1;
   far_listens = 1;
   boot("");
   line("connect('gigat', 100)");
   line("text = [=[");
-  on_air = far_prompts_open;
   far_gone = 1;
   said = line("hello");
-  words = strstr(said, "may not have got: hello\r\nIt may still be running "
-                 "a command. Once it has finished, if the last thing it "
-                 "showed is >>, press the reset button on the back of this "
-                 "micro:bit and connect again. Then check whether the line "
-                 "ran before you type it again.\r\n");
-  expect(words != NULL && strstr(words, ">> ") != NULL,
-         "a line lost inside an open statement says to reset and connect "
-         "again when >> shows, and >> shows after the words");
+  expect(strstr(said, not_taken("hello", 0, words, sizeof words)) != NULL,
+         "a line lost inside an open statement, with no >> shown, says to "
+         "reset, connect again and type the statement from its first line");
 }
 
 // notSent with its flags left out, for a line long enough that the words
@@ -2166,7 +2155,7 @@ static void words_with_flags_left_out(void) {
   fresh();
   boot("");
   said = line("print(microbit.radio.notSent(string.rep('x', 300)))");
-  expect(strstr(said, "It may still be running a command.") != NULL
+  expect(strstr(said, "Wait until the other micro:bit has finished.") != NULL
          && strstr(said, "What you typed after it") == NULL,
          "notSent with a long line and no flags gives the plain words");
 }

@@ -312,14 +312,14 @@ board that is gone. The board that called then says `The other micro:bit did not
 answer, so it may not have got:` and the line, and drops what was typed after
 it, what reached the port while it tried included: that is shown, and the line
 it begins is dropped up to its line ending. It says so when that held more than
-a line ending, and tells the person to check whether the line ran before typing
-it again, since the other board may have taken the line and only its answers
-been lost. First, once the other board has finished, if the last thing it showed
-is `>>`, the person is to press the reset button on the board that called and
-connect again: the new call starts the other board's session over, its
-unfinished statement gone. The board that called prints what the other board
-says as it comes, and between the lines it sends, so its own inbox does not fill
-while a paste goes out.
+a line ending, and tells the person to wait until the other board has finished,
+then press the reset button on the board that called, connect again, check what
+ran, and type again from its first line any statement that did not run. The
+other board may have taken the line and only its answers been lost, and may hold
+a statement not yet finished; the new call starts its session over, with that
+statement and what still waits in its inbox gone. The board that called prints
+what the other board says as it comes, and between the lines it sends, so its
+own inbox does not fill while a paste goes out.
 
 The first piece of each message is marked, and `rx()` returns with a piece
 whether it starts a message. The link's REPL is sent whole lines, one to a
