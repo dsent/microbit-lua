@@ -1106,11 +1106,11 @@ static void round_two(void) {
   expect(strstr(out, "<error, going on ") != NULL
          && strstr(out, "<scroll went on>") != NULL,
          "a handler's mistake is shown without waiting for it");
-  expect(strstr(out, "\r\nRuntime error: oops\r\n")
+  expect(strstr(out, "\r\nRuntime error: program: oops\r\n")
          != NULL, "... and goes to the port");
   fresh();
   boot_program("error('at boot')\n");
-  expect(strstr(out, "\r\nRuntime error: at boot"
+  expect(strstr(out, "\r\nRuntime error: program: at boot"
                 "\r\n<error Lua error!>") != NULL,
          "a mistake at boot goes to the port before it scrolls by");
   // sleep(0) lets other fibers run
@@ -1589,10 +1589,32 @@ static void a_port_event_stranded(void) {
          "... and one that waits for a running call is handed on once");
 }
 
-// A mistake the VM finds in the script at boot, stripped of its lines, is
-// named "program", with no line; a line typed at the REPL keeps its own
+// A mistake in the script at boot, stripped of its lines, is named
+// "program", with no line, whether the VM finds it, error() or assert()
+// raises it, or a function it calls finds a bad argument; one a C
+// function raises for another C function is not; a line typed at the REPL
+// keeps its line
 static void mistakes_named(void) {
+  static const char *const RAISED[][2] = {
+    { "error('boom')", "\r\nRuntime error: program: boom\r\n" },
+    { "assert(false, 'nope')", "\r\nRuntime error: program: nope\r\n" },
+    { "string.rep()", "\r\nRuntime error: program: bad argument #1 to "
+      "'rep' (string expected, got no value)\r\n" },
+    { "local ok, e = pcall(string.rep) error(e, 0)",
+      "\r\nRuntime error: bad argument #1 to '?' (string expected, got no "
+      "value)\r\n" },
+    { NULL, NULL } };
   const char *said;
+  char what[256];
+  int i;
+  for (i = 0; RAISED[i][0]; i++) {
+    fresh();
+    boot_program(RAISED[i][0]);
+    snprintf(what, sizeof what, "%s, a mistake at boot, %s", RAISED[i][0],
+             strstr(RAISED[i][1], "program: ") ? "is named \"program\""
+             : "raised for a C function, has no name");
+    expect(strstr(out, RAISED[i][1]) != NULL, what);
+  }
   fresh();
   boot_program("local m = require('microbit')\n"
                "m.nothing.x = 1\n");

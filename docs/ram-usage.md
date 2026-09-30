@@ -177,12 +177,16 @@ Trade-offs:
 Implemented in `source/lua-strip-debug.c` and called from `source/main.cpp`
 right after `luaL_loadbuffer` succeeds. `lua_strip_debug()` walks the loaded
 `Proto` recursively and frees `lineinfo`, `locvars`, and `upvalues` with
-`luaM_freearray`, zeroing the counts. The `debug` library is not opened, so the
-only loss is line numbers in errors raised by the embedded functions: the
-chunk is loaded as `=program`, and such an error reads `program: attempt to
-index field 'serial' (a nil value)`, with no line
-(`source/ldebug-no-line.patch`). REPL chunks compiled later keep their debug
-info and their lines.
+`luaM_freearray`, zeroing the counts: line numbers, local variable names and
+upvalue names. The `debug` library is not opened, so what a program loses is
+in its errors, which have no line and name no local or upvalue: `local t
+t.x = 1` gives `program: attempt to index a nil value`, where unstripped it
+gives `program:1: attempt to index local 't' (a nil value)`, and an upvalue
+shows as `'?'`; globals and fields keep their names. The chunk is loaded as
+`=program`, and its errors name it with no line: from the VM
+(`source/ldebug-no-line.patch`), and from `error`, `assert` or a function's
+bad argument, `program: boom` (`source/lauxlib-no-line.patch`). REPL chunks
+compiled later keep their debug info, their lines and their names.
 
 ### S4. Resolve constants through `__index` — done
 

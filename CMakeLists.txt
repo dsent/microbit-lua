@@ -413,6 +413,7 @@ lua_patch(lstate.c lstate-errerr.patch "error in error handling")
 # An error in a chunk with no line info, the script at boot once stripped,
 # names the chunk with no ":0".
 lua_patch(ldebug.c ldebug-no-line.patch "no line info")
+lua_patch(lauxlib.c lauxlib-no-line.patch "whose chunk has no line info")
 # A smaller string buffer on the C stack, so the check leaves more of it.
 lua_patch(luaconf.h luaconf-buffer.patch "leaves that check more")
 # Application sources build at -O2; this file is 1.3 KB smaller at -Os.
