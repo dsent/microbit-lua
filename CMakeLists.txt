@@ -348,14 +348,25 @@ set(LUA_DIR ${CMAKE_SOURCE_DIR}/${LIB_DEST}/lua-${LUA_VERSION})
 set(LUA_SRC_DIR ${LUA_DIR}/src)
 set(LUA_ARCHIVE ${CMAKE_SOURCE_DIR}/${LIB_DEST}/${LUA_TARBALL})
 
-# download tarball if missing
+# download tarball if missing: the Lua the patches are checked against
+# (source/lua-patch.cmake), so it must be lua.org's own, by the SHA256
+# lua.org lists for it
 if(NOT EXISTS ${LUA_ARCHIVE})
     message(STATUS "Downloading Lua ${LUA_VERSION}...")
     file(DOWNLOAD
         ${LUA_URL}
         ${LUA_ARCHIVE}
         SHOW_PROGRESS
+        EXPECTED_HASH SHA256=2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333
+        STATUS _lua_download
     )
+    list(GET _lua_download 0 _lua_download_rc)
+    if(NOT _lua_download_rc EQUAL 0)
+        file(REMOVE ${LUA_ARCHIVE})
+        message(FATAL_ERROR "Lua ${LUA_VERSION} could not be downloaded from "
+                "${LUA_URL} (${_lua_download}): check the network, and build "
+                "again.")
+    endif()
 endif()
 
 # extract if missing

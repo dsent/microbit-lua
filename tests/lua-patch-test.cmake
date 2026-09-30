@@ -146,6 +146,8 @@ endfunction()
 
 # the build stopped, its words holding WORDS
 function(stopped WORDS WHAT)
+    # CMake wraps a message where the paths in it make it long
+    string(REGEX REPLACE "[ \n]+" " " _said "${_said}")
     string(FIND "${_said}" "${WORDS}" _named)
     check("${WHAT}" NOT _rc EQUAL 0 AND NOT _named EQUAL -1)
 endfunction()
