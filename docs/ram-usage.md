@@ -59,24 +59,42 @@ grows the heap, since heap end = `stack_limit()`.
 
 On-device `LUA_MEM_DEBUG` deltas between the boot markers, measured on the
 build with S1 (lazy tables) + S2 (debug strip) + S6 (32-bit float numbers),
-before `require` and the TPBot commands in C (`source/tpbot.c`). Since then
-`api − stdlib` also holds `package`, `module`, `require`, the `tpbot` table
-and the four robot globals, and the script `Proto` holds the TPBot commands no
-more. Host estimate of the move, from `tests/host-tests.sh` (64-bit pointers,
-so larger than on the board): the TPBot commands in Lua held 25,742 B of heap
-with the state, in C 19,933 B, 5.8 KB less.
+before `require` and the TPBot commands in C (`source/tpbot.c`):
 
 | item | size | marker delta |
 |---|---:|---|
 | Lua state (empty) | 2,143 B | `state − boot` |
 | base/table/string/math libraries | 7,777 B | `stdlib − state` |
-| `microbit.*` API namespace tables, made by `require` at start | 1,742 B | `api − stdlib` |
+| `microbit.*` API namespace tables | 1,742 B | `api − stdlib` |
 | embedded script `Proto` + API names (with debug info) | 19,656 B | `loaded − api` |
 | ↳ debug info, freed by S2 | 7,740 B | `stripped − loaded` |
 | ↳ stripped `Proto` + API names | 11,916 B | `stripped − api` |
 | names materialised by the script + runtime state | 1,659 B | `ran − stripped` |
 
-Steady state (`ran`) is 25,237 B. The same markers on the double build (S1+S2,
+Steady state (`ran`) was 25,237 B.
+
+Host estimates of the builds since, on a 32-bit host model of the board's
+Lua (float numbers, 4-byte pointers; its empty state is 2,143 B, as on the
+board): each build's registration reproduced, its API stubbed, its script
+loaded, stripped and run as `main()` does, then collected. Static RAM
+(`.bss` + `.data`) is from each build's link.
+
+| build | Lua heap after boot | `.bss` + `.data` |
+|---|---:|---:|
+| daa2f77, before `require` (TPBot commands in Lua) | 29,080 B | 14,704 B |
+| upstream 1733ccd (`require`, TPBot in C for tpbot2) | 26,191 B | 14,712 B |
+| this firmware | 25,522 B | 14,944 B |
+
+What moved it, measured the same way:
+
+- the TPBot commands in C instead of Lua: 3,961 B less heap
+  (`tests/host-tests.sh`'s own figure, built 32-bit);
+- no `_M`, `_NAME` and `_PACKAGE` in module tables: 532 B less, on
+  upstream's script;
+- the event line (16 events of 8 B), the REPL's port slot and the
+  dispatcher's state: 160 B of `.bss`;
+- the radio's inbox of 2 pieces: 68 B of `.bss`.
+ The same markers on the double build (S1+S2,
 no S6) ended at 30,837 B, so S6 saves a further 5,600 B; against the original
 eager + debug build (`ran` 48,249 B) the three changes save 23,012 B.
 

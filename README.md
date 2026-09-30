@@ -148,6 +148,22 @@ deepest user is the Lua parser (~4 KB) parsing the embedded chunk; see
 `docs/ram-usage.md` for the breakdown and sizing guidance.
 
 
+## Modules
+
+Before a script runs there are only `package`, `module` and `require`. A
+program requires what it uses: `require("microbit")` makes the global
+`microbit` and returns it; `require("microbit.display")` makes
+`microbit.display` and returns it (making a plain `microbit` table on the
+way if there is none yet; `require("microbit")` then gives that same table
+its functions); `require("tpbot")` makes the global `tpbot` and sets the
+robot commands `robot_info`, `robot_move`, `turn` and `straight`. The other
+modules are `microbit.accelerometer`, `microbit.compass`, `microbit.audio`,
+`microbit.io`, `microbit.serial`, `microbit.i2c`, `microbit.radio`,
+`planetx`, `tpbot2` and `nezha2`. Requiring a module sends nothing to a
+robot. The firmware's own script requires `microbit` and its `audio`,
+`display`, `radio` and `serial`, and `tpbot`.
+
+
 ## Events
 
 The firmware calls the global `on_event(source, value, timestamp)` for each
@@ -174,19 +190,20 @@ sent to the REPL run one after another. The port holds 254 characters that
 wait to be read, what is typed while the script at boot runs included, and
 the REPL reads them when it starts.
 
+`robot_move`'s own wait handles nothing: a button pressed while the robot
+drives is handled when the move is over.
+
 A script that stops on a mistake at boot shows `Lua error!` and the message
 on the display, once. The board then handles events with the `on_event` the
 script set before it stopped, if any.
 
-`print` writes to the serial port, its values apart by tabs and each line
-ended by `\r\n`; the firmware's script puts its own in its place.
+Lua's own `print` writes to stdout, which goes nowhere on this board; the
+firmware's script puts its own in its place, writing to the serial port.
 
-The REPL takes what it uses (`pcall`, `print`, `tostring`, the string and
-table functions, the serial, display and radio calls) when the script loads,
-so a program that changes or removes those globals leaves the prompt
-answering. `print` stays a global a program may replace for its own use.
 Whatever goes wrong on the way from a line to its result, the prompt comes
-back and the port is armed.
+back and the port is armed. The REPL keeps `pcall` and `string.gmatch` of
+its own for that; a line that takes away another global it uses can stop
+what the REPL shows, and the global can be put back from the prompt.
 
 
 ## TPBot
