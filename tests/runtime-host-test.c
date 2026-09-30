@@ -679,10 +679,10 @@ static void on_event_and_print(void) {
   expect(strstr(said, "=> 2\r\n> ") != NULL, "... and the REPL still answers");
 }
 
-// The REPL keeps only pcall of its own: a global it uses, taken away,
-// can stop what a line shows, but the prompt comes back and the port is
-// armed, so the global can be put back from the prompt. print is the
-// REPL's own too.
+// The REPL keeps loadstring, setfenv, pcall and gmatch of its own: a
+// global it uses, taken away, can stop what a line shows, but the prompt
+// comes back and the port is armed, so the global can be put back from the
+// prompt. print is the REPL's own too.
 static void globals_taken_away(void) {
   const char *said;
   char what[256], take[128];
@@ -716,6 +716,22 @@ static void globals_taken_away(void) {
     snprintf(what, sizeof what, "the prompt comes back after a program's %s",
              take);
     expect(armed && strstr(said, "> ") != NULL, what);
+  }
+  // A global the REPL compiles with, taken away and put back from the
+  // prompt: the line that puts it back runs
+  for (i = 0; i < 2; i++) {
+    static const char *const COMPILER[] = { "loadstring", "setfenv" };
+    fresh();
+    boot("");
+    snprintf(take, sizeof take, "saved = %s _G.%s = nil", COMPILER[i],
+             COMPILER[i]);
+    line(take);
+    snprintf(take, sizeof take, "_G.%s = saved", COMPILER[i]);
+    line(take);
+    said = line("6*7");
+    snprintf(what, sizeof what, "_G.%s taken away is put back from the "
+             "prompt, and the REPL answers", COMPILER[i]);
+    expect(strstr(said, "=> 42\r\n> ") != NULL, what);
   }
   fresh();
   boot("");

@@ -11,9 +11,12 @@ require("microbit.i2c")
 require("tpbot")
 
 -- What the REPL cannot do without, taken here so that the prompt comes
--- back even after a line takes away the global: a line runs under pcall,
--- and every character goes out through gmatch.
+-- back even after a line takes away the global, and answers the line
+-- that puts it back: a line is compiled by loadstring, given its
+-- environment by setfenv and run under pcall, and every character goes
+-- out through gmatch.
 local pcall, gmatch = pcall, string.gmatch
+local loadstring, setfenv = loadstring, setfenv
 local HEAD_MATCH = uBit.CODAL_SERIAL_EVT_HEAD_MATCH
 local CLICK = uBit.DEVICE_BUTTON_EVT_CLICK
 local LONG_CLICK = uBit.DEVICE_BUTTON_EVT_LONG_CLICK

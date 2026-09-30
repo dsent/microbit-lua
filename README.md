@@ -231,10 +231,10 @@ Lua's own `print` writes to stdout, which goes nowhere on this board; the
 firmware's script puts its own in its place, writing to the serial port.
 
 Whatever goes wrong on the way from a line to its result, the prompt comes
-back and the port is armed. The REPL keeps `pcall` and `string.gmatch` of
-its own for that; a line that takes away another global it uses
-can stop what the REPL shows, and the global can be put back from the
-prompt.
+back and the port is armed. The REPL keeps `loadstring`, `setfenv`, `pcall`
+and `string.gmatch` of its own for that; a line that takes away another
+global it uses can stop what the REPL shows, and the global can be put back
+from the prompt.
 
 
 ## TPBot
