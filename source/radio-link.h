@@ -50,6 +50,7 @@ struct RadioLink {
   uint8_t link;                 // 0 while no link is open
   uint8_t out;                  // number of the last piece sent
   uint8_t in;                   // number of the last piece taken
+  bool serving;                 // the other board called this one
   char peer[RADIO_NAME + 1];
   // A frame taken off the air that the reader did not want, kept until
   // somebody wants it or another takes its place
@@ -82,8 +83,11 @@ bool radio_link_rx(RadioLink *r, uint8_t body[RADIO_BODY], int *len,
                    bool *starts);
 
 // A datagram has come: while a link is open, a piece of it is answered
-// and kept for rx, if there is room. Runs no Lua.
-void radio_link_heard(RadioLink *r);
+// and kept for rx, if there is room. Runs no Lua. Whether the radio's event
+// goes on to Lua: not while this board serves a link, whose listen() takes
+// what comes without it, so the link's traffic does not fill the line of
+// events waiting for Lua.
+bool radio_link_heard(RadioLink *r);
 
 #ifdef __cplusplus
 }

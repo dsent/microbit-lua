@@ -439,9 +439,13 @@ function listen(name)
     if radio.answered(name) then greet() end
     local piece, starts = radio.rx()
     if piece then
-      -- each message is whole lines: one that starts finds only a line
-      -- whose end was lost on the way, which the other board said
-      if starts then radio_session.buffer = "" end
+      -- each message is whole lines: one that starts drops what follows
+      -- the last line ending, a line whose end was lost on the way, which
+      -- the other board said; the lines of a statement still open stay
+      if starts then
+        radio_session.buffer = string.match(radio_session.buffer, "^.*\n")
+          or ""
+      end
       radio_session.run(typed, piece)
     end
     uBit.sleep(5)
@@ -457,6 +461,15 @@ local function typing()
     c = serial.getCharAsync()
   end
   return table.concat(chars)
+end
+
+--- What the link says goes to the port, all that has come
+local function link_to_port()
+  local piece = radio.rx()
+  while piece do
+    write(piece)
+    piece = radio.rx()
+  end
 end
 
 -- Whoever has the port serves it: the console's own session
@@ -478,24 +491,22 @@ local function port_to_link(value)
       typed_here = string.sub(typed_here, at + 1)
       if not radio.tx(line) then
         -- tx has tried for a quarter of a second; what was typed after
-        -- the line would arrive without it, and goes too
+        -- the line would arrive without it, and goes too. The other board
+        -- may have the line all the same, when only its answers were lost.
+        local after = string.find(typed_here, "[^\r\n]")
         typed_here = ""
-        write("\nThe other micro:bit did not answer, so it did not get: "
-              .. string.sub(line, 1, -2) .. "\nIt may still be running"
-              .. " a command. Type the line again once it has finished.\n")
+        write("\nThe other micro:bit did not answer, so it may not have got: "
+              .. string.sub(line, 1, -2) .. "\n"
+              .. (after and "What you typed after it was not sent either.\n"
+                  or "")
+              .. "It may still be running a command. Once it has finished,"
+              .. " check whether the line ran before you type it again.\n")
         return
       end
+      -- what the other board said meanwhile, before its inbox here fills
+      link_to_port()
       at = string.find(typed_here, "[\r\n]")
     end
-  end
-end
-
---- What the link says goes to the port, all that has come
-local function link_to_port()
-  local piece = radio.rx()
-  while piece do
-    write(piece)
-    piece = radio.rx()
   end
 end
 

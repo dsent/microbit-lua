@@ -252,10 +252,13 @@ static RadioLink board_link = { .air = &test_air }, far_link = { .air = &test_ai
 static Air board_air, far_air;  // what each end hears
 
 // The other board: gone from the air; listening for a call; or busy
-// running a command, its Lua taking nothing from the link; and whether
-// another pair talks on the air after each of its turns. What it took
-// otherwise, and how many answers this one sent.
+// running a command, its Lua taking nothing from the link; answering each
+// piece it takes with "=> " and the piece; with its answers lost on the
+// way; and whether another pair talks on the air after each of its turns.
+// What it took otherwise, how many of its answers failed, and how many
+// answers this one sent.
 static int far_gone, far_listens, far_busy, far_sending, neighbours;
+static int far_echoes, far_echo_fails, far_unheard;
 static char far_heard[1024];
 static int board_acks;
 
@@ -282,7 +285,7 @@ static void air_send(RadioLink *r, const uint8_t *frame, int len) {
       board_acks++;
     if (!far_gone)
       air_put(&far_air, frame, len);
-  } else {
+  } else if (!(far_unheard && frame[0] == KIND_ACK)) {
     air_put(&board_air, frame, len);
   }
 }
@@ -304,10 +307,16 @@ static uint32_t air_now(RadioLink *r) {
   return clock_ms;
 }
 
+// This board's fibers run while either board waits; the other board's own
+// run from this board's waits, where the test drives it
+static void board_fibers(void);
+
 static void air_pause(RadioLink *r, uint32_t ms) {
-  (void)r;
   clock_ms += ms;
-  others_run();
+  if (r == &far_link)
+    board_fibers();
+  else
+    others_run();
 }
 
 static const RadioAir test_air = { air_send, air_recv, air_now, air_pause };
@@ -316,8 +325,8 @@ static const RadioAir test_air = { air_send, air_recv, air_now, air_pause };
 static void board_fibers(void) {
   while (board_air.events > 0) {
     board_air.events--;
-    radio_link_heard(&board_link);
-    post(ID_RADIO, 1);
+    if (radio_link_heard(&board_link))
+      post(ID_RADIO, 1);
   }
 }
 
@@ -343,6 +352,14 @@ static void far_runs(void) {
                                                           &starts)) {
     size_t n = strlen(far_heard);
     snprintf(far_heard + n, sizeof far_heard - n, "%.*s", len, (char *)body);
+    if (far_echoes) {
+      char answer[RADIO_BODY + 8];
+      snprintf(answer, sizeof answer, "=> %.*s\n", len - 1, (char *)body);
+      far_sending = 1;
+      if (!radio_link_tx(&far_link, answer, strlen(answer)))
+        far_echo_fails++;
+      far_sending = 0;
+    }
   }
 }
 
@@ -440,7 +457,7 @@ static void no_link(void) {
   memset(&board_air, 0, sizeof board_air);
   memset(&far_air, 0, sizeof far_air);
   real_link = far_gone = far_listens = far_busy = far_sending = 0;
-  neighbours = 0;
+  neighbours = far_echoes = far_echo_fails = far_unheard = 0;
   far_heard[0] = 0;
   board_acks = 0;
   looks_left = 20;
@@ -1593,7 +1610,7 @@ static void every_drop_counted(void) {
 // listen() serves a board that calls over the radio: a prompt, and the
 // answer to a line. The session it serves is made then: booted, the
 // firmware's script holds no more Lua heap than this, on the 64-bit host.
-#define BOOTED_HEAP 45100
+#define BOOTED_HEAP 45500
 
 static void serving_a_link(void) {
   const char *said;
@@ -1612,11 +1629,15 @@ static void serving_a_link(void) {
          "... and the prompt is back when the caller hangs up");
 }
 
-// The words a line the other micro:bit did not take is said to be lost in
-static const char *not_taken(const char *text, char *words, size_t size) {
-  snprintf(words, size, "\r\nThe other micro:bit did not answer, so it did "
-           "not get: %s\r\nIt may still be running a command. Type the line "
-           "again once it has finished.\r\n", text);
+// The words a line the other micro:bit did not take is said to be lost in,
+// and whether something typed after it went with it
+static const char *not_taken(const char *text, int after, char *words,
+                             size_t size) {
+  snprintf(words, size, "\r\nThe other micro:bit did not answer, so it may "
+           "not have got: %s\r\n%sIt may still be running a command. Once "
+           "it has finished, check whether the line ran before you type it "
+           "again.\r\n", text,
+           after ? "What you typed after it was not sent either.\r\n" : "");
   return words;
 }
 
@@ -1743,6 +1764,94 @@ static void a_line_cut_short(void) {
          "... nothing of it runs, and the next line runs clean");
 }
 
+static void far_inbox(char *text, size_t size);
+
+// A statement typed over several lines, over a real link: each line is a
+// message of its own, and the lines of the statement still open stay
+static void far_types_a_block(void) {
+  far_says("for i = 1, 2 do\n");
+  far_says("x = (x or 0) + i * 100\n");
+  far_says("end\n");
+  far_says("x\n");
+}
+
+static void a_block_over_the_link(void) {
+  fresh();
+  real_link = 1;
+  boot("");
+  far_calls();
+  plan(far_types_a_block);
+  line("listen('gigat')");
+  expect(strcmp(far_heard, "> >> >> > => 300\n> ") == 0,
+         "a statement over several lines runs whole over the link");
+}
+
+// A robot that serves a link, driving while the link fills the air: a
+// button pressed meanwhile is handled when the move is over
+static void press_a_then_lines(void) {
+  int i;
+  post(ID_BUTTON_A, CLICK);
+  for (i = 0; i < 10; i++)
+    far_says("1\n");
+}
+
+static void a_press_while_serving(void) {
+  fresh();
+  real_link = 1;
+  boot("");
+  far_calls();
+  plan(far_sends_a_move);
+  on_move = press_a_then_lines;
+  line("listen('gigat')");
+  expect(strstr(out, "<scroll A>") != NULL,
+         "a press while the robot drives is kept, however much the link "
+         "sends meanwhile");
+}
+
+// Twelve lines pasted at once on the board that called, each answered by
+// the other board: every answer is printed, and none fails
+static void a_paste_over_the_link(void) {
+  char what[64];
+  int i, all = 1;
+  fresh();
+  real_link = 1;
+  far_listens = 1;
+  boot("");
+  line("connect('gigat', 100)");
+  far_echoes = 1;
+  type_in("1\r2\r3\r4\r5\r6\r7\r8\r9\r10\r11\r12\r");
+  for (i = 1; i <= 12; i++) {
+    snprintf(what, sizeof what, "=> %d\r\n", i);
+    all = all && strstr(out, what) != NULL;
+  }
+  expect(all && far_echo_fails == 0 && strstr(out, "did not answer") == NULL,
+         "twelve lines pasted over the link: every answer is printed");
+}
+
+// A line whose every answer is lost reached the other board all the same:
+// it is said that it may not have got it, and what was typed after it
+static void a_line_that_arrived(void) {
+  char words[512], held[256];
+  const char *said;
+  fresh();
+  real_link = 1;
+  far_listens = 1;
+  boot("");
+  line("connect('gigat', 100)");
+  far_busy = 1;
+  far_unheard = 1;
+  said = out + strlen(out);
+  type_in("robot_move(50, 50, 1)\r1+1");
+  expect(strstr(said, not_taken("robot_move(50, 50, 1)", 1, words,
+                                sizeof words)) != NULL,
+         "a line whose answers were all lost may not have been got, and "
+         "what was typed after it was not sent either");
+  far_busy = far_unheard = 0;
+  far_inbox(held, sizeof held);
+  expect(strcmp(held, "robot_move(50, 50, 1)\r") == 0,
+         "... though the other board got it, as the words allow");
+}
+
 // A call from a board whose link is an older version is not answered
 static void an_older_link(void) {
   uint8_t hello[RADIO_HEAD + RADIO_NAME * 2] = { KIND_HELLO, LINK, 0 };
@@ -1799,7 +1908,7 @@ static void a_full_inbox(void) {
   }
   expect(taken, "eight lines go while the other board drives");
   said = line("x = 9");
-  expect(strstr(said, not_taken("x = 9", words, sizeof words)) != NULL,
+  expect(strstr(said, not_taken("x = 9", 0, words, sizeof words)) != NULL,
          "a line that finds the other board's inbox full is said to be "
          "lost, in words");
   far_busy = 0;
@@ -1821,7 +1930,8 @@ static void a_line_not_taken(void) {
   line("connect('gigat', 100)");
   far_gone = 1;
   said = line("robot_move(50, 50, 1)");
-  expect(strstr(said, not_taken("robot_move(50, 50, 1)", words, sizeof words))
+  expect(strstr(said, not_taken("robot_move(50, 50, 1)", 0, words,
+                                 sizeof words))
          != NULL, "a line to a board gone from the air is said to be lost, "
          "and how to send it again");
   far_gone = 0;
@@ -2290,6 +2400,10 @@ int main(int argc, char **argv) {
   serving_a_link();
   lines_during_a_move();
   a_line_cut_short();
+  a_block_over_the_link();
+  a_press_while_serving();
+  a_paste_over_the_link();
+  a_line_that_arrived();
   an_older_link();
   a_full_inbox();
   a_line_not_taken();

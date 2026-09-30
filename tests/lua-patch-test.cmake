@@ -8,7 +8,8 @@
 # the file holds elsewhere, at a patch no longer listed, and at a patch
 # edited since, a hunk dropped or a line changed; and naming the patch at
 # one that no longer fits Lua as it ships, or that is missing, or with no
-# patch tool.
+# patch tool. And the Lua tarball: lua.org's goes on, another stops the
+# build.
 
 set(_patched "${WORK}/patched/lua-5.1.5/src")
 
@@ -230,3 +231,24 @@ execute_process(
     RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
 set(_said "${_out}${_err}")
 stopped("LUA_PATCH_TOOL" "with no patch tool the build says so")
+
+# the tarball, by the SHA256 CMakeLists.txt gives it: lua.org's goes on,
+# anything else stops the build, naming the way back
+string(REGEX MATCH "set\\(LUA_ARCHIVE_SHA256[ \n]+([0-9a-f]+)\\)" _m "${_cmake}")
+set(_sha256 "${CMAKE_MATCH_1}")
+file(WRITE "${WORK}/archive-check.cmake"
+     "include(\"${ROOT}/source/lua-patch.cmake\")\nlua_archive_check()\n")
+function(archive ARCHIVE)
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -DLUA_ARCHIVE=${ARCHIVE}
+                -DLUA_ARCHIVE_SHA256=${_sha256}
+                -P "${WORK}/archive-check.cmake"
+        RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+    set(_rc ${_rc} PARENT_SCOPE)
+    set(_said "${_out}${_err}" PARENT_SCOPE)
+endfunction()
+archive("${ROOT}/libraries/lua-5.1.5.tar.gz")
+check("lua.org's tarball goes on" _rc EQUAL 0 AND _sha256 MATCHES "^[0-9a-f]+$")
+file(WRITE "${WORK}/not-lua.tar.gz" "not Lua")
+archive("${WORK}/not-lua.tar.gz")
+stopped("is not the Lua lua.org ships" "a tarball that is not lua.org's stops the build")

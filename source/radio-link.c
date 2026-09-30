@@ -197,6 +197,7 @@ bool radio_link_call(RadioLink *r, const char *them, const char *us,
   while (r->air->now(r) - start < timeout_ms) {
     if (called_once(r, link, hello)) {
       radio_link_open(r, link, them);
+      r->serving = false;
       return true;
     }
   }
@@ -221,6 +222,7 @@ bool radio_link_called(RadioLink *r, const char *us, const char *from) {
   if (from && memcmp(body + RADIO_NAME, from, RADIO_NAME) != 0)
     return false;
   radio_link_open(r, link, (const char *)body + RADIO_NAME);
+  r->serving = true;
   memcpy(welcome, body + RADIO_NAME, RADIO_NAME);
   memcpy(welcome + RADIO_NAME, us, RADIO_NAME);
   welcome[RADIO_NAME * 2] = VERSION;
@@ -297,7 +299,8 @@ bool radio_link_rx(RadioLink *r, uint8_t body[RADIO_BODY], int *len,
   return false;
 }
 
-void radio_link_heard(RadioLink *r) {
+bool radio_link_heard(RadioLink *r) {
   if (r->link != 0)
     keep(r);
+  return !r->serving;
 }

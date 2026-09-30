@@ -347,17 +347,21 @@ set(LUA_URL https://www.lua.org/ftp/${LUA_TARBALL})
 set(LUA_DIR ${CMAKE_SOURCE_DIR}/${LIB_DEST}/lua-${LUA_VERSION})
 set(LUA_SRC_DIR ${LUA_DIR}/src)
 set(LUA_ARCHIVE ${CMAKE_SOURCE_DIR}/${LIB_DEST}/${LUA_TARBALL})
+# the SHA256 lua.org lists for it
+set(LUA_ARCHIVE_SHA256
+    2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333)
+include("${CMAKE_SOURCE_DIR}/source/lua-patch.cmake")
 
 # download tarball if missing: the Lua the patches are checked against
-# (source/lua-patch.cmake), so it must be lua.org's own, by the SHA256
-# lua.org lists for it
+# (source/lua-patch.cmake), so it must be lua.org's own, by its SHA256; one
+# already here is checked the same way each time the build is configured
 if(NOT EXISTS ${LUA_ARCHIVE})
     message(STATUS "Downloading Lua ${LUA_VERSION}...")
     file(DOWNLOAD
         ${LUA_URL}
         ${LUA_ARCHIVE}
         SHOW_PROGRESS
-        EXPECTED_HASH SHA256=2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333
+        EXPECTED_HASH SHA256=${LUA_ARCHIVE_SHA256}
         STATUS _lua_download
     )
     list(GET _lua_download 0 _lua_download_rc)
@@ -368,6 +372,7 @@ if(NOT EXISTS ${LUA_ARCHIVE})
                 "again.")
     endif()
 endif()
+lua_archive_check()
 
 # extract if missing
 if(NOT EXISTS ${LUA_DIR})
@@ -383,7 +388,6 @@ endif()
 # once each by lua_patch_apply (source/lua-patch.cmake). To be replaced by
 # commits in the Lua fork.
 set(LUA_PATCH_DIR "${CMAKE_SOURCE_DIR}/source")
-include("${CMAKE_SOURCE_DIR}/source/lua-patch.cmake")
 
 # Make LUA_NUMBER overridable (LUA_NUMBER_IS_FLOAT) and add float-tuned number
 # formatting/parsing.

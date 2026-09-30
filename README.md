@@ -284,25 +284,39 @@ robot drives is taken at once, waits in the board's inbox, and runs when the
 move is over, after the lines before it; the prompt comes back once it has
 run. The inbox holds 8 pieces, 226 B of the board's heap made when the first
 link opens. A piece that finds it full is not taken, and neither is one sent
-to a board that is gone: the sending board says `The other micro:bit did not
-answer, so it did not get:` and the line, and drops what was typed after it.
-A piece that comes again, because the answer to it was lost, is answered
-again and dropped. Another pair's link on the same group is ignored.
+to a board that is gone. The board that called then says `The other
+micro:bit did not answer, so it may not have got:` and the line, and drops
+what was typed after it, saying so when that held more than a line ending;
+it tells the person to check whether the line ran before typing it again,
+since the other board may have taken the line and only its answers been
+lost. A piece that comes again, because the answer to it was lost, is
+answered again and dropped. Another pair's link on the same group is
+ignored. The board that called prints what the other board says as it
+comes, and between the lines it sends, so its own inbox does not fill while
+a paste goes out.
 
 The first piece of each message is marked, and `rx()` returns with a piece
 whether it starts a message. The link's REPL is sent whole lines, one to a
-message, so a piece that starts a message drops what is left of a line whose
-end never came: a line said to be lost never runs in part, and the next one
-runs as it was sent. A call carries the link's version: a board whose
-firmware has an older link is not answered, and does not answer, so
-`connect` says `Connection timed out.`
+message, so a piece that starts a message drops what follows the last line
+ending: a line whose end never came. A line said to be lost never runs in
+part, the next one runs as it was sent, and the lines of a statement still
+open at `>>` stay. A call carries the link's version: a board whose firmware
+has an older link is not answered, and does not answer, so `connect` says
+`Connection timed out.`
 
-Two cases the link does not cover. A command that runs Lua without ever
-waiting lets no fiber run, so the pieces sent meanwhile wait in the radio's
-own queue of 4; a copy of one taken after the command may finish a line the
-sending board has already said was lost. And once a board has opened a link,
-its fiber takes every datagram that comes, so a program there that reads the
-radio itself with `recv` gets none.
+While a board serves a link, the radio's events do not reach `on_event`:
+`listen()` takes what comes without them, and the link's traffic does not
+push a button press out of the line of events waiting while the robot
+drives.
+
+Three cases the link does not cover. A line said to be lost has arrived
+when every answer to its last piece was lost on the way: it runs, and typed
+again, it runs twice. A command that runs Lua without ever waiting lets no
+fiber run, so the pieces sent meanwhile wait in the radio's own queue of 4;
+a copy of one taken after the command may finish a line the sending board
+has already said was lost. And once a board has opened a link, its fiber
+takes every datagram that comes, so a program there that reads the radio
+itself with `recv` gets none.
 
 
 ## TPBot
@@ -333,7 +347,9 @@ Classic at once.
   as plain `patch` puts them, change nothing a second time and finish a file
   patched in part; a file changed otherwise, or holding a patch no longer
   listed or edited since, stops the build naming the way back, and a patch
-  that no longer fits Lua, a missing one, or no `patch` tool is named.
+  that no longer fits Lua, a missing one, or no `patch` tool is named; a Lua
+  tarball in `libraries/` that is not lua.org's, by its SHA256, stops the
+  build at every configure.
 
 It needs `cc`, `patch`, `cmake`, and the Lua tarball a firmware build leaves
 in `libraries/`, which it patches as the build does.

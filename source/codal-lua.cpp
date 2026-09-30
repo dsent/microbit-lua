@@ -1204,7 +1204,9 @@ static const RadioAir radio_air = {
     radio_air_send, radio_air_recv, radio_air_now, radio_air_pause
 };
 
-static RadioLink radio_link = { &radio_air, 0, 0, 0, {0}, {0}, 0, NULL };
+static RadioLink radio_link = {
+    &radio_air, 0, 0, 0, false, {0}, {0}, 0, NULL
+};
 
 /* A board's friendly name from a Lua argument. Names are five
  * letters, and the frames carry exactly five, so anything else
@@ -1636,8 +1638,9 @@ static void lua_event_handler_fiber(void *arg) {
   LuaEvent e = { event->source, event->value, (uint32_t)event->timestamp };
   delete event;
   // the far end of a link is answered whatever Lua is doing
-  if (e.source == DEVICE_ID_RADIO && e.value == MICROBIT_RADIO_EVT_DATAGRAM)
-    radio_link_heard(&radio_link);
+  if (e.source == DEVICE_ID_RADIO && e.value == MICROBIT_RADIO_EVT_DATAGRAM
+      && !radio_link_heard(&radio_link))
+    return;
   lua_event_arrived(e);
 }
 

@@ -18,6 +18,17 @@
 
 find_program(LUA_PATCH_TOOL patch REQUIRED)
 
+# lua_archive_check() stops the build when LUA_ARCHIVE is not the Lua whose
+# SHA256 is LUA_ARCHIVE_SHA256, lua.org's own.
+function(lua_archive_check)
+    file(SHA256 "${LUA_ARCHIVE}" _sha256)
+    if(NOT _sha256 STREQUAL LUA_ARCHIVE_SHA256)
+        message(FATAL_ERROR "${LUA_ARCHIVE} is not the Lua lua.org ships: "
+                "its SHA256 is ${_sha256}, not ${LUA_ARCHIVE_SHA256}. Delete "
+                "it, and the next build downloads it again.")
+    endif()
+endfunction()
+
 function(lua_patch FILE PATCH)
     set_property(GLOBAL APPEND PROPERTY LUA_PATCHES "${FILE}|${PATCH}")
 endfunction()
