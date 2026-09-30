@@ -81,6 +81,10 @@ int lua_events_line(lua_State *L);
 // lets other fibers run.
 void lua_events_show_error(const char *message, bool wait);
 
+// The port armed for its next event, as microbit.serial.eventAfterAsync(1)
+// arms it
+void lua_events_arm_port(void);
+
 // The C stack in use, in bytes
 uint32_t lua_events_stack_used(void);
 uint32_t lua_events_now(void);

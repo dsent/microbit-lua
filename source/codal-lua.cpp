@@ -1716,6 +1716,10 @@ extern "C" void lua_events_show_error(const char *message, bool wait) {
     uBit.display.scrollAsync(message);
 }
 
+extern "C" void lua_events_arm_port(void) {
+  uBit.serial.eventAfter(1, ASYNC);
+}
+
 extern "C" uint32_t lua_events_stack_used(void) {
   return stack_probe_current();
 }

@@ -17,6 +17,9 @@ require("tpbot")
 -- out through gmatch.
 local pcall, gmatch = pcall, string.gmatch
 local loadstring, setfenv = loadstring, setfenv
+-- and the port's own: arming it for its next event, and marking the
+-- command read from it as the REPL's
+local arm_port, event_repl = serial.eventAfterAsync, uBit.eventRepl
 local HEAD_MATCH = uBit.CODAL_SERIAL_EVT_HEAD_MATCH
 local CLICK = uBit.DEVICE_BUTTON_EVT_CLICK
 local LONG_CLICK = uBit.DEVICE_BUTTON_EVT_LONG_CLICK
@@ -265,7 +268,7 @@ end
 local serial_session = make_session({
   crlf_before_result = true,
   getChar = serial.getCharAsync,
-  arm = function() serial.eventAfterAsync(1) end
+  arm = function() arm_port(1) end
 })
 
 local handler = { }
@@ -321,7 +324,7 @@ local function port_to_console(value)
   if value == HEAD_MATCH then
     -- a command's sleeps handle events, whichever on_event passed the
     -- port's event on to here
-    uBit.eventRepl()
+    event_repl()
     local c
     repeat
       serial_session.run(read_port, c)
@@ -442,7 +445,7 @@ end
 local function port_to_link(value)
   if value == HEAD_MATCH then
     local text = typing()
-    serial.eventAfterAsync(1)
+    arm_port(1)
     write(text)
     typed_here = typed_here .. text
     local at = string.find(typed_here, "[\r\n]")

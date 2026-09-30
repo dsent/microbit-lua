@@ -130,6 +130,10 @@ void lua_events_show_error(const char *message, bool wait) {
     then();
 }
 
+void lua_events_arm_port(void) {
+  armed = 1;
+}
+
 // The stack in use a safe point sees: 0, or what a test says
 static uint32_t stack_used_now;
 
@@ -733,6 +737,31 @@ static void globals_taken_away(void) {
              "prompt, and the REPL answers", COMPILER[i]);
     expect(strstr(said, "=> 42\r\n> ") != NULL, what);
   }
+  // The port's own functions, put out of reach: the REPL keeps its own
+  for (i = 0; i < 2; i++) {
+    static const char *const PORT[] = {
+      "microbit.eventRepl", "microbit.serial.eventAfterAsync" };
+    fresh();
+    boot("");
+    snprintf(take, sizeof take, "%s = false", PORT[i]);
+    line(take);
+    line("6*8");
+    said = line("6*7");
+    snprintf(what, sizeof what, "the REPL answers after %s", take);
+    expect(armed && strstr(said, "=> 42\r\n> ") != NULL, what);
+  }
+  // An on_event that fails on the port's event, before it passes it on to
+  // the REPL: the port is armed all the same
+  fresh();
+  boot("");
+  line("local original = on_event _G.on_event = function(s, v, t) "
+       "if s == 12 and not failed then failed = true error('once') end "
+       "original(s, v, t) end");
+  line("6*8");
+  said = line("6*7");
+  expect(armed && strstr(out, "<error, going on ") != NULL
+         && strstr(said, "=> 42\r\n> ") != NULL,
+         "the port is armed after an on_event fails on its event");
   fresh();
   boot("");
   line("_G.pcall = nil");
