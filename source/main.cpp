@@ -172,8 +172,10 @@ int main() {
 
     LUA_MEM_REPORT(L, "api");
 
+    // Its mistakes are "program: ...", with no line: the line info is
+    // stripped below (source/ldebug-no-line.patch)
     if (luaL_loadbuffer(L, (const char*)__lua_meta.start,
-                        __lua_meta.size, "embedded") == LUA_OK)
+                        __lua_meta.size, "=program") == LUA_OK)
     {
         LUA_MEM_REPORT(L, "loaded");
         report_stack("loaded");

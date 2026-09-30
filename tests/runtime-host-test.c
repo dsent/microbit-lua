@@ -469,7 +469,7 @@ static void boot_script(const char *text, size_t length) {
   lua_settop(L, 0);
   lua_modules_open(L, modules);
   lua_events_open(L, &events_config);
-  if (luaL_loadbuffer(L, text, length, "embedded")) {
+  if (luaL_loadbuffer(L, text, length, "=program")) {
     fprintf(stderr, "%s\n", lua_tostring(L, -1));
     exit(2);
   }
@@ -1581,6 +1581,25 @@ static void a_port_event_stranded(void) {
          "... and one that waits for a running call is handed on once");
 }
 
+// A mistake the VM finds in the script at boot, stripped of its lines, is
+// named "program", with no line; a line typed at the REPL keeps its own
+static void mistakes_named(void) {
+  const char *said;
+  fresh();
+  boot_program("local m = require('microbit')\n"
+               "m.nothing.x = 1\n");
+  expect(strstr(out, "\r\nRuntime error: program: attempt to index field "
+                "'nothing' (a nil value)\r\n") != NULL
+         && strstr(out, ":0:") == NULL,
+         "a mistake in the stripped script at boot is named \"program\", "
+         "with no line");
+  fresh();
+  boot("");
+  said = line("local t t.x = 1");
+  expect(strstr(said, "[string \"REPL\"]:1: attempt to index local 't'")
+         != NULL, "... and one at the REPL keeps its line");
+}
+
 // A sleep deep in the stack runs no handlers: their events wait for the
 // call to return
 static void deep_sleeps(void) {
@@ -1662,6 +1681,7 @@ int main(int argc, char **argv) {
   a_move_that_fails();
   mistakes_out_of_memory();
   a_port_event_stranded();
+  mistakes_named();
   deep_sleeps();
   codex_round_nine();
   programs_alone();

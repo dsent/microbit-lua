@@ -7,7 +7,7 @@
 // the same bytes to the same addresses, sleep as long, return the same
 // values and stop on the same message. The one difference let through:
 // the position the Lua put in front of a message it raised itself
-// ("[string "embedded"]:0: "), which the C has no line to give.
+// ("program: "), which the C has no chunk to name.
 //
 // Usage: tpbot-host-test tests/tpbot-reference.lua
 // With TPBOT_TEST_SHOW set in the environment it prints every case.
@@ -170,7 +170,7 @@ static lua_State *state(int lua) {
   lua_settop(L, 0);
   board(L);
   if (lua) {
-    if (luaL_loadbuffer(L, reference_text, reference_length, "embedded")) {
+    if (luaL_loadbuffer(L, reference_text, reference_length, "=program")) {
       fprintf(stderr, "%s\n", lua_tostring(L, -1));
       exit(2);
     }
@@ -203,7 +203,7 @@ static int positions;
 static void run(int lua, const char *code, char *out, size_t size) {
   lua_State *L = state(lua);
   const char *said;
-  static const char POSITION[] = "error [string \"embedded\"]:0: ";
+  static const char POSITION[] = "error program: ";
   bus.writes = 0;
   bus.log[0] = 0;
   lua_getglobal(L, "run_case");

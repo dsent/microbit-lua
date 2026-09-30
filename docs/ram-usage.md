@@ -176,8 +176,11 @@ Implemented in `source/lua-strip-debug.c` and called from `source/main.cpp`
 right after `luaL_loadbuffer` succeeds. `lua_strip_debug()` walks the loaded
 `Proto` recursively and frees `lineinfo`, `locvars`, and `upvalues` with
 `luaM_freearray`, zeroing the counts. The `debug` library is not opened, so the
-only loss is line numbers in errors raised by the embedded functions. REPL
-chunks compiled later keep their debug info.
+only loss is line numbers in errors raised by the embedded functions: the
+chunk is loaded as `=program`, and such an error reads `program: attempt to
+index field 'serial' (a nil value)`, with no line
+(`source/ldebug-no-line.patch`). REPL chunks compiled later keep their debug
+info and their lines.
 
 ### S4. Resolve constants through `__index` — done
 
