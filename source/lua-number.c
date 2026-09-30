@@ -237,7 +237,7 @@ int luai_numformat(char *s, const char *form, double x) {
 // A number as tostring and .. show it: a whole number that fits in 32 bits
 // in full, any other with 7 significant digits.
 int luai_number2str(char *s, double x) {
-    if (x == floor(x) && fabs(x) < 2147483648.0)
+    if (x == floor(x) && x >= -2147483648.0 && x < 2147483648.0)
         return luai_numformat(s, "%.0f", x);
     return luai_numformat(s, "%.7g", x);
 }

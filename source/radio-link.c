@@ -3,20 +3,24 @@
 // A link over radio datagrams.
 //
 // Datagrams are 32 bytes and anyone on the group hears them all, so a frame
-// says what it is and which link it belongs to. The link number is drawn by
-// the side that calls; two pairs on one group draw different numbers and
-// ignore each other's traffic. HELLO and WELCOME carry both ends' names in
-// a fixed ten bytes, then the version of this protocol: a board with
-// another version does not answer, and one that calls it is not answered.
+// says what it is and which link it belongs to. The link's number is drawn
+// by the side that calls, 32 bits at random: two pairs on one group draw
+// different numbers, but for one time in four billion, and ignore each
+// other's traffic. HELLO and WELCOME carry both ends' names in a fixed ten
+// bytes, then the version of this protocol: a board with another version
+// does not answer, and one that calls it is not answered.
 //
 // A message goes piece by piece, each sent again until the far end answers
 // it. Its first piece is marked, so the far end knows where a message
-// starts even when the one before it lost its end. The far end answers from the fiber that carries the radio's event,
-// whatever its Lua is doing, and keeps the piece in its inbox for rx(): a
-// line sent while it runs a command waits there, and runs after it. A piece
-// that finds the inbox full is dropped unanswered, so the sender, once its
-// tries are over, knows the piece was lost. A piece that comes again,
-// because its answer was lost, is answered again and dropped.
+// starts even when the one before it lost its end. The far end answers from
+// the fiber that carries the radio's event, whatever its Lua is doing, and
+// keeps the piece in its inbox for rx(): a line sent while it runs a command
+// waits there, and runs after it. A piece that finds the inbox full is
+// dropped unanswered, so the sender, once its tries are over, knows the
+// piece was lost. A piece that comes again, because its answer was lost, is
+// answered again and dropped. Pieces are numbered in 16 bits: a sender that
+// fails comes back round to the number the far end last took only after
+// 65,536 pieces, over four hours of tries.
 //
 // The inbox is made when the first link opens, so a program that never
 // links pays nothing for it.
@@ -36,8 +40,9 @@
 #define ACK     0xA4
 #define FIRST   0xA5    // a piece that starts one
 
-// Version 1 marked no first pieces
-#define VERSION 2
+// Version 1 marked no first pieces; version 2 numbered links and pieces in
+// a byte each
+#define VERSION 3
 
 // What a HELLO or a WELCOME carries: two names and the version
 #define CALL (RADIO_NAME * 2 + 1)
@@ -79,14 +84,23 @@ static bool inbox_take(RadioLink *r, uint8_t *body, int *len, bool *starts) {
   return true;
 }
 
+static uint32_t link_of(const uint8_t *b) {
+  return (uint32_t)b[1] | (uint32_t)b[2] << 8 | (uint32_t)b[3] << 16
+    | (uint32_t)b[4] << 24;
+}
+
 // kind, link, number, then body
-static void put(RadioLink *r, uint8_t kind, uint8_t link, uint8_t num,
+static void put(RadioLink *r, uint8_t kind, uint32_t link, uint16_t num,
                 const void *body, int len) {
   uint8_t f[RADIO_FRAME];
   if (len > RADIO_BODY) len = RADIO_BODY;
   f[0] = kind;
-  f[1] = link;
-  f[2] = num;
+  f[1] = (uint8_t)link;
+  f[2] = (uint8_t)(link >> 8);
+  f[3] = (uint8_t)(link >> 16);
+  f[4] = (uint8_t)(link >> 24);
+  f[5] = (uint8_t)num;
+  f[6] = (uint8_t)(num >> 8);
   if (len > 0) memcpy(f + RADIO_HEAD, body, len);
   r->air->send(r, f, len + RADIO_HEAD);
 }
@@ -94,14 +108,14 @@ static void put(RadioLink *r, uint8_t kind, uint8_t link, uint8_t num,
 // Is this frame the one being waited for, and if so, what does it carry?
 // A piece is wanted whether it starts a message or not, and says which in
 // kind. Anything longer than a frame is not ours.
-static bool wanted(const uint8_t *b, int n, uint8_t *kind, uint8_t link,
-                   uint8_t *from, uint8_t *num, uint8_t *body, int *len) {
+static bool wanted(const uint8_t *b, int n, uint8_t *kind, uint32_t link,
+                   uint32_t *from, uint16_t *num, uint8_t *body, int *len) {
   if (n < RADIO_HEAD || n > RADIO_FRAME) return false;
   if (b[0] != *kind && !(*kind == DATA && b[0] == FIRST)) return false;
+  if (link != 0 && link_of(b) != link) return false;
   *kind = b[0];
-  if (link != 0 && b[1] != link) return false;
-  if (from) *from = b[1];
-  if (num) *num = b[2];
+  if (from) *from = link_of(b);
+  if (num) *num = (uint16_t)(b[5] | b[6] << 8);
   if (body) memcpy(body, b + RADIO_HEAD, n - RADIO_HEAD);
   if (len) *len = n - RADIO_HEAD;
   return true;
@@ -116,7 +130,7 @@ static bool worth_holding(RadioLink *r, const uint8_t *b, int n) {
   case HELLO: case WELCOME:
     return true;
   case DATA: case FIRST: case ACK:
-    return r->link != 0 && b[1] == r->link;
+    return r->link != 0 && link_of(b) == r->link;
   default:
     return false;
   }
@@ -127,8 +141,8 @@ static bool worth_holding(RadioLink *r, const uint8_t *b, int n) {
 // came. Reading a datagram removes it, so one read while another is
 // awaited, an ACK while the fiber of the radio's event looks for a piece,
 // waits in the held slot for its reader.
-static int take(RadioLink *r, uint8_t *kind, uint8_t link, uint8_t *from,
-                uint8_t *num, uint8_t *body, int *len) {
+static int take(RadioLink *r, uint8_t *kind, uint32_t link, uint32_t *from,
+                uint16_t *num, uint8_t *body, int *len) {
   uint8_t f[RADIO_AIR_MAX];
   int n;
   if (r->held_len > 0
@@ -146,7 +160,7 @@ static int take(RadioLink *r, uint8_t *kind, uint8_t link, uint8_t *from,
   return 0;
 }
 
-void radio_link_open(RadioLink *r, uint8_t link, const char *peer) {
+void radio_link_open(RadioLink *r, uint32_t link, const char *peer) {
   r->link = link;
   r->held_len = 0;
   r->out = 0;
@@ -164,7 +178,7 @@ void radio_link_open(RadioLink *r, uint8_t link, const char *peer) {
 // share a kind and a link number with it, from some other board on the
 // air, is not taken for one. hello is the call: the board called, then
 // this one, then the version.
-static bool welcomed(RadioLink *r, uint8_t link, const char *hello) {
+static bool welcomed(RadioLink *r, uint32_t link, const char *hello) {
   uint8_t kind = WELCOME, body[RADIO_BODY];
   int len;
   if (take(r, &kind, link, NULL, NULL, body, &len) != 1)
@@ -176,7 +190,7 @@ static bool welcomed(RadioLink *r, uint8_t link, const char *hello) {
 }
 
 // Call once, then wait a moment for the answer
-static bool called_once(RadioLink *r, uint8_t link, const char *hello) {
+static bool called_once(RadioLink *r, uint32_t link, const char *hello) {
   uint32_t start;
   put(r, HELLO, link, 0, hello, CALL);
   start = r->air->now(r);
@@ -188,7 +202,7 @@ static bool called_once(RadioLink *r, uint8_t link, const char *hello) {
 }
 
 bool radio_link_call(RadioLink *r, const char *them, const char *us,
-                     uint8_t link, uint32_t timeout_ms) {
+                     uint32_t link, uint32_t timeout_ms) {
   char hello[CALL];
   uint32_t start = r->air->now(r);
   memcpy(hello, them, RADIO_NAME);
@@ -207,13 +221,16 @@ bool radio_link_call(RadioLink *r, const char *them, const char *us,
 // A HELLO addressed to this board, from the board it waits for, or from
 // any if it waits for none, in this version: answer it and take the link
 // it names. A call from anyone else is left unanswered, so the caller does
-// not think it got through. Any link the call replaces is dropped: the
-// other end has started over, which is how a reset board finds its way
-// back.
+// not think it got through. Any other link the call replaces is dropped:
+// the other end has started over, drawing a new number, which is how a
+// reset board finds its way back. A call for the link already open is the
+// caller calling again before the answer reached it: answered again, and
+// what the link holds stays.
 bool radio_link_called(RadioLink *r, const char *us, const char *from) {
   uint8_t kind = HELLO, body[RADIO_BODY];
   char welcome[CALL];
-  uint8_t link;
+  uint32_t link;
+  bool again;
   int len;
   if (take(r, &kind, 0, &link, NULL, body, &len) != 1
       || len != CALL
@@ -221,13 +238,17 @@ bool radio_link_called(RadioLink *r, const char *us, const char *from) {
       || memcmp(body, us, RADIO_NAME) != 0) return false;
   if (from && memcmp(body + RADIO_NAME, from, RADIO_NAME) != 0)
     return false;
-  radio_link_open(r, link, (const char *)body + RADIO_NAME);
-  r->serving = true;
+  again = r->serving && link == r->link
+    && memcmp(body + RADIO_NAME, r->peer, RADIO_NAME) == 0;
+  if (!again) {
+    radio_link_open(r, link, (const char *)body + RADIO_NAME);
+    r->serving = true;
+  }
   memcpy(welcome, body + RADIO_NAME, RADIO_NAME);
   memcpy(welcome + RADIO_NAME, us, RADIO_NAME);
   welcome[RADIO_NAME * 2] = VERSION;
   put(r, WELCOME, link, 0, welcome, CALL);
-  return true;
+  return !again;
 }
 
 // A piece the far end sent, if one came: answered and kept when there is
@@ -236,7 +257,7 @@ bool radio_link_called(RadioLink *r, const char *us, const char *from) {
 // could not give, a piece is left for rx.
 static void keep(RadioLink *r) {
   uint8_t kind = DATA, body[RADIO_BODY];
-  uint8_t num;
+  uint16_t num;
   int len;
   if (r->inbox == NULL
       || take(r, &kind, r->link, NULL, &num, body, &len) != 1)
@@ -257,7 +278,8 @@ static bool one(RadioLink *r, uint8_t kind, const char *body, int len) {
     put(r, kind, r->link, r->out, body, len);
     start = r->air->now(r);
     while (r->air->now(r) - start < WAIT) {
-      uint8_t got = ACK, num;
+      uint8_t got = ACK;
+      uint16_t num;
       if (take(r, &got, r->link, NULL, &num, NULL, NULL) == 1
           && num == r->out) return true;
       keep(r);
@@ -284,7 +306,8 @@ bool radio_link_rx(RadioLink *r, uint8_t body[RADIO_BODY], int *len,
                    bool *starts) {
   if (inbox_take(r, body, len, starts)) return true;
   while (r->link != 0) {
-    uint8_t kind = DATA, num;
+    uint8_t kind = DATA;
+    uint16_t num;
     int got = take(r, &kind, r->link, NULL, &num, body, len);
     if (got < 0) break;
     if (got == 1) {

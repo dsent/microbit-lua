@@ -478,11 +478,13 @@ end
 -- A line at a time goes over the link: tx waits to be
 -- answered, and a character each would spend that wait while
 -- the next ones pile up in the port. So the typing is echoed
--- as it comes and held until its line is whole.
+-- as it comes and held until its line is whole. The port is
+-- armed before it is read: a character that comes after the
+-- read raises the event, and one before it is read now.
 local function port_to_link(value)
   if value == HEAD_MATCH then
-    local text = typing()
     arm_port(1)
+    local text = typing()
     write(text)
     typed_here = typed_here .. text
     local at = string.find(typed_here, "[\r\n]")
@@ -491,9 +493,10 @@ local function port_to_link(value)
       typed_here = string.sub(typed_here, at + 1)
       if not radio.tx(line) then
         -- tx has tried for a quarter of a second; what was typed after
-        -- the line would arrive without it, and goes too. The other board
-        -- may have the line all the same, when only its answers were lost.
-        local after = string.find(typed_here, "[^\r\n]")
+        -- the line would arrive without it, and goes too, what came into
+        -- the port meanwhile with it. The other board may have the line
+        -- all the same, when only its answers were lost.
+        local after = string.find(typed_here .. typing(), "[^\r\n]")
         typed_here = ""
         write("\nThe other micro:bit did not answer, so it may not have got: "
               .. string.sub(line, 1, -2) .. "\n"

@@ -107,6 +107,8 @@ int main(void) {
     expect_text(123456789, "123456792");
     expect_text(2147483520.0f, "2147483520");
     expect_text(2147483648.0f, "2.147484e+09");
+    expect_text(-2147483648.0f, "-2147483648");
+    expect_text(-2147483904.0f, "-2.147484e+09");
     expect_text(1e10f, "1e+10");
     expect_text(3.4e38f, "3.4e+38");
     expect_text(1e-45f, "1.401298e-45");

@@ -270,53 +270,55 @@ fails on the port's event, and has what already waits there read.
 
 `listen(name)` at the prompt waits for the board named `name` to call, then
 serves it a REPL of its own over the radio. `connect(name, timeout)` on that
-board calls, and from then on what is typed there goes over the link a line
-at a time, and what comes back is printed. The link itself is
-`microbit.radio`'s `connect`, `listen`, `answered`, `tx` and `rx`, in
-`source/radio-link.c`.
+board calls, and from then on what is typed there goes over the link a line at a
+time, and what comes back is printed. The link itself is `microbit.radio`'s
+`connect`, `listen`, `answered`, `tx` and `rx`, in `source/radio-link.c`.
 
-`tx(message)` sends the message in pieces of 26 bytes, each sent again every
-30 ms, 8 times at most, until the other board takes it, and returns true
-once every piece is taken: the message has arrived, and a line in it may not
-have run yet. A board takes a piece whatever its Lua is doing, in the fiber
-that carries the radio's event, which runs no Lua: a line sent while the
-robot drives is taken at once, waits in the board's inbox, and runs when the
-move is over, after the lines before it; the prompt comes back once it has
-run. The inbox holds 8 pieces, 226 B of the board's heap made when the first
-link opens. A piece that finds it full is not taken, and neither is one sent
-to a board that is gone. The board that called then says `The other
-micro:bit did not answer, so it may not have got:` and the line, and drops
-what was typed after it, saying so when that held more than a line ending;
-it tells the person to check whether the line ran before typing it again,
-since the other board may have taken the line and only its answers been
-lost. A piece that comes again, because the answer to it was lost, is
-answered again and dropped. Another pair's link on the same group is
-ignored. The board that called prints what the other board says as it
-comes, and between the lines it sends, so its own inbox does not fill while
-a paste goes out.
+`tx(message)` sends the message in pieces of 22 bytes, each sent again every 30
+ms, 8 times at most, until the other board takes it, and returns true once every
+piece is taken: the message has arrived, and a line in it may not have run yet.
+A board takes a piece whatever its Lua is doing: the fiber that carries the
+radio's event answers the piece and keeps it in C before it hands the event on,
+and while another Lua call runs, the event only waits for it. A line sent while
+the robot drives is taken at once, waits in the board's inbox, and runs when the
+move is over, after the lines before it; the prompt comes back once it has run.
+The inbox holds 8 pieces, 194 B of the board's heap made when the first link
+opens. A piece that finds it full is not taken, and neither is one sent to a
+board that is gone. The board that called then says `The other micro:bit did not
+answer, so it may not have got:` and the line, and drops what was typed after
+it, what reached the port while it tried included, saying so when that held more
+than a line ending; it tells the person to check whether the line ran before
+typing it again, since the other board may have taken the line and only its
+answers been lost. A piece that comes again, because the answer to it was lost,
+is answered again and dropped; pieces are numbered in 16 bits, so a run of lost
+ones does not come round to a number the other board has taken. Every frame
+carries the link's number, 32 bits the calling board draws at random, so another
+pair on the same group, but for one draw in four billion, is ignored. A call
+repeated for the open link, its answer having come late, is answered again, and
+the link keeps what it took. The board that called prints what the other board
+says as it comes, and between the lines it sends, so its own inbox does not fill
+while a paste goes out.
 
 The first piece of each message is marked, and `rx()` returns with a piece
 whether it starts a message. The link's REPL is sent whole lines, one to a
 message, so a piece that starts a message drops what follows the last line
-ending: a line whose end never came. A line said to be lost never runs in
-part, the next one runs as it was sent, and the lines of a statement still
-open at `>>` stay. A call carries the link's version: a board whose firmware
-has an older link is not answered, and does not answer, so `connect` says
-`Connection timed out.`
+ending: a line whose end never came. A line said to be lost never runs in part,
+the next one runs as it was sent, and the lines of a statement still open at
+`>>` stay. A call carries the link's version, 3: a board whose firmware has an
+older link is not answered, and does not answer, so `connect` says `Connection
+timed out.`
 
 While a board serves a link, the radio's events do not reach `on_event`:
-`listen()` takes what comes without them, and the link's traffic does not
-push a button press out of the line of events waiting while the robot
-drives.
+`listen()` takes what comes without them, and the link's traffic does not push a
+button press out of the line of events waiting while the robot drives.
 
-Three cases the link does not cover. A line said to be lost has arrived
-when every answer to its last piece was lost on the way: it runs, and typed
-again, it runs twice. A command that runs Lua without ever waiting lets no
-fiber run, so the pieces sent meanwhile wait in the radio's own queue of 4;
-a copy of one taken after the command may finish a line the sending board
-has already said was lost. And once a board has opened a link, its fiber
-takes every datagram that comes, so a program there that reads the radio
-itself with `recv` gets none.
+Three cases the link does not cover. A line said to be lost has arrived when
+every answer to its last piece was lost on the way: it runs, and typed again, it
+runs twice. A command that runs Lua without ever waiting lets no fiber run, so
+the pieces sent meanwhile wait in the radio's own queue of 4; a copy of one
+taken after the command may finish a line the sending board has already said was
+lost. And once a board has opened a link, its fiber takes every datagram that
+comes, so a program there that reads the radio itself with `recv` gets none.
 
 
 ## TPBot

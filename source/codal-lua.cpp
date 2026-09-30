@@ -1208,6 +1208,14 @@ static RadioLink radio_link = {
     &radio_air, 0, 0, 0, false, {0}, {0}, 0, NULL
 };
 
+/* A link's number: 32 bits at random, never 0 */
+static uint32_t radio_draw(void)
+{
+    uint32_t link = (uint32_t)uBit.random(0x10000) << 16
+        | (uint32_t)uBit.random(0x10000);
+    return link != 0 ? link : 1;
+}
+
 /* A board's friendly name from a Lua argument. Names are five
  * letters, and the frames carry exactly five, so anything else
  * is a mistake in the call, said at once. */
@@ -1283,7 +1291,7 @@ static const char *radio_opt_name(lua_State *L, int arg)
 /* connect(friendlyName, timeout_ms) -> boolean */			\
     F(connect,    { lua_events_before_wait(); const char *them = radio_name(L, 1);		\
                     int timeout = luaL_optint(L, 2, RADIO_TIMEOUT);	\
-                    uint8_t link = (uint8_t)(uBit.random(255) + 1);	\
+                    uint32_t link = radio_draw();			\
                     lua_pushboolean(L, radio_link_call(&radio_link, them,	\
                       microbit_friendly_name(), link,			\
                       timeout > 0 ? (uint32_t)timeout : 0));		\

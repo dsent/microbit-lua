@@ -20,8 +20,10 @@ extern "C" {
 // The radio is documented to carry 32 bytes and the driver reports as many
 // sent, but past 29 the tail arrives zeroed: measured between two boards,
 // 28 and 29 come through whole, 30 loses its last byte and 31 and 32 lose
-// two. So a frame is 29, and the driver's own limit is never reached.
-#define RADIO_HEAD  3
+// two. So a frame is 29, and the driver's own limit is never reached. Its
+// head is the kind of frame, the link's number (4 bytes) and the piece's
+// number (2 bytes).
+#define RADIO_HEAD  7
 #define RADIO_FRAME 29
 #define RADIO_BODY  (RADIO_FRAME - RADIO_HEAD)
 
@@ -47,9 +49,9 @@ typedef struct {
 
 struct RadioLink {
   const RadioAir *air;
-  uint8_t link;                 // 0 while no link is open
-  uint8_t out;                  // number of the last piece sent
-  uint8_t in;                   // number of the last piece taken
+  uint32_t link;                // 0 while no link is open
+  uint16_t out;                 // number of the last piece sent
+  uint16_t in;                  // number of the last piece taken
   bool serving;                 // the other board called this one
   char peer[RADIO_NAME + 1];
   // A frame taken off the air that the reader did not want, kept until
@@ -61,15 +63,18 @@ struct RadioLink {
 
 // Both ends start a link the same way: numbering from nothing, the inbox
 // made if it is not yet, and emptied
-void radio_link_open(RadioLink *r, uint8_t link, const char *peer);
+void radio_link_open(RadioLink *r, uint32_t link, const char *peer);
 
 // Calls them, as us, on the given link number until they answer or the
-// time is up
+// time is up. The number is the caller's to draw, at random and not 0: it
+// is all that tells this pair's frames from another's on the same group.
 bool radio_link_call(RadioLink *r, const char *them, const char *us,
-                     uint8_t link, uint32_t timeout_ms);
+                     uint32_t link, uint32_t timeout_ms);
 
 // Whether a board called this one, us, and was answered: one look. With
-// from, only that board is answered.
+// from, only that board is answered. A call repeated for the link already
+// open, its answer having come late, is answered again and is no new
+// caller: the link goes on as it was.
 bool radio_link_called(RadioLink *r, const char *us, const char *from);
 
 // The message, piece by piece, each answered before the next leaves;
