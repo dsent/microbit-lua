@@ -262,11 +262,11 @@ The REPL keeps `loadstring`, `setfenv`, `pcall`, `string.gsub`, `string.sub`,
 `string.find`, `string.match`, `string.format`, `table.concat`,
 `microbit.serial.eventAfterAsync`, `microbit.serial.getCharAsync` and
 `microbit.eventRepl` of its own for that, and a radio link's `tx`, `rx`,
-`answered` and `microbit.sleep` from when it opens, so the REPL over a link
-answers too; a line that takes away another global it uses can stop what the
-REPL shows, and the global can be put back from the prompt. The firmware arms
-the port itself after an `on_event` that fails on the port's event, and has what
-already waits there read.
+`answered`, `notSent`, `typed` and `microbit.sleep` from when it opens, so the
+REPL over a link answers too; a line that takes away another global it uses can
+stop what the REPL shows, and the global can be put back from the prompt. The
+firmware arms the port itself after an `on_event` that fails on the port's
+event, and has what already waits there read.
 
 
 ## Radio link
@@ -274,10 +274,13 @@ already waits there read.
 `listen(name)` at the prompt waits for the board named `name` to call, then
 serves it a REPL of its own over the radio. `connect(name, timeout)` on that
 board calls, and from then on what is typed there goes over the link a line at a
-time, and what comes back is printed. A line typed while `connect` still calls
-goes over the link once it opens. The link itself is `microbit.radio`'s
-`connect`, `listen`, `answered`, `tx` and `rx`, in `source/radio-link.c`;
-`notSent` gives the words the REPL says when a line did not go.
+time, and what comes back is printed. Typing shows as at the board's own
+prompt: Backspace takes back a character of the line not yet sent, and Enter
+ends the line on the screen. A line typed while `connect` still calls goes over
+the link once it opens. The link itself is `microbit.radio`'s `connect`,
+`listen`, `answered`, `tx` and `rx`, in `source/radio-link.c`; `notSent` gives
+the words the REPL says when a line did not go, and `typed` what typing makes of
+the line and shows.
 
 A frame carries its kind, the link's number and a piece's number. The link's
 number is one byte, drawn at random by the board that calls. HELLO and WELCOME
@@ -301,7 +304,7 @@ move is over, after the lines before it; the prompt comes back once it has run.
 The inbox holds 8 pieces, 218 B of the board's heap made when the first link
 opens. A piece that comes again, because the answer to it was lost, is answered
 again and dropped. Pieces are numbered in 16 bits: a new piece is taken for a
-repeat only after 65,536 pieces in a row are lost to a board that took none,
+repeat only after 65,535 pieces in a row are lost to a board that took none,
 each a line typed or an answer given.
 
 A piece that finds the inbox full is not taken, and neither is one sent to a
@@ -311,10 +314,13 @@ it, what reached the port while it tried included: that is shown, and the line
 it begins is dropped up to its line ending. It says so when that held more than
 a line ending, and tells the person to check whether the line ran before typing
 it again, since the other board may have taken the line and only its answers
-been lost. When the other board last showed `>>`, it says instead to type `)`
-and Enter, then the whole statement again. The board that called prints what the
-other board says as it comes, and between the lines it sends, so its own inbox
-does not fill while a paste goes out.
+been lost. When the other board showed `>>` after the last line it took, it
+says the other board may be waiting for the rest of a statement, and tells the
+person to press the reset button on the board that called and connect again
+before that check: the new call starts the other board's session over, with
+its unfinished statement gone. The board that called prints what the other
+board says as it comes, and between the lines it sends, so its own inbox does
+not fill while a paste goes out.
 
 The first piece of each message is marked, and `rx()` returns with a piece
 whether it starts a message. The link's REPL is sent whole lines, one to a
@@ -332,10 +338,12 @@ every answer to its last piece was lost on the way: it runs, and typed again, it
 runs twice. A command that runs Lua without ever waiting lets no fiber run, so
 the pieces sent meanwhile wait in the radio's own queue of 4; a copy of one
 taken after the command may finish a line the sending board has already said was
-lost. An answer is cut short, with nothing to say so, when the board that called
-is busy in a handler of its own while more than 8 pieces of it come. And once a
-board has opened a link, its fiber takes every datagram that comes, so a program
-there that reads the radio itself with `recv` gets none.
+lost. An answer the board that called does not take is cut short, with nothing
+to say so, and what the other board says next follows it on the same line: when
+the board that called is out of reach, or busy while more than 8 pieces of the
+answer come, in a handler of its own or sending a line that is not taken. And
+once a board has opened a link, its fiber takes every datagram that comes, so a
+program there that reads the radio itself with `recv` gets none.
 
 
 ## TPBot

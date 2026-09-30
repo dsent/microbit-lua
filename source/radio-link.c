@@ -22,7 +22,7 @@
 // piece was lost. A piece that comes again, because its answer was lost, is
 // answered again and dropped. Pieces are numbered in 16 bits: a sender that
 // fails comes back round to the number the far end last took only after
-// 65,536 pieces, over four hours of tries.
+// 65,535 lost pieces, over four hours of tries.
 //
 // The inbox is made when the first link opens, so a program that never
 // links pays nothing for it.

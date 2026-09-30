@@ -1325,7 +1325,8 @@ static const char *radio_opt_name(lua_State *L, int arg)
                     return 2;						\
                   })							\
 /* answered([name]) -> friendlyName if somebody, or with a
- * name that board, has just called again, or nil */		\
+ * name that board, has just made a new call, or nil; a call
+ * repeated for the open link is none */		\
     F(answered,   { const char *from = radio_opt_name(L, 1);		\
                     if (radio_link_called(&radio_link,			\
                           microbit_friendly_name(), from)) {		\
@@ -1337,9 +1338,12 @@ static const char *radio_opt_name(lua_State *L, int arg)
                   })							\
 /* notSent(line, typedAfter, statementOpen) -> string
  * What the REPL says when a line over the link did not go */	\
-    F(notSent,    { return link_words_not_sent(L); })
+    F(notSent,    { return link_words_not_sent(L); })		\
+/* typed(sofar, text) -> line, shown
+ * Typing over the link, Backspace applied, and what it shows */	\
+    F(typed,      { return link_words_typed(L); })
 
-#define LUA_RADIO_COUNT 14
+#define LUA_RADIO_COUNT 15
 
 static const int digitalRJ[] = { 8, 12, 14, 16 };
 

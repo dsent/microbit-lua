@@ -29,6 +29,7 @@ local arm_port, event_repl = serial.eventAfterAsync, uBit.eventRepl
 -- Its radio functions are taken when a link opens.
 local get_char = serial.getCharAsync
 local HEAD_MATCH = uBit.CODAL_SERIAL_EVT_HEAD_MATCH
+local DEVICE_ID_SERIAL = uBit.DEVICE_ID_SERIAL
 local CLICK = uBit.DEVICE_BUTTON_EVT_CLICK
 local LONG_CLICK = uBit.DEVICE_BUTTON_EVT_LONG_CLICK
 
@@ -117,9 +118,9 @@ local function print_values(serialize, ...)
   end
   local out = { }
   for i = 1, n do
-    table.insert(out, serialize(select(i, ...)))
+    out[i] = serialize(select(i, ...))
   end
-  write(table.concat(out, "\t") .. "\n")
+  write(concat(out, "\t") .. "\n")
 end
 
 local env = { }
@@ -150,25 +151,16 @@ local function compile_try(code)
 end
 
 local function compile(code)
+  local e_chunk, e_err, e_incomp = compile_try("return " .. code)
+  if e_chunk then
+    return e_chunk
+  end
   local chunk, err, incomp = compile_try(code)
-  if incomp then
-    local e_chunk, e_err = compile_try("return " .. code)
-    if e_chunk then
-      return e_chunk, e_err
-    end
-    return chunk, err, true
+  if chunk or incomp then
+    return chunk, err, incomp
   end
-  if chunk then
-    local e_chunk, e_err = compile_try("return " .. code)
-    if e_chunk then
-      return e_chunk, e_err
-    end
-    return chunk
-  end
-  local e_chunk, e_err, e_incomp =
-    compile_try("return " .. code)
-  if e_chunk or e_incomp then
-    return e_chunk, e_err, e_incomp
+  if e_incomp then
+    return nil, e_err, true
   end
   return nil, err or e_err, false
 end
@@ -192,9 +184,9 @@ local function execute(chunk)
     if #results > 1 then
       local out = { }
       for i = 2, #results do
-        table.insert(out, serialize(results[i]))
+        out[i - 1] = serialize(results[i])
       end
-      say("=> " .. table.concat(out, "\t"))
+      say("=> " .. concat(out, "\t"))
     end
   else
     say("Runtime error: " .. tostring(results[2]))
@@ -348,7 +340,7 @@ local function port_to_console(value)
     repeat
       serial_session.run(read_port, c)
       if serial_session.transport.taken then
-        return handler[microbit.DEVICE_ID_SERIAL](value)
+        return handler[DEVICE_ID_SERIAL](value)
       end
       serial_session.transport.arm()
       c = serial_session.transport.getChar()
@@ -356,7 +348,7 @@ local function port_to_console(value)
   end
 end
 
-handler[microbit.DEVICE_ID_SERIAL] = port_to_console
+handler[DEVICE_ID_SERIAL] = port_to_console
 
 local function button(value, btn)
   if value == CLICK then
@@ -409,7 +401,7 @@ uBit.eventFallback(dispatch)
 local radio_session
 
 -- the link's, taken by listen() and connect()
-local tx, rx, not_sent_words
+local tx, rx, not_sent_words, line_typed
 
 
 -- A piece of the link, as much or as little as arrived: what
@@ -470,8 +462,9 @@ local function typing()
   return concat(chars)
 end
 
--- The end of what the link said last: whether the other board
--- shows ">> ", a statement not yet finished
+-- The end of what the link said since the last line it took:
+-- whether the other board shows ">> ", a statement not yet
+-- finished
 local link_said = ""
 
 --- What the link says goes to the port, all that has come
@@ -494,15 +487,16 @@ local dropping = false
 -- A line at a time goes over the link: tx waits to be
 -- answered, and a character each would spend that wait while
 -- the next ones pile up in the port. So the typing is echoed
--- as it comes and held until its line is whole. The port is
+-- as it comes, Backspace taken as the console takes it, and
+-- held until its line is whole. The port is
 -- armed before it is read: a character that comes after the
 -- read raises the event, and one before it is read now.
 local function port_to_link(value)
   if value == HEAD_MATCH then
     arm_port(1)
-    local text = typing()
-    write(text)
-    typed_here = typed_here .. text
+    local shown
+    typed_here, shown = line_typed(typed_here, typing())
+    write(shown)
     if dropping then
       local ends = find(typed_here, "[\r\n]")
       dropping = not ends
@@ -517,9 +511,8 @@ local function port_to_link(value)
         -- the line would arrive without it, and goes too, what came into
         -- the port meanwhile with it, shown, and the rest of a line
         -- begun then
-        local came = typing()
-        local rest = typed_here .. came
-        write(came)
+        local rest, shown = line_typed(typed_here, typing())
+        write(shown)
         typed_here = ""
         dropping = find(rest, "[^\r\n]$") ~= nil
         -- the other board may have the line all the same, when only its
@@ -528,14 +521,15 @@ local function port_to_link(value)
                              link_said == ">> "))
         return
       end
-      -- what the other board said meanwhile, before its inbox here fills
+      -- what the other board said meanwhile, before its inbox here
+      -- fills; what it shows after the line counts from here
+      link_said = ""
       link_to_port()
       at = find(typed_here, "[\r\n]")
     end
   end
 end
 
-local DEVICE_ID_SERIAL = uBit.DEVICE_ID_SERIAL
 local DEVICE_ID_RADIO = uBit.DEVICE_ID_RADIO
 
 function connect(name, timeout)
@@ -545,7 +539,8 @@ function connect(name, timeout)
     return
   end
   say(name .. " connected.")
-  tx, rx, not_sent_words = radio.tx, radio.rx, radio.notSent
+  tx, rx, not_sent_words, line_typed = radio.tx, radio.rx, radio.notSent,
+    radio.typed
   typed_here = ""
   link_said = ""
   dropping = false

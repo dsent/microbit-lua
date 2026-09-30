@@ -694,7 +694,7 @@ static const LuaApi l_radio[] = {
   {"enable", l_nothing, 0}, {"listen", l_listen, 0},
   {"connect", l_connect, 0}, {"answered", l_answered, 0},
   {"tx", l_tx, 0}, {"rx", l_rx, 0}, {"notSent", link_words_not_sent, 0},
-  {NULL, NULL, 0}
+  {"typed", link_words_typed, 0}, {NULL, NULL, 0}
 };
 #define X(name, function) {#name, function, 0},
 static const LuaApi l_tpbot[] = { TPBOT_FUNCTIONS {NULL, NULL, 0} };
@@ -1152,6 +1152,10 @@ static void globals_taken_away(void) {
   line("_G.print = nil");
   said = line("6*7");
   expect(strstr(said, "=> 42\r\n> ") != NULL, "print = nil leaves the REPL whole");
+  line("_G.table = nil");
+  said = line("6*7, 1");
+  expect(strstr(said, "=> 42\t1\r\n> ") != NULL,
+         "table = nil leaves the REPL's results whole");
   line("_G.microbit.display.scroll = nil");
   {
     size_t before = strlen(out);
@@ -2130,10 +2134,62 @@ static void a_loss_in_an_open_statement(void) {
   far_says(">> ");
   far_gone = 1;
   said = line("x = 1");
-  expect(strstr(said, "may not have got: x = 1\r\nType ) and press Enter, "
-                "then the whole statement again.\r\n") != NULL,
+  expect(strstr(said, "may not have got: x = 1\r\nIt may be waiting for the "
+                "rest of a statement. Press the reset button on the back of "
+                "this micro:bit and connect again, then check whether the "
+                "statement ran before you type it again.\r\n") != NULL,
          "a line lost inside an open statement says how to start the "
          "statement over");
+}
+
+// A line that did not go after the line that closed a statement, the
+// other board busy with it: the ">> " it showed before is not taken for
+// its state now
+static void a_loss_after_a_statement_ends(void) {
+  char words[512];
+  const char *said;
+  fresh();
+  real_link = 1;
+  far_listens = 1;
+  boot("");
+  line("connect('gigat', 100)");
+  far_says(">> ");
+  line("end");
+  far_gone = 1;
+  said = line("x = 1");
+  expect(strstr(far_heard, "end\r") != NULL
+         && strstr(said, not_taken("x = 1", 0, words, sizeof words)) != NULL,
+         "a line lost after the statement's last line was taken says to "
+         "check whether it ran");
+}
+
+// notSent with its flags left out, for a line long enough that the words
+// are built in more than one piece: a flag left out is false
+static void words_with_flags_left_out(void) {
+  const char *said;
+  fresh();
+  boot("");
+  said = line("print(microbit.radio.notSent(string.rep('x', 300)))");
+  expect(strstr(said, "It may still be running a command.") != NULL
+         && strstr(said, "What you typed after it") == NULL,
+         "notSent with a long line and no flags gives the plain words");
+}
+
+// Over a link, typing as the console takes it: Backspace takes back a
+// character of the line not yet sent, and Enter shows as a line ending
+static void editing_over_the_link(void) {
+  const char *said;
+  fresh();
+  real_link = 1;
+  far_listens = 1;
+  boot("");
+  line("connect('gigat', 100)");
+  said = out + strlen(out);
+  type_in("1+x\1771\r");
+  expect(strcmp(far_heard, "1+1\r") == 0
+         && strstr(said, "1+x\b \b1\r\n") != NULL,
+         "Backspace over a link takes back what it shows it does, and the "
+         "line's end shows as one");
 }
 
 // A call from a board whose link is an older version is not answered:
@@ -2714,6 +2770,9 @@ int main(int argc, char **argv) {
   typing_while_calling();
   the_rest_of_a_line();
   a_loss_in_an_open_statement();
+  a_loss_after_a_statement_ends();
+  words_with_flags_left_out();
+  editing_over_the_link();
   an_older_link();
   a_full_inbox();
   a_line_not_taken();

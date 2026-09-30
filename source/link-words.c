@@ -1,24 +1,58 @@
 // -*- mode: c; indent-tabs-mode: nil; -*-
 
+#include <string.h>
+
 #include "lauxlib.h"
 #include "link-words.h"
 
 int link_words_not_sent(lua_State *L) {
   size_t len;
   const char *line = luaL_checklstring(L, 1, &len);
+  // read before the buffer, whose pieces may take the missing ones' places
+  int typed_after = lua_toboolean(L, 2), open = lua_toboolean(L, 3);
   luaL_Buffer b;
   luaL_buffinit(L, &b);
   luaL_addstring(&b, "\nThe other micro:bit did not answer, so it may not "
                  "have got: ");
   luaL_addlstring(&b, line, len);
   luaL_addchar(&b, '\n');
-  if (lua_toboolean(L, 2))
+  if (typed_after)
     luaL_addstring(&b, "What you typed after it was not sent either.\n");
-  luaL_addstring(&b, lua_toboolean(L, 3)
-                 ? "Type ) and press Enter, then the whole statement again.\n"
+  luaL_addstring(&b, open
+                 ? "It may be waiting for the rest of a statement. Press the "
+                   "reset button on the back of this micro:bit and connect "
+                   "again, then check whether the statement ran before you "
+                   "type it again.\n"
                  : "It may still be running a command. Once it has "
                    "finished, check whether the line ran before you type "
                    "it again.\n");
   luaL_pushresult(&b);
   return 1;
+}
+
+int link_words_typed(lua_State *L) {
+  size_t have, len, at, n = 0, i;
+  const char *sofar = luaL_checklstring(L, 1, &have);
+  const char *text = luaL_checklstring(L, 2, &len);
+  // the line, then what shows: each character typed shows as 3 at most
+  char *line = (char *)lua_newuserdata(L, have + 4 * len);
+  char *shown = line + have + len;
+  memcpy(line, sofar, have);
+  at = have;
+  for (i = 0; i < len; i++) {
+    char c = text[i];
+    if (c == '\b' || c == 127) {
+      if (at > 0 && line[at - 1] != '\r' && line[at - 1] != '\n') {
+        at--;
+        memcpy(shown + n, "\b \b", 3);
+        n += 3;
+      }
+    } else {
+      line[at++] = c;
+      shown[n++] = c == '\r' ? '\n' : c;
+    }
+  }
+  lua_pushlstring(L, line, at);
+  lua_pushlstring(L, shown, n);
+  return 2;
 }
