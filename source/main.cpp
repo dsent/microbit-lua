@@ -30,9 +30,6 @@ extern const LuaMeta __lua_meta;
 #include "lua-events.h"
 #include "stack-probe.h"
 
-// Characters the port holds for the REPL while the script at boot runs
-#define LUA_TYPED_AHEAD 64
-
 // Stack high-water reporting (see stack-probe.c). The probe is always active;
 // the output only appears when DMESG is enabled (DMESG_SERIAL_DEBUG).
 static void report_stack(const char *tag) {
@@ -121,7 +118,9 @@ int main() {
 
     // Enlarge the serial RX ring (default 20) so pasted lines don't overflow
     // before the REPL drain fiber catches up. 254 is the uint8_t API maximum.
-    uBit.serial.setRxBufferSize(254);
+    // It holds what is typed while the script at boot runs, too.
+    if (uBit.serial.setRxBufferSize(254) != DEVICE_OK)
+        DMESG("serial RX ring left at its default size");
 
 #if CONFIG_ENABLED(DEVICE_BLE)
     setup_ble_uart_service();
@@ -160,10 +159,6 @@ int main() {
     luaopen_math(L);
 
     LUA_MEM_REPORT(L, "stdlib");
-
-    // The port keeps what is typed while the script runs, for the REPL to
-    // read when it starts: up to LUA_TYPED_AHEAD characters.
-    uBit.serial.setRxBufferSize(LUA_TYPED_AHEAD);
 
     register_lua_modules(L);
     // Register the MessageBus listener BEFORE running the script so that

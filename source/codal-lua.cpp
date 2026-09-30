@@ -16,6 +16,7 @@ extern "C" {
 #include "stack-probe.h"
 #include "tpbot.h"
 #include "lua-events.h"
+#include "lua-print.h"
 
 extern MicroBit uBit;
 
@@ -1863,8 +1864,8 @@ static const char *const lua_at_start[] = {
 };
 
 
-// package, module and require, the modules above, and the robot
-// commands that are globals (source/tpbot.c). package.loaded is the
+// package, module and require, the modules above, the robot commands that
+// are globals (source/tpbot.c), and print to the port (source/lua-print.c). package.loaded is the
 // registry's _LOADED, which module() relies on.
 void register_lua_modules(lua_State *L) {
   lua_newtable(L);                                    // package
@@ -1879,11 +1880,16 @@ void register_lua_modules(lua_State *L) {
     lua_call(L, 1, 0);
   }
   tpbot_register_globals(L);
+  lua_print_open(L);
 }
 
 // What source/lua-events.c needs of the board
 extern "C" void lua_events_show_error(const char *message) {
   uBit.display.scroll(message);
+}
+
+extern "C" void lua_print_out(const char *text, size_t length) {
+  uBit.serial.send((uint8_t *)text, (int)length, SYNC_SLEEP);
 }
 
 extern "C" uint32_t lua_events_now(void) {
@@ -1933,8 +1939,13 @@ static void on_codal_event(codal::Event e, void *arg) {
   if (e.source == DEVICE_ID_SCHEDULER || e.source == DEVICE_ID_COMPONENT ||
       e.source == DEVICE_ID_NOTIFY || e.source == DEVICE_ID_NOTIFY_ONE)
     return;
+  // The port says it has data after every character that comes; the REPL
+  // waits for its own event, and these would only fill the waiting line.
+  if (e.source == DEVICE_ID_SERIAL && e.value == CODAL_SERIAL_EVT_DATA_RECEIVED)
+    return;
   codal::Event *copy = new codal::Event(e);
-  create_fiber(lua_event_handler_fiber, copy);
+  if (create_fiber(lua_event_handler_fiber, copy) == NULL)
+    delete copy;
 }
 
 void register_lua_event_listener(lua_State *L) {

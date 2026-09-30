@@ -21,7 +21,9 @@
 // dropped, and counted (microbit.eventsDropped()). The port's event that
 // the REPL waits for never is: the port is armed for one at a time, so one
 // lost would leave the REPL deaf. It waits apart, one at most, and goes
-// first.
+// first when the running call is over; a sleep leaves it waiting, so the
+// lines sent to the REPL run one after another, each after the one before
+// has ended.
 //
 // Fibers take turns only where one sleeps or waits, and everything here
 // runs in fibers, so nothing comes between a look at the line and what is
@@ -79,8 +81,11 @@ static void queue_event(LuaEvent e) {
   count++;
 }
 
-static bool next_event(LuaEvent *e) {
-  if (port_waiting) {
+// The next event to handle. The port's goes first, but never at a
+// sleep: a command's lines follow one another, so the next one waits for
+// the one that sleeps to end.
+static bool next_event(LuaEvent *e, bool port_too) {
+  if (port_waiting && port_too) {
     *e = port_event;
     port_waiting = false;
     return true;
@@ -93,13 +98,28 @@ static bool next_event(LuaEvent *e) {
   return true;
 }
 
-// on_event, or when that is not a function, the handler the script gave
+// Whether the value on top can be called: a function, or a value whose
+// metatable has __call. Read raw: nothing a program wrote runs here.
+static bool callable(void) {
+  if (lua_isfunction(state, -1))
+    return true;
+  if (luaL_getmetafield(state, -1, "__call")) {
+    lua_pop(state, 1);
+    return true;
+  }
+  return false;
+}
+
+// on_event, or when that cannot be called, the handler the script gave
 // microbit.eventFallback(): a value put in on_event by mistake leaves the
 // REPL answering, so the mistake can be put right from the prompt. With
-// neither, the event goes nowhere.
+// neither, the event goes nowhere. on_event is read raw from the globals,
+// since a metamethod of _G's that raised an error here, outside any
+// protected call, would stop the board.
 static void handle(LuaEvent e) {
-  lua_getglobal(state, "on_event");
-  if (!lua_isfunction(state, -1)) {
+  lua_pushliteral(state, "on_event");
+  lua_rawget(state, LUA_GLOBALSINDEX);
+  if (!callable()) {
     lua_pop(state, 1);
     lua_pushlightuserdata(state, &fallback_key);
     lua_rawget(state, LUA_REGISTRYINDEX);
@@ -120,11 +140,11 @@ static void handle(LuaEvent e) {
 }
 
 // The events that wait, each handled to its end; their sleeps handle none.
-static void handle_waiting(void) {
+static void handle_waiting(bool port_too) {
   bool outer = sleep_handles;
   LuaEvent e;
   sleep_handles = false;
-  while (next_event(&e))
+  while (next_event(&e, port_too))
     handle(e);
   sleep_handles = outer;
 }
@@ -136,7 +156,7 @@ void lua_call_begin(void) {
 
 void lua_call_end(void) {
   sleep_handles = false;
-  handle_waiting();
+  handle_waiting(true);
   running = false;
 }
 
@@ -159,7 +179,7 @@ void lua_events_sleep(uint32_t ms) {
   }
   start = lua_events_now();
   for (;;) {
-    handle_waiting();
+    handle_waiting(false);
     elapsed = lua_events_now() - start;
     if (elapsed >= ms)
       return;
