@@ -314,13 +314,12 @@ it, what reached the port while it tried included: that is shown, and the line
 it begins is dropped up to its line ending. It says so when that held more than
 a line ending, and tells the person to check whether the line ran before typing
 it again, since the other board may have taken the line and only its answers
-been lost. When the other board showed `>>` after the last line it took, it
-says the other board may be waiting for the rest of a statement, and tells the
-person to press the reset button on the board that called and connect again
-before that check: the new call starts the other board's session over, with
-its unfinished statement gone. The board that called prints what the other
-board says as it comes, and between the lines it sends, so its own inbox does
-not fill while a paste goes out.
+been lost. First, once the other board has finished, if the last thing it showed
+is `>>`, the person is to press the reset button on the board that called and
+connect again: the new call starts the other board's session over, its
+unfinished statement gone. The board that called prints what the other board
+says as it comes, and between the lines it sends, so its own inbox does not fill
+while a paste goes out.
 
 The first piece of each message is marked, and `rx()` returns with a piece
 whether it starts a message. The link's REPL is sent whole lines, one to a

@@ -8,11 +8,10 @@
 extern "C" {
 #endif
 
-// microbit.radio.notSent(line, typedAfter, statementOpen) -> string
+// microbit.radio.notSent(line, typedAfter) -> string
 // What the REPL says when a line over a radio link did not go: kept in C,
 // so that its words take flash and no Lua heap. typedAfter: more was typed
-// after the line, and dropped with it; statementOpen: the other board
-// showed ">> " after the last line it took.
+// after the line, and dropped with it.
 int link_words_not_sent(lua_State *L);
 
 // microbit.radio.typed(sofar, text) -> line, shown

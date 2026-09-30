@@ -81,13 +81,14 @@ Host estimates of the builds since, on a 32-bit host model of the board's
 Lua (float numbers, 4-byte pointers; its empty state is 2,143 B, as on the
 board): each build's registration reproduced, its API stubbed, its script
 loaded, stripped and run as `main()` does, then collected. Static RAM
-(`.bss` + `.data`) is from each build's link.
+(`.bss` + `.data`) is from each build's link; the firmware as it ships has
+7,144 B of it.
 
 | build | Lua heap after boot | `.bss` + `.data` |
 |---|---:|---:|
 | daa2f77, before `require` (TPBot commands in Lua) | 29,080 B | 14,704 B |
 | upstream 1733ccd (`require`, TPBot in C for tpbot2) | 26,191 B | 14,712 B |
-| this firmware | 26,033 B | 14,736 B |
+| 6cc5820 (the REPL's line under one pcall) | 26,033 B | 14,736 B |
 
 What moved it, measured the same way:
 

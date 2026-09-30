@@ -8,8 +8,8 @@
 int link_words_not_sent(lua_State *L) {
   size_t len;
   const char *line = luaL_checklstring(L, 1, &len);
-  // read before the buffer, whose pieces may take the missing ones' places
-  int typed_after = lua_toboolean(L, 2), open = lua_toboolean(L, 3);
+  // read before the buffer, whose pieces may take a missing one's place
+  int typed_after = lua_toboolean(L, 2);
   luaL_Buffer b;
   luaL_buffinit(L, &b);
   luaL_addstring(&b, "\nThe other micro:bit did not answer, so it may not "
@@ -18,14 +18,11 @@ int link_words_not_sent(lua_State *L) {
   luaL_addchar(&b, '\n');
   if (typed_after)
     luaL_addstring(&b, "What you typed after it was not sent either.\n");
-  luaL_addstring(&b, open
-                 ? "It may be waiting for the rest of a statement. Press the "
-                   "reset button on the back of this micro:bit and connect "
-                   "again, then check whether the statement ran before you "
-                   "type it again.\n"
-                 : "It may still be running a command. Once it has "
-                   "finished, check whether the line ran before you type "
-                   "it again.\n");
+  luaL_addstring(&b, "It may still be running a command. Once it has "
+                 "finished, if the last thing it showed is >>, press the "
+                 "reset button on the back of this micro:bit and connect "
+                 "again. Then check whether the line ran before you type it "
+                 "again.\n");
   luaL_pushresult(&b);
   return 1;
 }

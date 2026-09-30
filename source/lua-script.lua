@@ -462,17 +462,11 @@ local function typing()
   return concat(chars)
 end
 
--- The end of what the link said since the last line it took:
--- whether the other board shows ">> ", a statement not yet
--- finished
-local link_said = ""
-
 --- What the link says goes to the port, all that has come
 local function link_to_port()
   local piece = rx()
   while piece do
     write(piece)
-    link_said = sub(link_said .. piece, -3)
     piece = rx()
   end
 end
@@ -516,14 +510,12 @@ local function port_to_link(value)
         typed_here = ""
         dropping = find(rest, "[^\r\n]$") ~= nil
         -- the other board may have the line all the same, when only its
-        -- answers were lost
-        write(not_sent_words(sub(line, 1, -2), find(rest, "[^\r\n]") ~= nil,
-                             link_said == ">> "))
+        -- answers were lost; whether it waits for the rest of a statement
+        -- shows once what it says has come
+        write(not_sent_words(sub(line, 1, -2), find(rest, "[^\r\n]") ~= nil))
         return
       end
-      -- what the other board said meanwhile, before its inbox here
-      -- fills; what it shows after the line counts from here
-      link_said = ""
+      -- what the other board said meanwhile, before its inbox here fills
       link_to_port()
       at = find(typed_here, "[\r\n]")
     end
@@ -542,7 +534,6 @@ function connect(name, timeout)
   tx, rx, not_sent_words, line_typed = radio.tx, radio.rx, radio.notSent,
     radio.typed
   typed_here = ""
-  link_said = ""
   dropping = false
   handler[DEVICE_ID_SERIAL] = port_to_link
   handler[DEVICE_ID_RADIO] = link_to_port

@@ -1336,7 +1336,7 @@ static const char *radio_opt_name(lua_State *L, int arg)
                     }							\
                     return 1;						\
                   })							\
-/* notSent(line, typedAfter, statementOpen) -> string
+/* notSent(line, typedAfter) -> string
  * What the REPL says when a line over the link did not go */	\
     F(notSent,    { return link_words_not_sent(L); })		\
 /* typed(sofar, text) -> line, shown

@@ -1608,18 +1608,23 @@ static void what_waiting_costs(void) {
   expect(strstr(out, "<scroll 0 2>") != NULL,
          "eventLine(0) drops every event that would have to wait");
 
+  // two presses while the robot drives, which handles nothing: both wait
   fresh();
-  plan(press_a);
-  plan(press_b);
+  on_move = press_b_then_a;
   boot_program(
-    "local got = 0\n"
-    "function on_event(s, v) got = got + 1 end\n"
+    "require('tpbot')\n"
+    "local got = ''\n"
+    "function on_event(s, v)\n"
+    "  got = got .. (s == microbit.DEVICE_ID_BUTTON_A and 'A' or 'B')\n"
+    "end\n"
     "microbit.sleep(0)\n"
     "microbit.eventLine(1)\n"
+    "robot_move(50, 50, 0.1)\n"
     "microbit.sleep(50)\n"
     "microbit.display.scroll(got .. ' ' .. microbit.eventsDropped())\n");
-  expect(strstr(out, "<scroll 2 0>") != NULL,
-         "eventLine(1) keeps one event that waits at a time");
+  expect(strstr(out, "<scroll A 1>") != NULL,
+         "eventLine(1) keeps the newest of two events that wait together, "
+         "and counts the other dropped");
 }
 
 // Events dropped for want of memory, for the line or for a fiber, are
@@ -1683,8 +1688,10 @@ static const char *not_taken(const char *text, int after, char *words,
                              size_t size) {
   snprintf(words, size, "\r\nThe other micro:bit did not answer, so it may "
            "not have got: %s\r\n%sIt may still be running a command. Once "
-           "it has finished, check whether the line ran before you type it "
-           "again.\r\n", text,
+           "it has finished, if the last thing it showed is >>, press the "
+           "reset button on the back of this micro:bit and connect again. "
+           "Then check whether the line ran before you type it again.\r\n",
+           text,
            after ? "What you typed after it was not sent either.\r\n" : "");
   return words;
 }
@@ -2123,44 +2130,33 @@ static void the_rest_of_a_line(void) {
          "to its line's end; the next line goes");
 }
 
-// A line that did not go, inside a statement the other board shows open
-static void a_loss_in_an_open_statement(void) {
-  const char *said;
-  fresh();
-  real_link = 1;
-  far_listens = 1;
-  boot("");
-  line("connect('gigat', 100)");
+// The other board shows ">> " while this one tries a line
+static void far_prompts_open(void) {
   far_says(">> ");
-  far_gone = 1;
-  said = line("x = 1");
-  expect(strstr(said, "may not have got: x = 1\r\nIt may be waiting for the "
-                "rest of a statement. Press the reset button on the back of "
-                "this micro:bit and connect again, then check whether the "
-                "statement ran before you type it again.\r\n") != NULL,
-         "a line lost inside an open statement says how to start the "
-         "statement over");
 }
 
-// A line that did not go after the line that closed a statement, the
-// other board busy with it: the ">> " it showed before is not taken for
-// its state now
-static void a_loss_after_a_statement_ends(void) {
-  char words[512];
-  const char *said;
+// A line that did not go after one that opened a statement, the other
+// board's ">> " coming only after the words: the words say what to do
+// when it shows, and it shows after them
+static void a_loss_in_an_open_statement(void) {
+  const char *said, *words;
   fresh();
   real_link = 1;
   far_listens = 1;
   boot("");
   line("connect('gigat', 100)");
-  far_says(">> ");
-  line("end");
+  line("text = [=[");
+  on_air = far_prompts_open;
   far_gone = 1;
-  said = line("x = 1");
-  expect(strstr(far_heard, "end\r") != NULL
-         && strstr(said, not_taken("x = 1", 0, words, sizeof words)) != NULL,
-         "a line lost after the statement's last line was taken says to "
-         "check whether it ran");
+  said = line("hello");
+  words = strstr(said, "may not have got: hello\r\nIt may still be running "
+                 "a command. Once it has finished, if the last thing it "
+                 "showed is >>, press the reset button on the back of this "
+                 "micro:bit and connect again. Then check whether the line "
+                 "ran before you type it again.\r\n");
+  expect(words != NULL && strstr(words, ">> ") != NULL,
+         "a line lost inside an open statement says to reset and connect "
+         "again when >> shows, and >> shows after the words");
 }
 
 // notSent with its flags left out, for a line long enough that the words
@@ -2235,7 +2231,7 @@ static void far_inbox(char *text, size_t size) {
 // nothing meanwhile: its inbox takes eight pieces, and a line that finds it
 // full is said to be lost, in words, and never arrives
 static void a_full_inbox(void) {
-  char words[256], held[256];
+  char words[512], held[256];
   const char *said;
   int i, taken = 1;
   fresh();
@@ -2277,7 +2273,7 @@ static void a_full_inbox(void) {
 // A line to a board gone from the air is said to be lost, in words, and
 // what was typed after it goes with it
 static void a_line_not_taken(void) {
-  char words[256];
+  char words[512];
   const char *said;
   fresh();
   real_link = 1;
@@ -2770,7 +2766,6 @@ int main(int argc, char **argv) {
   typing_while_calling();
   the_rest_of_a_line();
   a_loss_in_an_open_statement();
-  a_loss_after_a_statement_ends();
   words_with_flags_left_out();
   editing_over_the_link();
   an_older_link();
