@@ -283,14 +283,17 @@ static int l_rx(lua_State *L) {
 static const char *send_trigger, *send_brings;
 static int send_fails;
 
+static int sends;
+
 static int l_send(lua_State *L) {
   const char *text = luaL_checkstring(L, 1);
+  sends++;
   if (send_fails) {
     send_fails = 0;
     return luaL_error(L, "the port failed");
   }
   note(text);
-  if (send_trigger && strcmp(text, send_trigger) == 0) {
+  if (send_trigger && strncmp(text, send_trigger, strlen(send_trigger)) == 0) {
     size_t n = strlen(send_brings);
     memcpy(typed + typed_len, send_brings, n);
     typed_len += n;
@@ -887,6 +890,27 @@ static void the_repl_always_comes_back(void) {
          "... and the prompt comes back after it");
 }
 
+// What is typed at once is echoed in one send, what the REPL says in
+// sends of 64 characters, the bytes as they were
+static void echo_in_pieces(void) {
+  const char *said;
+  int before;
+  fresh();
+  boot("");
+  before = sends;
+  type_in("x = 'abcdefghijklmnop'\r");
+  expect(strstr(out, "x = 'abcdefghijklmnop'\r\r\n> ") != NULL
+         && sends - before == 3,
+         "a line typed at once is echoed in one send, then the line break "
+         "and the prompt");
+  before = sends;
+  said = line("string.rep('a', 150)");
+  expect(strstr(said, "=> \"aaaaaaaaaa") != NULL
+         && strstr(said, "aaaaaaaaaa\"\r\n> ") != NULL
+         && count(said, "a") == 150 + 1,
+         "a result longer than 64 characters goes out whole, in pieces");
+}
+
 // Lines sent together run one after another: a line that sleeps ends
 // before the next one starts, whether the next came with it or later
 static void lines_in_turn(void) {
@@ -1274,7 +1298,7 @@ static void every_drop_counted(void) {
 // listen() serves a board that calls over the radio: a prompt, and the
 // answer to a line. The session it serves is made then: booted, the
 // firmware's script holds no more Lua heap than this, on the 64-bit host.
-#define BOOTED_HEAP 44100
+#define BOOTED_HEAP 44700
 
 static void serving_a_link(void) {
   const char *said;
@@ -1716,6 +1740,7 @@ int main(int argc, char **argv) {
   globals_taken_away();
   the_repl_always_comes_back();
   lines_in_turn();
+  echo_in_pieces();
   robot_file();
   round_two();
   what_waiting_costs();

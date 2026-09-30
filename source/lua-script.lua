@@ -13,10 +13,11 @@ require("tpbot")
 -- What the REPL cannot do without, taken here so that the prompt comes
 -- back even after a line takes away the global, and answers the line
 -- that puts it back: a line is compiled by loadstring, given its
--- environment by setfenv and run under pcall, and every character goes
--- out through gmatch.
-local pcall, gmatch = pcall, string.gmatch
+-- environment by setfenv and run under pcall; what it says goes out
+-- through gsub and sub, and a line is put together with concat.
+local pcall = pcall
 local loadstring, setfenv = loadstring, setfenv
+local gsub, sub, concat = string.gsub, string.sub, table.concat
 -- and the port's own: arming it for its next event, and marking the
 -- command read from it as the REPL's
 local arm_port, event_repl = serial.eventAfterAsync, uBit.eventRepl
@@ -51,11 +52,10 @@ local function write(s)
   local session = active_session
   local out = session and session.transport.send
   if out then return out(s) end
-  for c in gmatch(s, ".") do
-    if c == "\n" then
-      serial.send("\r")
-    end
-    serial.send(c)
+  -- one send for each 64 characters, each a copy on CODAL's heap
+  s = gsub(s, "\n", "\r\n")
+  for i = 1, #s, 64 do
+    serial.send(sub(s, i, i + 63))
   end
 end
 
@@ -296,27 +296,36 @@ local keypress = {
 
 local typed_here = ""
 
+-- The characters typed since the last key the REPL acts on, held to be
+-- added to the line, and echoed, in one piece
+local held, held_count = { }, 0
+
+local function flush_held()
+  if held_count > 0 then
+    local text = concat(held, "", 1, held_count)
+    held_count = 0
+    serial_session.buffer = serial_session.buffer .. text
+    write(text)
+  end
+end
+
 -- What has been typed, from c on, into the console
 local function read_port(c)
+  -- what a read cut short by a mistake held goes, as the line does
+  held_count = 0
   c = c or serial_session.transport.getChar()
-  local echo = ""
   while c do
     local input = keypress[c]
     if input then
-      if #echo > 0 then
-        write(echo)
-        echo = ""
-      end
+      flush_held()
       input()
     else
-      serial_session.buffer = serial_session.buffer .. c
-      echo = echo .. c
+      held_count = held_count + 1
+      held[held_count] = c
     end
     c = serial_session.transport.getChar()
   end
-  if #echo > 0 then
-    write(echo)
-  end
+  flush_held()
 end
 
 -- The port is armed however the reading ends, and then looked at once
