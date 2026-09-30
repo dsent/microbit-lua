@@ -268,7 +268,9 @@ RECURSIVE_FIND_FILE(S_FILES "${PROJECT_SOURCE_DIR}/${CODAL_APP_SOURCE_DIR}" "*.s
 RECURSIVE_FIND_FILE(C_FILES "${PROJECT_SOURCE_DIR}/${CODAL_APP_SOURCE_DIR}" "*.c")
 RECURSIVE_FIND_FILE(CC_FILES "${PROJECT_SOURCE_DIR}/${CODAL_APP_SOURCE_DIR}" "*.cc")
 # An array on the C stack sized by a value from Lua does not build: the C
-# stack check (source/lua-cstack.c) cannot see how much it takes.
+# stack check (source/lua-cstack.c) cannot see how much it takes. CODAL is
+# built without this; the bindings keep off its own such arrays
+# (Serial::read(n), the BLE UART's read(n)).
 set_property(SOURCE ${SOURCE_FILES} ${C_FILES} ${CC_FILES}
     APPEND PROPERTY COMPILE_OPTIONS "-Werror=vla")
 list(APPEND SOURCE_FILES ${S_FILES})

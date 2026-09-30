@@ -136,6 +136,19 @@ Image luaL_checkimage(lua_State *L, int narg) {
   return r;
 }
 
+// read(n) of a port: up to n bytes, read into a buffer on Lua's heap and
+// returned as a string. CODAL's read(n) puts n bytes on the C stack, below
+// any check (source/lua-cstack.c).
+template <typename Read>
+static int read_into_lua(lua_State *L, Read read) {
+  int size = luaL_checkint(L, 1);
+  luaL_argcheck(L, size >= 0, 1, "from 0 up");
+  uint8_t *buffer = (uint8_t *)lua_newuserdata(L, size);
+  int got = read(buffer, size);
+  lua_pushlstring(L, (const char *)buffer, got > 0 ? got : 0);
+  return 1;
+}
+
 // see https://rneacy.dev/mbv2/ubit/display/
 #define LUA_DISPLAY_FUNCTIONS						\
     F(getWidth,   { lua_pushinteger(L, uBit.display.getWidth());	\
@@ -683,15 +696,12 @@ ManagedString luaL_checkManagedString(lua_State *L, int narg) {
                     }							\
                     return 1;						\
                   })							\
-    F(read,       { lua_events_before_wait(); int size = luaL_checkint(L, 1);			\
-                    lua_pushManagedString(L,				\
-                      uBit.serial.read(size, SYNC_SLEEP));		\
-                    return 1;						\
+    F(read,       { lua_events_before_wait();				\
+                    return read_into_lua(L, [](uint8_t *b, int n) {	\
+                      return uBit.serial.read(b, n, SYNC_SLEEP); });	\
                   })							\
-    F(readAsync,  { int size = luaL_checkint(L, 1);			\
-                    lua_pushManagedString(L,				\
-                      uBit.serial.read(size, ASYNC));			\
-                    return 1;						\
+    F(readAsync,  { return read_into_lua(L, [](uint8_t *b, int n) {	\
+                      return uBit.serial.read(b, n, ASYNC); });		\
                   })							\
     F(readUntil,  { lua_events_before_wait(); ManagedString delimiters =				\
                       luaL_checkManagedString(L, 1);			\
@@ -835,16 +845,12 @@ extern MicroBitUARTService *uart;
                   })							\
     F(read,       { if(!uart) { lua_pushnil(L); return 1; }		\
                     lua_events_before_wait();				\
-                    int size = luaL_checkint(L, 1);			\
-                    lua_pushManagedString(L,				\
-                      uart->read(size, SYNC_SLEEP));			\
-                    return 1;						\
+                    return read_into_lua(L, [](uint8_t *b, int n) {	\
+                      return uart->read(b, n, SYNC_SLEEP); });		\
                   })							\
     F(readAsync,  { if(!uart) { lua_pushnil(L); return 1; }		\
-                    int size = luaL_checkint(L, 1);			\
-                    lua_pushManagedString(L,				\
-                      uart->read(size, ASYNC));				\
-                    return 1;						\
+                    return read_into_lua(L, [](uint8_t *b, int n) {	\
+                      return uart->read(b, n, ASYNC); });		\
                   })							\
     F(readUntil,  { if(!uart) { lua_pushnil(L); return 1; }		\
                     lua_events_before_wait();				\
