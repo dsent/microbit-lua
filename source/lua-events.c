@@ -77,7 +77,7 @@ static char fallback_key;
 void lua_events_open(lua_State *L, const LuaEventsConfig *c) {
   state = L;
   config = c;
-  running = sleep_handles = wants = port_waiting = false;
+  running = sleep_handles = wants = port_waiting = port_again = false;
   dropped = 0;
   board_free(line);
   line = NULL;
