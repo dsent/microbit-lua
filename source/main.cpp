@@ -174,6 +174,7 @@ int main() {
         lua_strip_debug(L);
         LUA_MEM_REPORT(L, "stripped");
 
+        lua_call_begin();
         if (lua_pcall(L, 0, LUA_MULTRET, 0) != LUA_OK)
         {
             const char *err = lua_tostring(L, -1);
@@ -182,6 +183,7 @@ int main() {
                 uBit.display.scroll(err);
             }
         }
+        lua_call_end();
     }
     else
     {

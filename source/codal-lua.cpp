@@ -33,6 +33,9 @@ I2C &i2c = uBit.i2c;
 extern "C" __attribute__((used))
 const char firmware_version_mark[] = FIRMWARE_VERSION_MARK FIRMWARE_VERSION;
 
+// Events dropped while Lua was busy, see lua_event_wait()
+static uint32_t lua_events_dropped;
+
 #define LUA_MICROBIT_FUNCTIONS						\
     F(reset,      { uBit.reset();					\
                     return 0;						\
@@ -71,6 +74,9 @@ const char firmware_version_mark[] = FIRMWARE_VERSION_MARK FIRMWARE_VERSION;
                   })							\
     F(stackReset, { stack_probe_paint();				\
                     return 0;						\
+                  })							\
+    F(eventsDropped, { lua_pushinteger(L, (lua_Integer)lua_events_dropped); \
+                    return 1;						\
                   })							\
     F(panic,      { int statusCode = (int)luaL_checkinteger(L, 1);      \
                     microbit_panic(statusCode);				\
@@ -1821,16 +1827,70 @@ void register_lua_modules(lua_State *L) {
   lua_setglobal(L, "package");
   lua_register(L, "module", ll_module);
   lua_register(L, "require", l_require);
+  for (const char *const *name = lua_at_start; *name != NULL; name++) {
+    lua_pushcfunction(L, l_require);
+    lua_pushstring(L, *name);
+    lua_call(L, 1, 0);
+  }
+  tpbot_register_globals(L);
 }
 
 static lua_State *lua_state;
 
-// Runs in a dedicated fiber (spawned by on_codal_event).  Has a full
-// fiber stack so lua_pcall won't overflow the idle or interrupt stacks.
-static void lua_event_handler_fiber(void *arg) {
-  codal::Event e = *(codal::Event *)arg;
-  delete (codal::Event *)arg;
+// One Lua call at a time. The script at boot and every handler run on the
+// one lua_State; a handler started while another call sleeps would run on
+// top of it, and the state breaks when the two end out of order. So an
+// event that comes while Lua runs waits, and is handled when the call is
+// over, in the order the events came. The line is short and fixed: an
+// event that finds it full is dropped, and counted
+// (microbit.eventsDropped()). The port's event that the REPL waits for
+// never is: the port is armed for one at a time, so one lost would leave
+// the REPL deaf. It waits apart, one at most, and goes first.
 
+#define LUA_EVENTS_WAITING 16
+
+typedef struct {
+  uint16_t source;
+  uint16_t value;
+  CODAL_TIMESTAMP timestamp;
+} LuaEvent;
+
+static bool lua_running = false;
+static LuaEvent lua_waiting[LUA_EVENTS_WAITING];
+static int lua_waiting_first = 0;
+static int lua_waiting_count = 0;
+static bool lua_port_waiting = false;
+static LuaEvent lua_port_event;
+
+static void lua_event_wait(const LuaEvent &e) {
+  if (e.source == DEVICE_ID_SERIAL && e.value == CODAL_SERIAL_EVT_HEAD_MATCH) {
+    lua_port_event = e;
+    lua_port_waiting = true;
+  } else if (lua_waiting_count == LUA_EVENTS_WAITING) {
+    lua_events_dropped++;
+  } else {
+    int at = (lua_waiting_first + lua_waiting_count) % LUA_EVENTS_WAITING;
+    lua_waiting[at] = e;
+    lua_waiting_count++;
+  }
+}
+
+static bool lua_event_next(LuaEvent &e) {
+  if (lua_port_waiting) {
+    e = lua_port_event;
+    lua_port_waiting = false;
+    return true;
+  }
+  if (lua_waiting_count == 0)
+    return false;
+  e = lua_waiting[lua_waiting_first];
+  lua_waiting_first = (lua_waiting_first + 1) % LUA_EVENTS_WAITING;
+  lua_waiting_count--;
+  return true;
+}
+
+// The script's on_event, called for one event
+static void lua_event_handle(const LuaEvent &e) {
   lua_getglobal(lua_state, "on_event");
   if (!lua_isfunction(lua_state, -1)) {
     lua_pop(lua_state, 1);
@@ -1846,6 +1906,35 @@ static void lua_event_handler_fiber(void *arg) {
     }
     lua_pop(lua_state, 1);
   }
+}
+
+void lua_call_begin(void) {
+  lua_running = true;
+}
+
+// The events that waited, then Lua is free. Fibers take turns only where
+// one sleeps or waits, so nothing comes between the last look at the line
+// and lua_running going false.
+void lua_call_end(void) {
+  LuaEvent e;
+  while (lua_event_next(e))
+    lua_event_handle(e);
+  lua_running = false;
+}
+
+// Runs in a dedicated fiber (spawned by on_codal_event).  Has a full
+// fiber stack so lua_pcall won't overflow the idle or interrupt stacks.
+static void lua_event_handler_fiber(void *arg) {
+  codal::Event *event = (codal::Event *)arg;
+  LuaEvent e = { event->source, event->value, event->timestamp };
+  delete event;
+  if (lua_running) {
+    lua_event_wait(e);
+    return;
+  }
+  lua_call_begin();
+  lua_event_handle(e);
+  lua_call_end();
 }
 
 // Called by the MessageBus for every event matching DEVICE_ID_ANY /

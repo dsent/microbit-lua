@@ -148,6 +148,17 @@ deepest user is the Lua parser (~4 KB) parsing the embedded chunk; see
 `docs/ram-usage.md` for the breakdown and sizing guidance.
 
 
+## Events
+
+The firmware calls the global `on_event(source, value, timestamp)` for each
+event: a button, the serial port, the radio. One Lua call runs at a time: an
+event that comes while the script, a handler or a command is still running
+waits in a line of 16, and is handled once the call is over, in the order the
+events came. The serial port's event the REPL waits for is kept apart and
+never lost. When the line is full an event is dropped;
+`microbit.eventsDropped()` says how many have been since boot.
+
+
 ## TPBot
 
 `tpbot` and the robot globals `robot_info`, `robot_move`, `turn` and
