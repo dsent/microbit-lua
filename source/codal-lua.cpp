@@ -1709,8 +1709,11 @@ void register_lua_modules(lua_State *L) {
 }
 
 // What source/lua-events.c needs of the board
-extern "C" void lua_events_show_error(const char *message) {
-  uBit.display.scroll(message);
+extern "C" void lua_events_show_error(const char *message, bool wait) {
+  if (wait)
+    uBit.display.scroll(message);
+  else
+    uBit.display.scrollAsync(message);
 }
 
 extern "C" uint32_t lua_events_now(void) {
@@ -1760,17 +1763,33 @@ static void on_codal_event(codal::Event e, void *arg) {
   if (e.source == DEVICE_ID_SCHEDULER || e.source == DEVICE_ID_COMPONENT ||
       e.source == DEVICE_ID_NOTIFY || e.source == DEVICE_ID_NOTIFY_ONE)
     return;
-  // The port says it has data after every character that comes; the REPL
-  // waits for its own event, and these would only fill the waiting line.
-  if (e.source == DEVICE_ID_SERIAL && e.value == CODAL_SERIAL_EVT_DATA_RECEIVED)
+  if (lua_event_is_noise(e.source, e.value))
     return;
   codal::Event *copy = new codal::Event(e);
-  if (create_fiber(lua_event_handler_fiber, copy) == NULL)
+  if (create_fiber(lua_event_handler_fiber, copy) == NULL) {
     delete copy;
+    // the port is armed for one event at a time: this one is not lost
+    if (e.source == DEVICE_ID_SERIAL && e.value == CODAL_SERIAL_EVT_HEAD_MATCH)
+      lua_events_port_missed();
+  }
 }
 
+// The port's event that the REPL waits for
+static const LuaEventId lua_port_event =
+  { DEVICE_ID_SERIAL, CODAL_SERIAL_EVT_HEAD_MATCH };
+
+// Events that only fill the waiting line: the port saying it has data
+// after every character, or that it is full, and a scroll that has ended.
+// Nothing in the firmware's script reads them.
+static const LuaEventId lua_noise_events[] = {
+  { DEVICE_ID_SERIAL, CODAL_SERIAL_EVT_DATA_RECEIVED },
+  { DEVICE_ID_SERIAL, CODAL_SERIAL_EVT_RX_FULL },
+  { DEVICE_ID_DISPLAY, DISPLAY_EVT_ANIMATION_COMPLETE },
+};
+
 void register_lua_event_listener(lua_State *L) {
-  lua_events_open(L, DEVICE_ID_SERIAL, CODAL_SERIAL_EVT_HEAD_MATCH);
+  lua_events_open(L, lua_port_event, lua_noise_events,
+                  sizeof lua_noise_events / sizeof lua_noise_events[0]);
   uBit.messageBus.listen(DEVICE_ID_ANY, DEVICE_EVT_ANY,
                          on_codal_event, NULL,
                          MESSAGE_BUS_LISTENER_IMMEDIATE);
