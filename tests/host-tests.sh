@@ -5,7 +5,7 @@
 #   (tests/tpbot-reference.lua), call by call;
 # - runtime-host-test: source/lua-script.lua, and programs in its place,
 #   over a stand-in board, with events through source/lua-events.c and
-#   print through source/lua-print.c.
+#   modules through source/lua-modules.c.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,6 +30,6 @@ cc "${STRICT[@]}" -o "$DIR/tpbot" "$ROOT/tests/tpbot-host-test.c" \
   "$ROOT/source/tpbot.c" "$DIR"/*.o -lm
 cc "${STRICT[@]}" -o "$DIR/runtime" "$ROOT/tests/runtime-host-test.c" \
   "$ROOT/source/tpbot.c" "$ROOT/source/lua-events.c" \
-  "$ROOT/source/lua-print.c" "$DIR"/*.o -lm
+  "$ROOT/source/lua-modules.c" "$DIR"/*.o -lm
 "$DIR/tpbot" "$ROOT/tests/tpbot-reference.lua"
 "$DIR/runtime" "$ROOT/source/lua-script.lua"

@@ -16,7 +16,7 @@ extern "C" {
 #include "stack-probe.h"
 #include "tpbot.h"
 #include "lua-events.h"
-#include "lua-print.h"
+#include "lua-modules.h"
 
 extern MicroBit uBit;
 
@@ -1198,7 +1198,7 @@ static bool radio_take(uint8_t kind, uint8_t link,
  * answered them waits until the tx() that is waiting is
  * done. A piece that finds the inbox full is left unanswered,
  * and the far end sends it again. */
-#define RADIO_INBOX 4
+#define RADIO_INBOX 2
 static uint8_t radio_inbox[RADIO_INBOX][RADIO_BODY];
 static int radio_inbox_len[RADIO_INBOX];
 static int radio_inbox_first = 0;
@@ -1428,7 +1428,9 @@ static bool radio_one(const char *body, int len)
 /* rx() -> string or nil
  * One piece, acknowledged. A piece that arrives twice is
  * acknowledged again and dropped: the far end did not hear
- * the first answer. */							\
+ * the first answer. A frame that is not a new piece is passed
+ * over for the next one waiting, so a piece behind it is not
+ * left for a later call. */						\
     F(rx,         { uint8_t body[RADIO_BODY];				\
                     uint8_t num;					\
                     int len;						\
@@ -1441,19 +1443,21 @@ static bool radio_one(const char *body, int len)
                         radio_inbox_len[at]);				\
                       return 1;						\
                     }							\
-                    if (radio_link == 0					\
-                         || !radio_take(RADIO_DATA, radio_link, NULL,	\
-                         &num, body, &len)){				\
-                      lua_pushnil(L);					\
-                      return 1;						\
+                    for (int n = 0; radio_link != 0			\
+                         && n <= MICROBIT_RADIO_MAXIMUM_RX_BUFFERS; n++) {	\
+                      if (radio_take(RADIO_DATA, radio_link, NULL,	\
+                                     &num, body, &len)) {		\
+                        radio_put(RADIO_ACK, radio_link, num, NULL, 0);	\
+                        if (num != radio_in) {				\
+                          radio_in = num;				\
+                          lua_pushlstring(L, (const char *)body, len);	\
+                          return 1;					\
+                        }						\
+                      } else if (uBit.radio.dataReady() == 0) {		\
+                        break;						\
+                      }							\
                     }							\
-                    radio_put(RADIO_ACK, radio_link, num, NULL, 0);	\
-                    if (num == radio_in) {				\
-                      lua_pushnil(L);					\
-                      return 1;						\
-                    }							\
-                    radio_in = num;					\
-                    lua_pushlstring(L, (const char *)body, len);	\
+                    lua_pushnil(L);					\
                     return 1;						\
                   })							\
 /* answered([name]) -> friendlyName if somebody, or with a
@@ -1573,15 +1577,6 @@ LUA_TPBOT2_FUNCTIONS
 LUA_NEZHA2_FUNCTIONS
 #undef F
 
-// One entry per public name of an API namespace: a method (func set) or an
-// event constant (func NULL, value set). Kept in flash; the namespace tables
-// reference these arrays and materialise entries on first access.
-typedef struct {
-  const char *name;
-  lua_CFunction func;
-  lua_Integer value;
-} LuaApi;
-
 #define F(name, body) {#name, l_##name, 0},
 #define C(n)          {#n, NULL, (lua_Integer)(n)},
 static const LuaApi l_microbit[] = {
@@ -1678,218 +1673,35 @@ static const LuaApi l_nezha2[] = {
 };
 #undef F
 
-// Resolve a missing field on an API namespace table. Upvalue 1 is the
-// namespace's LuaApi array. The first matching entry is materialised (a C
-// closure for a method, an integer for a constant) and cached in the table, so
-// only names that are actually used ever allocate.
-static int l_lazy_index(lua_State *L) {
-  const char *key = (lua_type(L, 2) == LUA_TSTRING) ? lua_tostring(L, 2) : NULL;
-  if (key != NULL) {
-    const LuaApi *e = (const LuaApi *)lua_touserdata(L, lua_upvalueindex(1));
-    for (; e->name != NULL; e++) {
-      if (strcmp(e->name, key) == 0) {
-        if (e->func != NULL)
-          lua_pushcfunction(L, e->func);
-        else
-          lua_pushinteger(L, e->value);
-        lua_pushvalue(L, 2);    // key
-        lua_pushvalue(L, -2);   // value
-        lua_rawset(L, 1);       // table[key] = value (cache it)
-        return 1;
-      }
-    }
-  }
-  return 0;
-}
-
-// Give the table at absolute index idx the lazy __index over api.
-static void lua_set_lazy_index(lua_State *L, int idx, const LuaApi *api) {
-  lua_newtable(L);
-  lua_pushlightuserdata(L, (void *)api);
-  lua_pushcclosure(L, l_lazy_index, 1);
-  lua_setfield(L, -2, "__index");
-  lua_setmetatable(L, idx);
-}
-
-
-// module(), from lua-5.1.5/src/loadlib.c
-
-static void setfenv (lua_State *L) {
-  lua_Debug ar;
-  if (lua_getstack(L, 1, &ar) == 0 ||
-      lua_getinfo(L, "f", &ar) == 0 ||  /* get calling function */
-      lua_iscfunction(L, -1))
-    luaL_error(L, LUA_QL("module") " not called from a Lua function");
-  lua_pushvalue(L, -2);
-  lua_setfenv(L, -2);
-  lua_pop(L, 1);
-}
-
-
-static void dooptions (lua_State *L, int n) {
-  int i;
-  for (i = 2; i <= n; i++) {
-    lua_pushvalue(L, i);  /* get option (a function) */
-    lua_pushvalue(L, -2);  /* module */
-    lua_call(L, 1, 0);
-  }
-}
-
-
-static void modinit (lua_State *L, const char *modname) {
-  const char *dot;
-  lua_pushvalue(L, -1);
-  lua_setfield(L, -2, "_M");  /* module._M = module */
-  lua_pushstring(L, modname);
-  lua_setfield(L, -2, "_NAME");
-  dot = strrchr(modname, '.');  /* look for last dot in module name */
-  if (dot == NULL) dot = modname;
-  else dot++;
-  /* set _PACKAGE as package name (full module name minus last part) */
-  lua_pushlstring(L, modname, dot - modname);
-  lua_setfield(L, -2, "_PACKAGE");
-}
-
-
-/* push the module's table, creating it (and _LOADED[modname]) if needed,
-   with no fields of its own */
-static void push_module_table (lua_State *L, const char *modname) {
-  lua_getfield(L, LUA_REGISTRYINDEX, "_LOADED");
-  lua_getfield(L, -1, modname);  /* get _LOADED[modname] */
-  if (!lua_istable(L, -1)) {  /* not found? */
-    lua_pop(L, 1);  /* remove previous result */
-    /* try global variable (and create one if it does not exist) */
-    if (luaL_findtable(L, LUA_GLOBALSINDEX, modname, 1) != NULL)
-      luaL_error(L, "name conflict for module " LUA_QS, modname);
-    lua_pushvalue(L, -1);
-    lua_setfield(L, -3, modname);  /* _LOADED[modname] = new table */
-  }
-  lua_remove(L, -2);  /* remove _LOADED */
-}
-
-
-/* push the module's table as push_module_table does, initialised */
-static void push_module (lua_State *L, const char *modname) {
-  push_module_table(L, modname);
-  /* check whether table already has a _NAME field */
-  lua_getfield(L, -1, "_NAME");
-  if (!lua_isnil(L, -1))  /* is table an initialized module? */
-    lua_pop(L, 1);
-  else {  /* no; initialize it */
-    lua_pop(L, 1);
-    modinit(L, modname);
-  }
-}
-
-
-static int ll_module (lua_State *L) {
-  const char *modname = luaL_checkstring(L, 1);
-  int n = lua_gettop(L);  /* number of arguments */
-  push_module(L, modname);
-  lua_pushvalue(L, -1);
-  setfenv(L);
-  dooptions(L, n);
-  return 0;
-}
-
-
-// Modules
-//
-// require(name) makes a module from the list below the first time it is
-// asked for: its table is found or made where module() would put it, so
-// microbit.audio lands in microbit.audio, and gets the lazy __index over
-// the module's API. It holds nothing else: the _M, _NAME and _PACKAGE
-// module() adds would cost heap in every table, and nothing reads them. A
-// parent made on the way (microbit, for microbit.audio) is a plain table;
-// requiring it later gives that same table its API.
-
-typedef struct {
-  const char *name;
-  const LuaApi *api;
-} LuaModule;
-
+// The modules require() makes (source/lua-modules.c). tpbot's first
+// require also sets the robot commands that are globals (source/tpbot.c).
 static const LuaModule lua_modules[] = {
-  {"microbit",               l_microbit},
-  {"microbit.display",       l_display},
-  {"microbit.accelerometer", l_accelerometer},
-  {"microbit.compass",       l_compass},
-  {"microbit.audio",         l_audio},
-  {"microbit.io",            l_io},
-  {"microbit.serial",        l_serial},
-  {"microbit.i2c",           l_i2c},
-  {"microbit.radio",         l_radio},
+  {"microbit",               l_microbit,      NULL},
+  {"microbit.display",       l_display,       NULL},
+  {"microbit.accelerometer", l_accelerometer, NULL},
+  {"microbit.compass",       l_compass,       NULL},
+  {"microbit.audio",         l_audio,         NULL},
+  {"microbit.io",            l_io,            NULL},
+  {"microbit.serial",        l_serial,        NULL},
+  {"microbit.i2c",           l_i2c,           NULL},
+  {"microbit.radio",         l_radio,         NULL},
 #if CONFIG_ENABLED(DEVICE_BLE)
-  {"microbit.ble.uart",      l_ble_uart},
+  {"microbit.ble.uart",      l_ble_uart,      NULL},
 #endif
-  {"planetx",                l_planetx},
-  {"tpbot",                  l_tpbot},
-  {"tpbot2",                 l_tpbot2},
-  {"nezha2",                 l_nezha2},
-  {NULL, NULL}
+  {"planetx",                l_planetx,       NULL},
+  {"tpbot",                  l_tpbot,         tpbot_register_globals},
+  {"tpbot2",                 l_tpbot2,        NULL},
+  {"nezha2",                 l_nezha2,        NULL},
+  {NULL, NULL, NULL}
 };
 
-static int l_require(lua_State *L) {
-  const char *name = luaL_checkstring(L, 1);
-  lua_getfield(L, LUA_REGISTRYINDEX, "_LOADED");
-  lua_getfield(L, -1, name);
-  if (lua_toboolean(L, -1)) return 1;
-  const LuaModule *m = lua_modules;
-  while (m->name != NULL && strcmp(m->name, name) != 0) m++;
-  if (m->name == NULL)
-    return luaL_error(L, "module " LUA_QS " not found", name);
-  push_module_table(L, name);
-  lua_set_lazy_index(L, lua_gettop(L), m->api);
-  return 1;
-}
-
-// What is there before the script runs, as it was before require came:
-// the global microbit with its tables, and tpbot. A script that is only
-// a person's program, put into the image in place of this firmware's
-// own, finds them all the same.
-static const char *const lua_at_start[] = {
-  "microbit",
-  "microbit.display",
-  "microbit.accelerometer",
-  "microbit.compass",
-  "microbit.audio",
-  "microbit.io",
-  "microbit.serial",
-  "microbit.i2c",
-  "microbit.radio",
-#if CONFIG_ENABLED(DEVICE_BLE)
-  "microbit.ble.uart",
-#endif
-  "tpbot",
-  NULL
-};
-
-
-// package, module and require, the modules above, the robot commands that
-// are globals (source/tpbot.c), and print to the port (source/lua-print.c). package.loaded is the
-// registry's _LOADED, which module() relies on.
 void register_lua_modules(lua_State *L) {
-  lua_newtable(L);                                    // package
-  lua_getfield(L, LUA_REGISTRYINDEX, "_LOADED");
-  lua_setfield(L, -2, "loaded");
-  lua_setglobal(L, "package");
-  lua_register(L, "module", ll_module);
-  lua_register(L, "require", l_require);
-  for (const char *const *name = lua_at_start; *name != NULL; name++) {
-    lua_pushcfunction(L, l_require);
-    lua_pushstring(L, *name);
-    lua_call(L, 1, 0);
-  }
-  tpbot_register_globals(L);
-  lua_print_open(L);
+  lua_modules_open(L, lua_modules);
 }
 
 // What source/lua-events.c needs of the board
 extern "C" void lua_events_show_error(const char *message) {
   uBit.display.scroll(message);
-}
-
-extern "C" void lua_print_out(const char *text, size_t length) {
-  uBit.serial.send((uint8_t *)text, (int)length, SYNC_SLEEP);
 }
 
 extern "C" uint32_t lua_events_now(void) {
@@ -1904,7 +1716,7 @@ extern "C" void lua_events_pause(uint32_t ms) {
 // fiber stack so lua_pcall won't overflow the idle or interrupt stacks.
 static void lua_event_handler_fiber(void *arg) {
   codal::Event *event = (codal::Event *)arg;
-  LuaEvent e = { event->source, event->value, (uint64_t)event->timestamp };
+  LuaEvent e = { event->source, event->value, (uint32_t)event->timestamp };
   delete event;
   lua_event_arrived(e);
 }

@@ -20,7 +20,7 @@
 #include "lauxlib.h"
 #include "lualib.h"
 #include "lua-events.h"
-#include "lua-print.h"
+#include "lua-modules.h"
 #include "tpbot.h"
 
 void lua_strip_debug(lua_State *L);
@@ -110,18 +110,13 @@ void lua_events_pause(uint32_t ms) {
     pauses[pauses_done++]();
 }
 
-void lua_print_out(const char *text, size_t length) {
-  char piece[1024];
-  if (length >= sizeof piece) length = sizeof piece - 1;
-  memcpy(piece, text, length);
-  piece[length] = 0;
-  note(piece);
-}
-
 // A robot that takes every command; robot_move's sleep is the firmware's,
 // which lets other fibers run and handles no events.
+static int bus_writes;
+
 int tpbot_i2c_write(int address, const char *data, size_t length) {
   (void)address; (void)data; (void)length;
+  bus_writes++;
   return 0;
 }
 void tpbot_sleep(uint32_t ms) {
@@ -214,55 +209,48 @@ static int l_name(lua_State *L) {
   return 1;
 }
 
-static void set(lua_State *L, const char *name, lua_CFunction f) {
-  lua_pushcfunction(L, f);
-  lua_setfield(L, -2, name);
-}
-
-static void constant(lua_State *L, const char *name, int value) {
-  lua_pushinteger(L, value);
-  lua_setfield(L, -2, name);
-}
-
-static void board(lua_State *L) {
-  lua_newtable(L);
-  set(L, "version", l_version);
-  set(L, "friendlyName", l_name);
-  set(L, "sleep", l_sleep);
-  set(L, "eventsDropped", lua_events_dropped);
-  set(L, "eventFallback", lua_events_fallback);
-  constant(L, "DEVICE_ID_BUTTON_A", ID_BUTTON_A);
-  constant(L, "DEVICE_ID_BUTTON_B", ID_BUTTON_B);
-  constant(L, "DEVICE_ID_BUTTON_AB", ID_BUTTON_AB);
-  constant(L, "DEVICE_ID_RADIO", ID_RADIO);
-  constant(L, "DEVICE_ID_SERIAL", ID_SERIAL);
-  constant(L, "CODAL_SERIAL_EVT_HEAD_MATCH", HEAD_MATCH);
-  constant(L, "DEVICE_BUTTON_EVT_CLICK", CLICK);
-  constant(L, "DEVICE_BUTTON_EVT_LONG_CLICK", LONG_CLICK);
-  lua_newtable(L);
-  set(L, "setVolume", l_nothing);
-  set(L, "express", l_nothing);
-  lua_setfield(L, -2, "audio");
-  lua_newtable(L);
-  set(L, "animate", l_nothing);
-  set(L, "scrollAsync", l_nothing);
-  set(L, "scroll", l_scroll);
-  lua_setfield(L, -2, "display");
-  lua_newtable(L);
-  set(L, "send", l_send);
-  set(L, "getCharAsync", l_get_char);
-  set(L, "eventAfterAsync", l_arm);
-  lua_setfield(L, -2, "serial");
-  lua_newtable(L);
-  set(L, "enable", l_nothing);
-  set(L, "listen", l_nothing);
-  set(L, "connect", l_connect);
-  set(L, "answered", l_nothing);
-  set(L, "tx", l_tx);
-  set(L, "rx", l_rx);
-  lua_setfield(L, -2, "radio");
-  lua_setglobal(L, "microbit");
-}
+// The board's modules, as the firmware lists them for require(), with the
+// stand-ins above; tpbot is the firmware's own.
+static const LuaApi l_microbit[] = {
+  {"version", l_version, 0}, {"friendlyName", l_name, 0},
+  {"sleep", l_sleep, 0}, {"eventsDropped", lua_events_dropped, 0},
+  {"eventFallback", lua_events_fallback, 0},
+  {"DEVICE_ID_BUTTON_A", NULL, ID_BUTTON_A},
+  {"DEVICE_ID_BUTTON_B", NULL, ID_BUTTON_B},
+  {"DEVICE_ID_BUTTON_AB", NULL, ID_BUTTON_AB},
+  {"DEVICE_ID_RADIO", NULL, ID_RADIO},
+  {"DEVICE_ID_SERIAL", NULL, ID_SERIAL},
+  {"CODAL_SERIAL_EVT_HEAD_MATCH", NULL, HEAD_MATCH},
+  {"DEVICE_BUTTON_EVT_CLICK", NULL, CLICK},
+  {"DEVICE_BUTTON_EVT_LONG_CLICK", NULL, LONG_CLICK},
+  {NULL, NULL, 0}
+};
+static const LuaApi l_audio[] = {
+  {"setVolume", l_nothing, 0}, {"express", l_nothing, 0}, {NULL, NULL, 0}
+};
+static const LuaApi l_display[] = {
+  {"animate", l_nothing, 0}, {"scrollAsync", l_nothing, 0},
+  {"scroll", l_scroll, 0}, {NULL, NULL, 0}
+};
+static const LuaApi l_serial[] = {
+  {"send", l_send, 0}, {"getCharAsync", l_get_char, 0},
+  {"eventAfterAsync", l_arm, 0}, {NULL, NULL, 0}
+};
+static const LuaApi l_radio[] = {
+  {"enable", l_nothing, 0}, {"listen", l_nothing, 0},
+  {"connect", l_connect, 0}, {"answered", l_nothing, 0},
+  {"tx", l_tx, 0}, {"rx", l_rx, 0}, {NULL, NULL, 0}
+};
+#define X(name, function) {#name, function, 0},
+static const LuaApi l_tpbot[] = { TPBOT_FUNCTIONS {NULL, NULL, 0} };
+#undef X
+static const LuaModule modules[] = {
+  {"microbit", l_microbit, NULL}, {"microbit.audio", l_audio, NULL},
+  {"microbit.display", l_display, NULL}, {"microbit.serial", l_serial, NULL},
+  {"microbit.radio", l_radio, NULL},
+  {"tpbot", l_tpbot, tpbot_register_globals},
+  {NULL, NULL, NULL}
+};
 
 // What the next pauses do, from the next one on
 static void plan(Action a) {
@@ -270,6 +258,7 @@ static void plan(Action a) {
 }
 
 static void fresh(void) {
+  bus_writes = 0;
   lost = 0;
   linked = 0;
   far_end[0] = 0;
@@ -320,9 +309,7 @@ static void boot_script(const char *text, size_t length) {
   luaopen_string(L);
   luaopen_math(L);
   lua_settop(L, 0);
-  board(L);
-  tpbot_register_globals(L);
-  lua_print_open(L);
+  lua_modules_open(L, modules);
   lua_events_open(L, ID_SERIAL, HEAD_MATCH);
   if (luaL_loadbuffer(L, text, length, "embedded")) {
     fprintf(stderr, "%s\n", lua_tostring(L, -1));
@@ -357,6 +344,15 @@ static void boot(const char *program) {
 // A program that is the board's whole script, as upload() puts one
 static void boot_alone(const char *program) {
   boot_script(program, strlen(program));
+}
+
+// Such a program that starts by requiring microbit and its display
+static void boot_program(const char *program) {
+  static const char START[] =
+    "require('microbit') require('microbit.display')\n";
+  char text[4096];
+  snprintf(text, sizeof text, "%s%s", START, program);
+  boot_alone(text);
 }
 
 static int failures, checks;
@@ -488,6 +484,7 @@ static void the_repl(void) {
   expect(strstr(out, "micro:bit\r\nLua 5.1 REPL\r\nfirmware hosttest\r\n> ")
          == out, "the greeting, then the prompt");
   expect(armed, "the port is armed after boot");
+  expect(bus_writes == 0, "booting writes nothing to the bus");
   said = line("print(6*7)");
   expect(strcmp(said, "print(6*7)\r\r\n42\r\n> ") == 0, "print(6*7)");
   said = line("6*7");
@@ -567,36 +564,58 @@ static void on_event_and_print(void) {
   expect(strstr(said, "=> 2\r\n> ") != NULL, "... and the REPL still answers");
 }
 
+// The REPL keeps only pcall of its own: a global it uses, taken away,
+// can stop what a line shows, but the prompt comes back and the port is
+// armed, so the global can be put back from the prompt. print is the
+// REPL's own too.
 static void globals_taken_away(void) {
   const char *said;
   char what[256], take[128];
   int i;
+  fresh();
+  boot("");
+  still_answers("nothing");
   for (i = 0; GLOBALS[i]; i++) {
     fresh();
     boot("");
     snprintf(take, sizeof take, "_G.%s = nil", GLOBALS[i]);
     line(take);
-    said = line("print(6*7)");
-    snprintf(what, sizeof what, "print answers after %s", take);
-    expect(!strcmp(GLOBALS[i], "print")
-           || strstr(said, "42\r\n> ") != NULL, what);
-    still_answers(take);
+    said = line("6*7");
+    snprintf(what, sizeof what, "the prompt comes back after %s", take);
+    expect(armed && strstr(said, "> ") != NULL, what);
   }
   for (i = 0; LIBRARY_FIELDS[i]; i++) {
     fresh();
     boot("");
     snprintf(take, sizeof take, "%s = nil", LIBRARY_FIELDS[i]);
     line(take);
-    still_answers(take);
+    said = line("6*7");
+    snprintf(what, sizeof what, "the prompt comes back after %s", take);
+    expect(armed && strstr(said, "> ") != NULL, what);
   }
   for (i = 0; GLOBALS[i]; i++) {
     fresh();
     snprintf(take, sizeof take, "_G.%s = nil", GLOBALS[i]);
     boot(take);
     said = line("6*7");
-    snprintf(what, sizeof what, "the REPL answers after a program's %s",
+    snprintf(what, sizeof what, "the prompt comes back after a program's %s",
              take);
-    expect(strstr(said, "=> 42\r\n> ") != NULL, what);
+    expect(armed && strstr(said, "> ") != NULL, what);
+  }
+  fresh();
+  boot("");
+  line("_G.pcall = nil");
+  said = line("6*7");
+  expect(strstr(said, "=> 42\r\n> ") != NULL, "pcall = nil leaves the REPL whole");
+  line("_G.print = nil");
+  said = line("6*7");
+  expect(strstr(said, "=> 42\r\n> ") != NULL, "print = nil leaves the REPL whole");
+  line("_G.microbit.display.scroll = nil");
+  {
+    size_t before = strlen(out);
+    press_a();
+    expect(strstr(out + before, "<scroll A>") != NULL,
+           "a module's function set to nil comes back from the firmware");
   }
 }
 
@@ -693,7 +712,7 @@ static void programs_alone(void) {
   fresh();
   plan(press_a);
   plan(press_b_then_a);
-  boot_alone(
+  boot_program(
     "local got = {}\n"
     "function on_event(s, v) got[#got + 1] = s .. ':' .. v end\n"
     "for i = 1, 3 do microbit.sleep(100) end\n"
@@ -709,7 +728,7 @@ static void programs_alone(void) {
     fresh();
     plan(press_a);
     plan(press_b);
-    boot_alone(
+    boot_program(
       "function on_event(s, v)\n"
       "  microbit.display.scroll('in' .. s)\n"
       "  microbit.sleep(20)\n"
@@ -726,7 +745,7 @@ static void programs_alone(void) {
       "<booted>", "<scroll in1>", "<scroll out1>", "<scroll in2>",
       "<scroll out2>", NULL };
     fresh();
-    boot_alone(
+    boot_program(
       "function on_event(s, v)\n"
       "  microbit.display.scroll('in' .. s)\n"
       "  microbit.sleep(20)\n"
@@ -737,15 +756,32 @@ static void programs_alone(void) {
     expect(in_order(out, order), "... and after boot as well");
   }
 
-  // print goes to the port, a line at a time
+  // Nothing but package, module and require is there before a program
+  // requires it, and requiring touches no bus
   fresh();
-  boot_alone("print(1, 'a') print('x\\ny') print()");
-  expect(strstr(out, "1\ta\r\nx\r\ny\r\n\r\n<booted>") != NULL,
-         "a program's print writes to the port, lines ended by \\r\\n");
+  boot_alone(
+    "if microbit ~= nil or tpbot ~= nil or robot_move ~= nil then\n"
+    "  error('there at start')\n"
+    "end\n"
+    "local d = require('microbit.display')\n"
+    "if microbit == nil or microbit.version ~= nil or microbit.display ~= d then\n"
+    "  error('microbit.display')\n"
+    "end\n"
+    "local m = require('microbit')\n"
+    "if m ~= microbit or microbit.version == nil then error('microbit') end\n"
+    "if require('microbit') ~= m then error('once') end\n"
+    "local t = require('tpbot')\n"
+    "if t ~= tpbot or type(robot_move) ~= 'function'\n"
+    "  or type(robot_info) ~= 'function' or type(turn) ~= 'function'\n"
+    "  or type(straight) ~= 'function' then error('tpbot') end\n"
+    "d.scroll('ok')\n");
+  expect(strstr(out, "<scroll ok><booted>") != NULL && bus_writes == 0,
+         "a program finds only require; require sets the globals it names, "
+         "and tpbot's the robot commands, with nothing on the bus");
 
   // A metamethod of _G's that fails does not reach the dispatcher
   fresh();
-  boot_alone(
+  boot_program(
     "setmetatable(_G, { __index = function(t, k) error('undeclared ' .. k) "
     "end })\n"
     "microbit.display.scroll('set')\n");
@@ -756,7 +792,7 @@ static void programs_alone(void) {
   // No on_event and no fallback: events go nowhere, and nothing breaks
   fresh();
   plan(press_a);
-  boot_alone("microbit.sleep(50) microbit.display.scroll('done')");
+  boot_program("microbit.sleep(50) microbit.display.scroll('done')");
   press_b();
   expect(strstr(out, "<scroll done><booted>") != NULL
          && strstr(out, "<error") == NULL,
@@ -771,7 +807,7 @@ static void programs_alone(void) {
     fresh();
     plan(press_a);
     on_error = press_b;
-    boot_alone(
+    boot_program(
       "function on_event(s, v) microbit.display.scroll('late' .. s) end\n"
       "microbit.sleep(10)\n"
       "error('boom')\n");

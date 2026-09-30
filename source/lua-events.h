@@ -10,10 +10,11 @@ extern "C" {
 
 #include "lua.h"
 
+// The timestamp is what Lua sees of CODAL's: its low 32 bits.
 typedef struct {
   uint16_t source;
   uint16_t value;
-  uint64_t timestamp;
+  uint32_t timestamp;
 } LuaEvent;
 
 // L, and which event is the port's that the REPL waits for.

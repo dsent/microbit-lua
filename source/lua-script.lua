@@ -1,25 +1,14 @@
-local uBit = microbit
+local uBit = require("microbit")
+require("microbit.audio")
+require("microbit.display")
+local radio = require("microbit.radio")
+local serial = require("microbit.serial")
+require("tpbot")
 
--- What the REPL and the event handlers use, taken as they are now:
--- a program that puts something else in a global, or takes one away,
--- changes its own world, and the prompt still answers.
-local pcall, tostring, type, select = pcall, tostring, type, select
-local pairs, setmetatable = pairs, setmetatable
-local loadstring, setfenv, collectgarbage =
-  loadstring, setfenv, collectgarbage
-local format, find, gmatch, match, sub =
-  string.format, string.find, string.gmatch, string.match, string.sub
-local insert, concat = table.insert, table.concat
-local scroll = uBit.display.scroll
-local radio = {
-  enable = uBit.radio.enable,
-  listen = uBit.radio.listen,
-  connect = uBit.radio.connect,
-  answered = uBit.radio.answered,
-  tx = uBit.radio.tx,
-  rx = uBit.radio.rx,
-}
-local sleep = uBit.sleep
+-- What the REPL cannot do without, taken here so that the prompt comes
+-- back even after a line takes away the global: a line runs under pcall,
+-- and every character goes out through gmatch.
+local pcall, gmatch = pcall, string.gmatch
 local HEAD_MATCH = uBit.CODAL_SERIAL_EVT_HEAD_MATCH
 local CLICK = uBit.DEVICE_BUTTON_EVT_CLICK
 local LONG_CLICK = uBit.DEVICE_BUTTON_EVT_LONG_CLICK
@@ -40,12 +29,6 @@ uBit.audio.setVolume(20)
 uBit.audio.express("giggle")
 uBit.display.animate(heart, 1000, 5)
 uBit.display.scrollAsync(uBit.friendlyName())
-
-local serial = {
-  send = uBit.serial.send,
-  getCharAsync = uBit.serial.getCharAsync,
-  eventAfterAsync = uBit.serial.eventAfterAsync,
-}
 
 -- The session being served, if any
 local active_session
@@ -71,7 +54,7 @@ io = {
 
 local function is_identifier(str)
   return type(str) == "string"
-    and match(str, "^[%a_][%w_]*$")
+    and string.match(str, "^[%a_][%w_]*$")
 end
 
 local prettyprint = { }
@@ -86,7 +69,7 @@ local function serialize(value, visited)
 end
 
 function prettyprint.string(value)
-  return format("%q", value)
+  return string.format("%q", value)
 end
 
 local function key(k, visited)
@@ -102,12 +85,12 @@ local function table_tokens(value, visited)
   local first = true
   for k, v in pairs(value) do
     if not first then
-       insert(out, ", ")
+       table.insert(out, ", ")
     end
     first = false
-    insert(out, key(k, visited) .. " = " .. serialize(v, visited))
+    table.insert(out, key(k, visited) .. " = " .. serialize(v, visited))
   end
-  insert(out, "}")
+  table.insert(out, "}")
   return out
 end
 
@@ -118,7 +101,7 @@ function prettyprint.table(value, visited)
   visited[value] = true
   local out = table_tokens(value, visited)
   visited[value] = nil
-  return concat(out)
+  return table.concat(out)
 end
 
 local function print_values(serialize, ...)
@@ -128,9 +111,9 @@ local function print_values(serialize, ...)
   end
   local out = { }
   for i = 1, n do
-    insert(out, serialize(select(i, ...)))
+    table.insert(out, serialize(select(i, ...)))
   end
-  write(concat(out, "\t") .. "\n")
+  write(table.concat(out, "\t") .. "\n")
 end
 
 local env = { }
@@ -147,7 +130,7 @@ local function load_with_env(code, chunkname)
 end
 
 local function is_incomplete(err)
-  return err and find(err, "near '<eof>'", 1, true) ~= nil
+  return err and string.find(err, "near '<eof>'", 1, true) ~= nil
 end
 
 local function compile_try(code)
@@ -203,9 +186,9 @@ local function execute(chunk)
     if #results > 1 then
       local out = { }
       for i = 2, #results do
-        insert(out, serialize(results[i]))
+        table.insert(out, serialize(results[i]))
       end
-      say("=> " .. concat(out, "\t"))
+      say("=> " .. table.concat(out, "\t"))
     end
   else
     say("Runtime error: " .. tostring(results[2]))
@@ -244,14 +227,15 @@ local function make_session(transport)
     local ran, err = pcall(run_line, text)
     if not ran then
       s.buffer = ""
-      collectgarbage("collect")
-      local shown, words = pcall(tostring, err)
-      if not shown or type(words) ~= "string" then
-        words = "the result cannot be shown"
+      pcall(collectgarbage, "collect")
+      local said = pcall(function()
+        say("Runtime error: " .. tostring(err))
+      end)
+      if not said then
+        pcall(say, "Runtime error: the result cannot be shown")
       end
-      pcall(say, "Runtime error: " .. words)
     end
-    collectgarbage("collect")
+    pcall(collectgarbage, "collect")
     pcall(s.prompt)
   end
   function s.run(f, ...)
@@ -280,7 +264,7 @@ end
 
 local function backspace()
   if #serial_session.buffer > 0 then
-    serial_session.buffer = sub(serial_session.buffer, 1, -2)
+    serial_session.buffer = string.sub(serial_session.buffer, 1, -2)
     write("\b \b")
   end
 end
@@ -336,9 +320,9 @@ handler[microbit.DEVICE_ID_SERIAL] = port_to_console
 
 local function button(value, btn)
   if value == CLICK then
-      scroll(btn)
+      uBit.display.scroll(btn)
    elseif value == LONG_CLICK then
-      scroll(btn .. "!")
+      uBit.display.scroll(btn .. "!")
   end
 end
 
@@ -391,13 +375,13 @@ local radio_session = make_session({
 -- stands before a line ending is entered, what follows it
 -- waits for the rest to come.
 local function typed(piece)
-  local at = find(piece, "[\r\n]")
+  local at = string.find(piece, "[\r\n]")
   while at do
     radio_session.buffer =
-      radio_session.buffer .. sub(piece, 1, at - 1)
+      radio_session.buffer .. string.sub(piece, 1, at - 1)
     radio_session.submit("")
-    piece = sub(piece, at + 1)
-    at = find(piece, "[\r\n]")
+    piece = string.sub(piece, at + 1)
+    at = string.find(piece, "[\r\n]")
   end
   radio_session.buffer = radio_session.buffer .. piece
 end
@@ -418,7 +402,7 @@ function listen(name)
     if piece then
       radio_session.run(function() typed(piece) end)
     end
-    sleep(5)
+    uBit.sleep(5)
   end
 end
 
@@ -430,7 +414,7 @@ local function typing()
     chars[#chars + 1] = c
     c = serial.getCharAsync()
   end
-  return concat(chars)
+  return table.concat(chars)
 end
 
 -- Whoever has the port serves it: the console's own session
@@ -446,11 +430,11 @@ local function port_to_link(value)
     serial.eventAfterAsync(1)
     write(text)
     typed_here = typed_here .. text
-    local at = find(typed_here, "[\r\n]")
+    local at = string.find(typed_here, "[\r\n]")
     while at do
-      radio.tx(sub(typed_here, 1, at))
-      typed_here = sub(typed_here, at + 1)
-      at = find(typed_here, "[\r\n]")
+      radio.tx(string.sub(typed_here, 1, at))
+      typed_here = string.sub(typed_here, at + 1)
+      at = string.find(typed_here, "[\r\n]")
     end
   end
 end
