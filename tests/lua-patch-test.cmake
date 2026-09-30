@@ -2,10 +2,13 @@
 #
 # The build's Lua patches (source/lua-patch.cmake), on Lua sources in each
 # state libraries/ can hold: fresh, patched as plain patch patches them;
-# patched already, left as they are; patched in part, finished; with a
-# comment holding a patch's words, patched all the same; and with a line of
-# a patched block gone, though the same line is elsewhere in the file, or
-# with an edited patch's words, stopping the build and naming the way back.
+# patched already, left as they are; patched in part, finished. And the
+# build stopping, naming the way back, at a file changed otherwise: with a
+# comment holding a patch's words, at a patched block that has lost a line
+# the file holds elsewhere, at a patch no longer listed, and at a patch
+# edited since, a hunk dropped or a line changed; and naming the patch at
+# one that no longer fits Lua as it ships, or that is missing, or with no
+# patch tool.
 
 set(_patched "${WORK}/patched/lua-5.1.5/src")
 
@@ -20,10 +23,11 @@ endfunction()
 
 # the build's patches applied to WORK/<dir>; its exit code in _rc, what it
 # said in _said
+# ARGN: more -D settings for tests/lua-patch-one.cmake
 function(apply DIR)
     execute_process(
         COMMAND ${CMAKE_COMMAND} -DROOT=${ROOT}
-                -DLUA_SRC_DIR=${WORK}/${DIR}/lua-5.1.5/src
+                -DLUA_SRC_DIR=${WORK}/${DIR}/lua-5.1.5/src ${ARGN}
                 -P "${ROOT}/tests/lua-patch-one.cmake"
         RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
     set(_rc ${_rc} PARENT_SCOPE)
@@ -91,14 +95,14 @@ apply(part)
 same(part)
 check("a luaconf.h holding its first two patches gets the rest" _rc EQUAL 0 AND _same)
 
-# a comment holding the new block's words does not pass for it
+# a comment holding the new block's words does not pass for it: the file is
+# not Lua's own, and stops the build
 fresh_lua(comment)
 file(APPEND "${WORK}/comment/lua-5.1.5/src/ldebug.c"
      "/* no line info */\n/* luaO_pushfstring(L, \"%s: %s\", buff, msg); */\n")
 apply(comment)
-file(READ "${WORK}/comment/lua-5.1.5/src/ldebug.c" _text)
-string(FIND "${_text}" "    else  /* no line info: the chunk was stripped */" _at)
-check("an ldebug.c whose comments hold the patch's words is patched" _rc EQUAL 0 AND NOT _at EQUAL -1)
+string(FIND "${_said}" "Delete" _named)
+check("an unpatched ldebug.c whose comments hold the patch's words stops the build" NOT _rc EQUAL 0 AND NOT _named EQUAL -1)
 
 # a line gone from a patched block, the same line standing elsewhere
 function(damaged FILE LINE NTH WHAT)
@@ -133,3 +137,67 @@ damaged(lauxlib.c "      return;\n" 1
         "a luaL_where whose new return; is gone stops the build, naming the way back")
 damaged(ldo.c "    case 2: luaD_throw(L, LUA_ERRERR);\n" 1
         "a resume whose C stack case 2 is gone stops the build")
+
+# the fully patched Lua in WORK/<dir>
+function(patched_copy DIR)
+    file(REMOVE_RECURSE "${WORK}/${DIR}")
+    file(COPY "${WORK}/build/lua-5.1.5" DESTINATION "${WORK}/${DIR}")
+endfunction()
+
+# the build stopped, its words holding WORDS
+function(stopped WORDS WHAT)
+    string(FIND "${_said}" "${WORDS}" _named)
+    check("${WHAT}" NOT _rc EQUAL 0 AND NOT _named EQUAL -1)
+endfunction()
+
+# a patch left off the list, still in the file
+patched_copy(unlisted)
+apply(unlisted -DSKIP=ldo-text-only.patch)
+stopped("Delete" "an ldo.c holding a patch no longer listed stops the build")
+
+# patches edited since: a hunk dropped, a line changed
+file(REMOVE_RECURSE "${WORK}/edited")
+file(COPY "${ROOT}/source/" DESTINATION "${WORK}/edited")
+file(READ "${WORK}/edited/lstrlib-cstack.patch" _diff)
+string(FIND "${_diff}" "\n@@ " _first)
+math(EXPR _from "${_first} + 1")
+string(SUBSTRING "${_diff}" ${_from} -1 _after)
+string(FIND "${_after}" "\n@@ " _second)
+math(EXPR _keep "${_from} + ${_second} + 1")
+string(SUBSTRING "${_diff}" 0 ${_keep} _diff)
+file(WRITE "${WORK}/edited/lstrlib-cstack.patch" "${_diff}")
+patched_copy(hunk)
+apply(hunk -DPATCH_DIR=${WORK}/edited)
+stopped("Delete" "a patch edited down to its first hunk stops the build")
+file(COPY "${ROOT}/source/lstrlib-cstack.patch" DESTINATION "${WORK}/edited")
+file(READ "${WORK}/edited/ldebug-no-line.patch" _diff)
+string(REPLACE "\"%s: %s\", buff, msg" "\"%s - %s\", buff, msg" _diff "${_diff}")
+file(WRITE "${WORK}/edited/ldebug-no-line.patch" "${_diff}")
+patched_copy(words)
+apply(words -DPATCH_DIR=${WORK}/edited)
+stopped("Delete" "a patch whose words were edited since stops the build")
+
+# a patch that does not fit Lua as it ships: named, with no advice to
+# delete what is not at fault
+file(READ "${WORK}/edited/ldebug-no-line.patch" _diff)
+string(REPLACE "     char buff[LUA_IDSIZE];  /* add file:line information */"
+               "     char buff[LUA_IDSIZE];  /* where */"
+               _diff "${_diff}")
+file(WRITE "${WORK}/edited/ldebug-no-line.patch" "${_diff}")
+fresh_lua(unfit)
+apply(unfit -DPATCH_DIR=${WORK}/edited)
+stopped("ldebug-no-line.patch does not go into ldebug.c"
+        "a patch that no longer fits Lua as it ships is named")
+
+# a listed patch missing, and no patch tool
+fresh_lua(missing)
+apply(missing "-DEXTRA=ldo.c no-such.patch")
+stopped("has no such file" "a listed patch that is missing is named")
+execute_process(
+    COMMAND ${CMAKE_COMMAND} -E env PATH=${WORK}/nowhere
+            ${CMAKE_COMMAND} -DROOT=${ROOT}
+            -DLUA_SRC_DIR=${WORK}/missing/lua-5.1.5/src
+            -P "${ROOT}/tests/lua-patch-one.cmake"
+    RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+set(_said "${_out}${_err}")
+stopped("LUA_PATCH_TOOL" "with no patch tool the build says so")

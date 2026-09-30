@@ -321,7 +321,7 @@ embed` workflow to require compatible bytecode.
   calls `device_heap_print()` (CODAL allocator `mb_total_used`/`mb_total_free`).
   Config changes require `./build.py --clean`.
 - Number type: S6 is selected by `LUA_NUMBER_IS_FLOAT`; `source/luaconf-float.patch`
-  is applied in place from CMake with a content guard, so it is a no-op once
-  `libraries/` is patched. `LUAI_USER_ALIGNMENT_T` (`double`) is deliberately
+  is applied in place from CMake (`source/lua-patch.cmake`), once, so it is a
+  no-op once `libraries/` is patched. `LUAI_USER_ALIGNMENT_T` (`double`) is deliberately
   left unchanged, so string/userdata alignment does not depend on the number
   type.

@@ -282,12 +282,14 @@ Classic at once.
 - `source/lua-script.lua` over a stand-in board, with events through
   `source/lua-events.c`: typing at the REPL, buttons pressed while Lua sleeps,
   and the globals the REPL uses taken away;
-- `source/lua-cstack.c`'s limits at three stack sizes: they follow the size;
+- `source/lua-cstack.c`'s limits at four stack sizes, which they follow, and
+  at sizes too small for them, where none wraps round;
 - `tests/wait-audit.sh`: every binding that waits looks for `on_event` first;
 - `tests/lua-patch-test.cmake`: the build's Lua patches go into a fresh Lua
-  as plain `patch` puts them, change nothing a second time, finish a file
-  patched in part, and stop the build, naming the way back, at a file whose
-  patched block has lost a line.
+  as plain `patch` puts them, change nothing a second time and finish a file
+  patched in part; a file changed otherwise, or holding a patch no longer
+  listed or edited since, stops the build naming the way back, and a patch
+  that no longer fits Lua, a missing one, or no `patch` tool is named.
 
 It needs `cc`, `patch`, `cmake`, and the Lua tarball a firmware build leaves
 in `libraries/`, which it patches as the build does.
