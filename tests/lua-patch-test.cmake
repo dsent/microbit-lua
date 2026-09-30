@@ -8,8 +8,8 @@
 # the file holds elsewhere, at a patch no longer listed, and at a patch
 # edited since, a hunk dropped or a line changed; and naming the patch at
 # one that no longer fits Lua as it ships, or that is missing, or with no
-# patch tool. And the Lua tarball: lua.org's goes on, another stops the
-# build.
+# patch tool. A file no patch touches, changed, stops the build too. And
+# the Lua tarball: lua.org's goes on, another stops the build.
 
 set(_patched "${WORK}/patched/lua-5.1.5/src")
 
@@ -218,6 +218,16 @@ fresh_lua(unfit)
 apply(unfit -DPATCH_DIR=${WORK}/edited)
 stopped("ldebug-no-line.patch does not go into ldebug.c"
         "a patch that no longer fits Lua as it ships is named")
+
+# a file no patch touches, changed, or gone
+patched_copy(untouched)
+file(APPEND "${WORK}/untouched/lua-5.1.5/src/lvm.c" "/* changed */\n")
+apply(untouched)
+stopped("lvm.c in" "a file no patch touches, changed, stops the build")
+patched_copy(untouched_gone)
+file(REMOVE "${WORK}/untouched_gone/lua-5.1.5/src/lgc.c")
+apply(untouched_gone)
+stopped("lgc.c in" "... and so does one gone")
 
 # a listed patch missing, and no patch tool
 fresh_lua(missing)

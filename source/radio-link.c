@@ -201,6 +201,11 @@ static bool called_once(RadioLink *r, uint32_t link, const char *hello) {
   return false;
 }
 
+uint32_t radio_link_number(uint32_t noise, uint32_t serial) {
+  uint32_t link = noise ^ serial;
+  return link != 0 ? link : 1;
+}
+
 bool radio_link_call(RadioLink *r, const char *them, const char *us,
                      uint32_t link, uint32_t timeout_ms) {
   char hello[CALL];

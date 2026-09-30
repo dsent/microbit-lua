@@ -65,9 +65,13 @@ struct RadioLink {
 // made if it is not yet, and emptied
 void radio_link_open(RadioLink *r, uint32_t link, const char *peer);
 
+// A link's number, never 0, from noise the board draws and its serial
+// number: two boards differ even when their noise is the same
+uint32_t radio_link_number(uint32_t noise, uint32_t serial);
+
 // Calls them, as us, on the given link number until they answer or the
-// time is up. The number is the caller's to draw, at random and not 0: it
-// is all that tells this pair's frames from another's on the same group.
+// time is up. The number is radio_link_number's: it is all that tells this
+// pair's frames from another's on the same group.
 bool radio_link_call(RadioLink *r, const char *them, const char *us,
                      uint32_t link, uint32_t timeout_ms);
 

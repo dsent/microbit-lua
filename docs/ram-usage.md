@@ -240,7 +240,8 @@ static `TString` (header + inline bytes) is simpler and saves more.
 small in-place patch of Lua's `luaconf.h` (`source/luaconf-float.patch`, applied
 idempotently from CMake; to become a commit in the Lua fork). It halves `TValue`
 (16→8) and shrinks `Node` (32→20), `CClosure` (40→28), `UpVal` (32→20) and Lua
-stack slots; the number formatting/parsing macros move to `"%.9g"`/`strtof`.
+stack slots; numbers are read with `strtof`, and written by
+`source/lua-number.c` (see the README's Numbers as text).
 The Cortex-M4 single-precision FPU also makes arithmetic faster. On device the
 steady-state heap fell by a further 5,600 B (`ran` 30,837→25,237 B).
 

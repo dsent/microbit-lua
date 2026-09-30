@@ -14,7 +14,8 @@
 # file only once all of its patches fit. A file no J fits stops the build: one
 # changed by hand, or holding a patch no longer listed, or a hunk an edited
 # patch no longer has, with the way back, a fresh Lua; one as Lua ships it,
-# with the patch that does not go in.
+# with the patch that does not go in. Every other file of src/ must be as
+# Lua ships it, or the build stops the same way.
 
 find_program(LUA_PATCH_TOOL patch REQUIRED)
 
@@ -142,6 +143,25 @@ function(lua_patch_apply)
         message(FATAL_ERROR "${LUA_ARCHIVE} could not be unpacked: delete "
                 "it, and the next build downloads it again.")
     endif()
+    # the files no patch touches, as Lua ships them
+    get_filename_component(_lua "${LUA_SRC_DIR}" DIRECTORY)
+    file(GLOB _shipped RELATIVE "${_pristine}/lua-5.1.5/src"
+         "${_pristine}/lua-5.1.5/src/*")
+    foreach(_file IN LISTS _shipped)
+        if(NOT _file IN_LIST _files)
+            set(_same FALSE)
+            if(EXISTS "${LUA_SRC_DIR}/${_file}")
+                _lua_patch_same("${LUA_SRC_DIR}/${_file}"
+                                "${_pristine}/lua-5.1.5/src/${_file}")
+            endif()
+            if(NOT _same)
+                message(FATAL_ERROR
+                    "${_file} in ${_lua} is not as Lua ships it, and no patch "
+                    "touches it: it was changed. Delete ${_lua}, and the next "
+                    "build unpacks a fresh Lua and patches it again.")
+            endif()
+        endif()
+    endforeach()
     foreach(_file IN LISTS _files)
         set(_patches "")
         foreach(_entry IN LISTS _all)

@@ -1208,12 +1208,26 @@ static RadioLink radio_link = {
     &radio_air, 0, 0, 0, false, {0}, {0}, 0, NULL
 };
 
-/* A link's number: 32 bits at random, never 0 */
+/* A link's number: 32 bits from the chip's own random number
+ * generator, which a program's seedRandom does not repeat, with the
+ * board's serial number mixed in. With BLE running the generator is
+ * the SoftDevice's, and the noise is the microsecond clock; the serial
+ * number still sets two boards apart. */
 static uint32_t radio_draw(void)
 {
-    uint32_t link = (uint32_t)uBit.random(0x10000) << 16
-        | (uint32_t)uBit.random(0x10000);
-    return link != 0 ? link : 1;
+    uint32_t noise = 0;
+    if (ble_running()) {
+        noise = (uint32_t)system_timer_current_time_us();
+    } else {
+        NRF_RNG->TASKS_START = 1;
+        for (int i = 0; i < 4; i++) {
+            NRF_RNG->EVENTS_VALRDY = 0;
+            while (NRF_RNG->EVENTS_VALRDY == 0);
+            noise = noise << 8 | NRF_RNG->VALUE;
+        }
+        NRF_RNG->TASKS_STOP = 1;
+    }
+    return radio_link_number(noise, microbit_serial_number());
 }
 
 /* A board's friendly name from a Lua argument. Names are five

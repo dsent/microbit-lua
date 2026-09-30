@@ -256,14 +256,17 @@ scrolls them by.
 Lua's own `print` writes to stdout, which goes nowhere on this board; the
 firmware's script puts its own in its place, writing to the serial port.
 
-Whatever goes wrong on the way from a line to its result, short of CODAL's
-heap running out (see Stack and heap), the prompt comes back and the port is
-armed. The REPL keeps `loadstring`, `setfenv`, `pcall`, `string.gsub`,
-`string.sub`, `table.concat`, `microbit.serial.eventAfterAsync` and
-`microbit.eventRepl` of its own for that; a line that takes away another
-global it uses can stop what the REPL shows, and the global can be put back
-from the prompt. The firmware arms the port itself after an `on_event` that
-fails on the port's event, and has what already waits there read.
+Whatever goes wrong on the way from a line to its result, short of CODAL's heap
+running out (see Stack and heap), the prompt comes back and the port is armed.
+The REPL keeps `loadstring`, `setfenv`, `pcall`, `string.gsub`, `string.sub`,
+`string.find`, `string.match`, `string.format`, `table.concat`,
+`microbit.serial.eventAfterAsync`, `microbit.serial.getCharAsync` and
+`microbit.eventRepl` of its own for that, and a radio link's `tx`, `rx`,
+`answered` and `microbit.sleep` from when it opens, so the REPL over a link
+answers too; a line that takes away another global it uses can stop what the
+REPL shows, and the global can be put back from the prompt. The firmware arms
+the port itself after an `on_event` that fails on the port's event, and has what
+already waits there read.
 
 
 ## Radio link
@@ -283,21 +286,33 @@ and while another Lua call runs, the event only waits for it. A line sent while
 the robot drives is taken at once, waits in the board's inbox, and runs when the
 move is over, after the lines before it; the prompt comes back once it has run.
 The inbox holds 8 pieces, 194 B of the board's heap made when the first link
-opens. A piece that finds it full is not taken, and neither is one sent to a
+opens.
+
+A piece that finds the inbox full is not taken, and neither is one sent to a
 board that is gone. The board that called then says `The other micro:bit did not
 answer, so it may not have got:` and the line, and drops what was typed after
-it, what reached the port while it tried included, saying so when that held more
-than a line ending; it tells the person to check whether the line ran before
-typing it again, since the other board may have taken the line and only its
-answers been lost. A piece that comes again, because the answer to it was lost,
-is answered again and dropped; pieces are numbered in 16 bits, so a run of lost
-ones does not come round to a number the other board has taken. Every frame
-carries the link's number, 32 bits the calling board draws at random, so another
+it, what reached the port while it tried included: that is shown, and the line
+it begins is dropped up to its line ending. It says so when that held more than
+a line ending, and tells the person to check whether the line ran before typing
+it again, since the other board may have taken the line and only its answers
+been lost. When the other board last showed `>>`, the line was part of a
+statement not yet finished, and the words say to type `)` and Enter there to
+drop the statement, then type all of it again. The serving board says `[Some of
+the answer was lost on the way.]` before its next answer when part of one did
+not go, because the calling board was busy.
+
+A piece that comes again, because the answer to it was lost, is answered again
+and dropped. Pieces are numbered in 16 bits: a new piece is taken for a repeat
+only after 65,536 pieces in a row are lost to a board that took none, each a
+line typed or an answer given. Every frame carries the link's number, 32 bits
+the calling board draws from the chip's own random number generator, which a
+program's `seedRandom` does not repeat, mixed with its serial number, so another
 pair on the same group, but for one draw in four billion, is ignored. A call
 repeated for the open link, its answer having come late, is answered again, and
 the link keeps what it took. The board that called prints what the other board
 says as it comes, and between the lines it sends, so its own inbox does not fill
-while a paste goes out.
+while a paste goes out. A line typed while `connect` still calls goes over the
+link once it opens.
 
 The first piece of each message is marked, and `rx()` returns with a piece
 whether it starts a message. The link's REPL is sent whole lines, one to a
@@ -341,7 +356,8 @@ Classic at once.
   `source/radio-link.c`, both ends of it, with lines sent while the robot
   drives;
 - `source/radio-link.c` built without Lua's headers, calling nothing of
-  Lua's;
+  Lua's, and `radio_draw` reading the chip's random number generator, never
+  the one `seedRandom` seeds;
 - `source/lua-cstack.c`'s limits at four stack sizes, which they follow, and
   at sizes too small for them, where none wraps round;
 - `tests/wait-audit.sh`: every binding that waits looks for `on_event` first;
@@ -349,9 +365,10 @@ Classic at once.
   as plain `patch` puts them, change nothing a second time and finish a file
   patched in part; a file changed otherwise, or holding a patch no longer
   listed or edited since, stops the build naming the way back, and a patch
-  that no longer fits Lua, a missing one, or no `patch` tool is named; a Lua
-  tarball in `libraries/` that is not lua.org's, by its SHA256, stops the
-  build at every configure.
+  that no longer fits Lua, a missing one, or no `patch` tool is named; a file
+  of the unpacked Lua that no patch touches, changed or gone, stops the build
+  too, and so does a Lua tarball in `libraries/` that is not lua.org's, by its
+  SHA256, at every configure.
 
 It needs `cc`, `patch`, `cmake`, and the Lua tarball a firmware build leaves
 in `libraries/`, which it patches as the build does.
@@ -363,8 +380,11 @@ The firmware leaves printf's float support out to save flash, so
 `source/lua-number.c` turns numbers into text: `tostring`, `..`,
 `table.concat`, and `string.format`'s `%e`, `%f` and `%g`. Two patches,
 `source/luaconf-number-text.patch` and `source/lstrlib-number-text.patch`,
-route Lua's own calls there. A whole number that fits in 32 bits shows in
-full; any other number shows 7 significant digits.
+route Lua's own calls there. As `tostring` and `..` write it, a whole number
+that fits in 32 bits shows in full, and any other number with 7 significant
+digits. `string.format` follows its format: `%f` gives 6 decimals unless the
+format says otherwise, and a precision past 14 significant digits is only
+approximate.
 
 `tests/lua-number-tests.sh` builds it with the host's C compiler and checks it
 against the host's printf.

@@ -1647,7 +1647,7 @@ static void every_drop_counted(void) {
 // listen() serves a board that calls over the radio: a prompt, and the
 // answer to a line. The session it serves is made then: booted, the
 // firmware's script holds no more Lua heap than this, on the 64-bit host.
-#define BOOTED_HEAP 45500
+#define BOOTED_HEAP 47300
 
 static void serving_a_link(void) {
   const char *said;
@@ -1999,6 +1999,143 @@ static void a_line_at_the_last_moment(void) {
   type_in("2+2\r");
   expect(strstr(far_heard, "2+2\r") && strstr(far_heard, "1+1\r"),
          "a line that reaches the port as it is found empty goes");
+}
+
+// Two boards whose noise is the same, as two seeded alike would draw from
+// one generator, draw different link numbers, and none draws 0
+static void link_numbers(void) {
+  uint32_t same = 0x1234ABCDu;
+  expect(radio_link_number(same, 0x9F3C1122u)
+         != radio_link_number(same, 0x0B7E5530u)
+         && radio_link_number(0x5EEDu, 0x5EEDu) != 0,
+         "two boards whose noise is the same draw different link numbers, "
+         "and never 0");
+}
+
+// Over the link, the string functions the link's REPL reads lines with
+// taken away, then put back: the REPL answers throughout
+// a line at each of the board's waits, so that its inbox never fills
+static void far_keeps_strings(void) {
+  far_says("m, f, s = string.match, string.find, string.sub\n");
+}
+static void far_takes_strings(void) {
+  far_says("string.match, string.find, string.sub = nil, nil, nil\n");
+}
+static void far_adds(void) { far_says("1+1\n"); }
+static void far_puts_strings_back(void) {
+  far_says("string.match, string.find, string.sub = m, f, s\n");
+}
+static void far_matches(void) { far_says("('abc'):match('b')\n"); }
+
+static void strings_taken_over_the_link(void) {
+  static const char *const order[] = { "=> 2\n", "=> \"b\"\n", NULL };
+  fresh();
+  real_link = 1;
+  boot("");
+  far_calls();
+  plan(far_keeps_strings);
+  plan(far_takes_strings);
+  plan(far_adds);
+  plan(far_puts_strings_back);
+  plan(far_matches);
+  line("listen('gigat')");
+  expect(in_order(far_heard, order),
+         "string functions taken away over the link: the REPL there still "
+         "answers, and the line that puts them back reaches it");
+}
+
+// A line typed while connect() calls goes over the link once it is open,
+// and the console's own prompt does not come between
+static void types_while_calling(void) {
+  type_in("1+1\r");
+}
+
+static void typing_while_calling(void) {
+  fresh();
+  real_link = 1;
+  far_listens = 1;
+  boot("");
+  on_air = types_while_calling;
+  line("connect('gigat', 100)");
+  expect(strcmp(far_heard, "1+1\r") == 0
+         && strstr(out, "gigat connected.\r\n> ") == NULL
+         && strstr(out, "=> 2") == NULL,
+         "a line typed while connect() calls goes over the link, and runs "
+         "nowhere here");
+}
+
+// Typing that reaches the port while a line fails to go is shown, and the
+// line it begins is dropped to its end
+static void types_part_of_a_line(void) {
+  type_in("robot_mo");
+}
+
+static void the_rest_of_a_line(void) {
+  static char said[65536];
+  fresh();
+  real_link = 1;
+  far_listens = 1;
+  boot("");
+  line("connect('gigat', 100)");
+  far_gone = 1;
+  on_air = types_part_of_a_line;
+  snprintf(said, sizeof said, "%s", line("1+1"));
+  far_gone = 0;
+  type_in("ve(50, 50, 1)\r");
+  line("2+2");
+  expect(strstr(said, "robot_mo") != NULL
+         && strstr(said, "What you typed after it was not sent either.")
+         && strstr(far_heard, "ve(") == NULL
+         && strstr(far_heard, "2+2\r") != NULL,
+         "what is typed after a line that did not go is shown, and dropped "
+         "to its line's end; the next line goes");
+}
+
+// A line that did not go, inside a statement the other board shows open
+static void a_loss_in_an_open_statement(void) {
+  const char *said;
+  fresh();
+  real_link = 1;
+  far_listens = 1;
+  boot("");
+  line("connect('gigat', 100)");
+  far_says(">> ");
+  far_gone = 1;
+  said = line("x = 1");
+  expect(strstr(said, "It was part of a statement you had not finished. If "
+                "the other micro:bit shows >>, type ) and press Enter to "
+                "drop the statement, then type all of it again. If it shows "
+                ">, check whether the statement ran first.\r\n") != NULL,
+         "a line lost inside an open statement says how to start the "
+         "statement over");
+}
+
+// Output the calling board could not take while it was busy is said to be
+// missing, before what comes next
+static void far_busy_asks_for_much(void) {
+  far_busy = 1;
+  far_says("string.rep('x', 300)\n");
+}
+
+static void far_free_asks_again(void) {
+  far_busy = 0;
+  far_says("1+1\n");
+}
+
+static void output_lost_on_the_way(void) {
+  static const char *const order[] = {
+    "=> \"xxx", "\n[Some of the answer was lost on the way.]\n=> 2\n> ",
+    NULL };
+  fresh();
+  real_link = 1;
+  boot("");
+  far_calls();
+  plan(far_busy_asks_for_much);
+  plan(far_free_asks_again);
+  line("listen('gigat')");
+  expect(in_order(far_heard, order),
+         "output the other board could not take is said to be missing, "
+         "before the next answer");
 }
 
 // A call from a board whose link is an older version is not answered:
@@ -2562,6 +2699,12 @@ int main(int argc, char **argv) {
   numbers_that_come_round();
   typing_during_a_loss();
   a_line_at_the_last_moment();
+  link_numbers();
+  strings_taken_over_the_link();
+  typing_while_calling();
+  the_rest_of_a_line();
+  a_loss_in_an_open_statement();
+  output_lost_on_the_way();
   an_older_link();
   a_full_inbox();
   a_line_not_taken();
