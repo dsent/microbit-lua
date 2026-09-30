@@ -25,7 +25,7 @@
 #include "lua-events.h"
 #include "lua-modules.h"
 #include "board-alloc.h"
-#include "radio-inbox.h"
+#include "radio-link.h"
 #include "host-cstack.h"
 #include "tpbot.h"
 
@@ -172,9 +172,12 @@ uint32_t lua_events_now(void) {
 
 static int pauses_all;
 
+static void others_run(void);
+
 void lua_events_pause(uint32_t ms) {
   pauses_all++;
   clock_ms += ms;
+  others_run();
   if (pauses_done < pauses_planned)
     pauses[pauses_done++]();
 }
@@ -206,15 +209,224 @@ int tpbot_i2c_write(int address, const char *data, size_t length) {
     heap_limit = heap_used;
   return -1;
 }
-// robot_move's sleep, as the firmware binds it
+// robot_move's sleep, as the firmware binds it; and what a test has
+// happen while the robot drives
+static Action on_move;
+
 void tpbot_sleep(uint32_t ms) {
   char text[32];
+  Action then = on_move;
+  on_move = NULL;
   lua_events_before_wait();
   snprintf(text, sizeof text, "<move %lu>", (unsigned long)ms);
   note(text);
   lua_events_pause(ms);
+  if (then)
+    then();
 }
 int tpbot_echo_us(void) { return -1; }
+
+// A real link, source/radio-link.c, once a test says so: this board's end,
+// which its Lua reaches through the radio module below, and the other
+// board's, "gigat", in C alone, which the test drives. Each end hears what
+// the other sends in a queue of 4, as CODAL keeps no more: a datagram that
+// finds its queue full is lost, and one that does not raises the radio's
+// event on its board. The fibers carrying this board's events run whenever
+// its Lua lets other fibers run, as on the board: each answers the link,
+// then hands the event to the dispatcher. The other board's run then too.
+static int real_link;
+
+typedef struct {
+  uint8_t frame[4][RADIO_AIR_MAX];
+  int len[4], first, count;
+  int events;                   // datagram events no fiber has carried yet
+} Air;
+
+static const RadioAir test_air;
+static RadioLink board_link = { .air = &test_air }, far_link = { .air = &test_air };
+static Air board_air, far_air;  // what each end hears
+
+// The other board: gone from the air; listening for a call; or busy
+// running a command, its Lua taking nothing from the link; and whether
+// another pair talks on the air after each of its turns. What it took
+// otherwise, and how many answers this one sent.
+static int far_gone, far_listens, far_busy, far_sending, neighbours;
+static char far_heard[1024];
+static int board_acks;
+
+enum { KIND_HELLO = 0xA1, KIND_DATA = 0xA3, KIND_ACK = 0xA4, LINK = 7 };
+
+static void air_put(Air *a, const uint8_t *frame, int len) {
+  int at;
+  if (a->count == 4)
+    return;
+  at = (a->first + a->count) % 4;
+  memcpy(a->frame[at], frame, len);
+  a->len[at] = len;
+  a->count++;
+  a->events++;
+}
+
+static void air_send(RadioLink *r, const uint8_t *frame, int len) {
+  if (r == &board_link) {
+    if (frame[0] == KIND_ACK)
+      board_acks++;
+    if (!far_gone)
+      air_put(&far_air, frame, len);
+  } else {
+    air_put(&board_air, frame, len);
+  }
+}
+
+static int air_recv(RadioLink *r, uint8_t frame[RADIO_AIR_MAX]) {
+  Air *a = r == &board_link ? &board_air : &far_air;
+  int len;
+  if (a->count == 0)
+    return -1;
+  len = a->len[a->first];
+  memcpy(frame, a->frame[a->first], len);
+  a->first = (a->first + 1) % 4;
+  a->count--;
+  return len;
+}
+
+static uint32_t air_now(RadioLink *r) {
+  (void)r;
+  return clock_ms;
+}
+
+static void air_pause(RadioLink *r, uint32_t ms) {
+  (void)r;
+  clock_ms += ms;
+  others_run();
+}
+
+static const RadioAir test_air = { air_send, air_recv, air_now, air_pause };
+
+// This board's fibers for the radio's events, as the firmware's carries one
+static void board_fibers(void) {
+  while (board_air.events > 0) {
+    board_air.events--;
+    radio_link_heard(&board_link);
+    post(ID_RADIO, 1);
+  }
+}
+
+// The other board: answers a call when it listens, answers the link from
+// its fibers, and takes what came when it is not busy
+static void far_runs(void) {
+  uint8_t body[RADIO_BODY];
+  int len;
+  if (far_gone)
+    return;
+  if (far_listens && far_link.link == 0)
+    radio_link_called(&far_link, "gigat", NULL);
+  while (far_air.events > 0) {
+    far_air.events--;
+    radio_link_heard(&far_link);
+  }
+  if (neighbours) {
+    static const uint8_t theirs[] = { KIND_DATA, LINK + 1, 1, 'h', 'i' };
+    air_put(&board_air, theirs, sizeof theirs);
+  }
+  while (!far_busy && !far_sending && radio_link_rx(&far_link, body, &len)) {
+    size_t n = strlen(far_heard);
+    snprintf(far_heard + n, sizeof far_heard - n, "%.*s", len, (char *)body);
+  }
+}
+
+static int others_running;
+
+static void others_run(void) {
+  if (others_running)
+    return;
+  others_running = 1;
+  far_runs();
+  board_fibers();
+  others_running = 0;
+}
+
+// The other board sends a line
+static int far_says(const char *text) {
+  int ok;
+  far_sending = 1;
+  ok = radio_link_tx(&far_link, text, strlen(text));
+  far_sending = 0;
+  return ok;
+}
+
+// The other board calls this one, and opens its end as the answer will
+static void far_calls(void) {
+  uint8_t hello[RADIO_HEAD + RADIO_NAME * 2] = { KIND_HELLO, LINK, 0 };
+  memcpy(hello + RADIO_HEAD, "zezopgigat", RADIO_NAME * 2);
+  air_put(&board_air, hello, sizeof hello);
+  radio_link_open(&far_link, LINK, "zezop");
+}
+
+// This board's radio bindings, as the firmware's call the link
+static int link_listen(lua_State *L) {
+  const char *from = lua_isnoneornil(L, 1) ? NULL : luaL_checkstring(L, 1);
+  lua_events_before_wait();
+  while (!radio_link_called(&board_link, "zezop", from))
+    air_pause(&board_link, 1);
+  lua_pushstring(L, board_link.peer);
+  return 1;
+}
+
+static int looks_left;
+
+static int link_answered(lua_State *L) {
+  const char *from = lua_isnoneornil(L, 1) ? NULL : luaL_checkstring(L, 1);
+  if (--looks_left < 0)
+    return luaL_error(L, "hung up");
+  if (radio_link_called(&board_link, "zezop", from))
+    lua_pushstring(L, board_link.peer);
+  else
+    lua_pushnil(L);
+  return 1;
+}
+
+static int link_connect(lua_State *L) {
+  const char *them = luaL_checkstring(L, 1);
+  lua_events_before_wait();
+  lua_pushboolean(L, radio_link_call(&board_link, them, "zezop", LINK,
+                                     (uint32_t)luaL_optint(L, 2, 5000)));
+  return 1;
+}
+
+static int link_tx(lua_State *L) {
+  size_t len;
+  const char *msg = luaL_checklstring(L, 1, &len);
+  lua_events_before_wait();
+  lua_pushboolean(L, radio_link_tx(&board_link, msg, len));
+  return 1;
+}
+
+static int link_rx(lua_State *L) {
+  uint8_t body[RADIO_BODY];
+  int len;
+  if (radio_link_rx(&board_link, body, &len))
+    lua_pushlstring(L, (const char *)body, len);
+  else
+    lua_pushnil(L);
+  return 1;
+}
+
+// Both ends as a new test finds them: no link, nothing on the air
+static void no_link(void) {
+  board_free(board_link.inbox);
+  board_free(far_link.inbox);
+  memset(&board_link, 0, sizeof board_link);
+  memset(&far_link, 0, sizeof far_link);
+  board_link.air = far_link.air = &test_air;
+  memset(&board_air, 0, sizeof board_air);
+  memset(&far_air, 0, sizeof far_air);
+  real_link = far_gone = far_listens = far_busy = far_sending = 0;
+  neighbours = 0;
+  far_heard[0] = 0;
+  board_acks = 0;
+  looks_left = 20;
+}
 
 // A radio link whose far end is a board that answers each line with
 // "=> " and the line: what tx sends comes back through rx, with the
@@ -230,12 +442,15 @@ static char caller_hears[1024];
 static int listening, looks;
 
 static int l_listen(lua_State *L) {
-  (void)L;
+  if (real_link)
+    return link_listen(L);
   listening = 1;
   return 0;
 }
 
 static int l_answered(lua_State *L) {
+  if (real_link)
+    return link_answered(L);
   if (listening && ++looks > 3)
     return luaL_error(L, "hung up");
   lua_pushboolean(L, 0);
@@ -243,21 +458,19 @@ static int l_answered(lua_State *L) {
 }
 
 static int l_connect(lua_State *L) {
+  if (real_link)
+    return link_connect(L);
   linked = 1;
   lua_pushboolean(L, 1);
   return 1;
 }
 
-// A far end that does not answer, as one running a command does
-static int far_end_deaf;
-
 static int l_tx(lua_State *L) {
-  const char *text = luaL_checkstring(L, 1);
+  const char *text;
   size_t n = strlen(far_end);
-  if (far_end_deaf) {
-    lua_pushboolean(L, 0);
-    return 1;
-  }
+  if (real_link)
+    return link_tx(L);
+  text = luaL_checkstring(L, 1);
   if (listening) {
     n = strlen(caller_hears);
     snprintf(caller_hears + n, sizeof caller_hears - n, "%s", text);
@@ -271,6 +484,8 @@ static int l_tx(lua_State *L) {
 }
 
 static int l_rx(lua_State *L) {
+  if (real_link)
+    return link_rx(L);
   if (listening && caller_types) {
     lua_pushstring(L, caller_types);
     caller_types = NULL;
@@ -437,7 +652,8 @@ static void fresh(void) {
   lost = 0;
   linked = 0;
   far_end[0] = 0;
-  far_end_deaf = 0;
+  no_link();
+  on_move = NULL;
   caller_types = NULL;
   caller_hears[0] = 0;
   listening = looks = 0;
@@ -1377,45 +1593,190 @@ static void serving_a_link(void) {
          "... and the prompt is back when the caller hangs up");
 }
 
-// A line the far end of a link does not take is said to be lost, in
-// words, and what was typed after it goes with it
-static void a_line_not_taken(void) {
-  const char *said;
-  fresh();
-  boot("");
-  line("connect('zezop', 10)");
-  far_end_deaf = 1;
-  said = line("robot_move(50, 50, 1)");
-  expect(strstr(said, "\r\nThe other micro:bit did not answer, so it did "
-                "not get: robot_move(50, 50, 1)\r\nIt may still be running a "
-                "command. Type the line again once it has finished.\r\n")
-         != NULL, "a line the other micro:bit does not take is said to be "
-         "lost, and how to send it again");
-  far_end_deaf = 0;
-  said = line("1+1");
-  expect(strstr(said, "=> 1+1") != NULL, "... and the next line goes");
+// The words a line the other micro:bit did not take is said to be lost in
+static const char *not_taken(const char *text, char *words, size_t size) {
+  snprintf(words, size, "\r\nThe other micro:bit did not answer, so it did "
+           "not get: %s\r\nIt may still be running a command. Type the line "
+           "again once it has finished.\r\n", text);
+  return words;
 }
 
-// The radio's inbox: made when the first link opens, not before
+// What the other board does while this one serves it: sends a move, then,
+// while the robot drives, lines, and notes whether each was taken, how
+// long that took, and what it had heard by then
+static const char *far_types[4];
+static int far_taken[4];
+static uint32_t far_took_ms;
+static char far_heard_then[1024];
+
+static void far_sends_a_move(void) {
+  far_says("robot_move(50, 50, 0.1)\n");
+}
+
+static void far_types_lines(void) {
+  int i;
+  uint32_t start = clock_ms;
+  for (i = 0; far_types[i]; i++)
+    far_taken[i] = far_says(far_types[i]);
+  far_took_ms = clock_ms - start;
+  snprintf(far_heard_then, sizeof far_heard_then, "%s", far_heard);
+}
+
+// The piece the other board sent last, sent again, as when this board's
+// answer to it was lost
+static void far_sends_again(void) {
+  uint8_t frame[RADIO_FRAME] = { KIND_DATA, LINK, 0 };
+  frame[2] = far_link.out;
+  memcpy(frame + RADIO_HEAD, "10+1\n", 5);
+  air_put(&board_air, frame, RADIO_HEAD + 5);
+  board_fibers();
+}
+
+static void far_types_then_again(void) {
+  int acks;
+  far_types_lines();
+  acks = board_acks;
+  far_sends_again();
+  far_taken[3] = board_acks == acks + 1;
+}
+
+// Serving a real link while the robot drives
+static void lines_during_a_move(void) {
+  char what[160];
+  fresh();
+  real_link = 1;
+  boot("");
+  far_calls();
+  plan(far_sends_a_move);
+  on_move = far_types_lines;
+  far_types[0] = "10+1\n";
+  far_types[1] = "20+2\n";
+  far_types[2] = NULL;
+  line("listen('gigat')");
+  snprintf(what, sizeof what, "a line sent while the robot drives is taken "
+           "at once, on the first try (%lu ms for two)",
+           (unsigned long)far_took_ms);
+  expect(far_taken[0] && far_took_ms < 30, what);
+  expect(strcmp(far_heard_then, "> ") == 0,
+         "... before the move has ended, and so before any prompt after it");
+  expect(far_taken[1] && strcmp(far_heard, "> > => 11\n> => 22\n> ") == 0,
+         "... and it runs after the move, the next line after it, each "
+         "prompt after its line has run");
+
+  // a piece sent again is answered again and dropped
+  fresh();
+  real_link = 1;
+  boot("");
+  far_calls();
+  plan(far_sends_a_move);
+  on_move = far_types_then_again;
+  far_types[0] = "10+1\n";
+  far_types[1] = NULL;
+  line("listen('gigat')");
+  expect(far_taken[0] && far_taken[3] && count(far_heard, "=> 11") == 1,
+         "a piece that comes again is answered again, and runs once");
+}
+
+// The other board's inbox: what it holds, in order, taken out of it
+static void far_inbox(char *text, size_t size) {
+  uint8_t body[RADIO_BODY];
+  int len;
+  text[0] = 0;
+  while (radio_link_rx(&far_link, body, &len)) {
+    size_t n = strlen(text);
+    snprintf(text + n, size - n, "%.*s", len, (char *)body);
+  }
+}
+
+// Lines sent over a real link to a robot that drives, whose Lua takes
+// nothing meanwhile: its inbox takes eight pieces, and a line that finds it
+// full is said to be lost, in words, and never arrives
+static void a_full_inbox(void) {
+  char words[256], held[256];
+  const char *said;
+  int i, taken = 1;
+  fresh();
+  real_link = 1;
+  far_listens = 1;
+  boot("");
+  said = line("connect('gigat', 100)");
+  expect(strstr(said, "gigat connected.") != NULL && far_link.link == LINK,
+         "connect() calls the other board over a real link");
+  neighbours = 1;
+  {
+    uint32_t start = clock_ms;
+    said = line("0");
+    expect(strstr(said, "did not answer") == NULL && clock_ms - start < 30,
+           "... and a line goes on the first try while another pair talks "
+           "on the air");
+  }
+  neighbours = 0;
+  far_inbox(held, sizeof held);
+  far_busy = 1;
+  for (i = 1; i <= 8; i++) {
+    char text[8];
+    snprintf(text, sizeof text, "%d", i);
+    said = line(text);
+    taken = taken && strstr(said, "did not answer") == NULL;
+  }
+  expect(taken, "eight lines go while the other board drives");
+  said = line("x = 9");
+  expect(strstr(said, not_taken("x = 9", words, sizeof words)) != NULL,
+         "a line that finds the other board's inbox full is said to be "
+         "lost, in words");
+  far_busy = 0;
+  far_inbox(held, sizeof held);
+  expect(strcmp(held, "1\r2\r3\r4\r5\r6\r7\r8\r") == 0,
+         "... the eight before it wait for the move to end, in order, and "
+         "it never arrives");
+}
+
+// A line to a board gone from the air is said to be lost, in words, and
+// what was typed after it goes with it
+static void a_line_not_taken(void) {
+  char words[256];
+  const char *said;
+  fresh();
+  real_link = 1;
+  far_listens = 1;
+  boot("");
+  line("connect('gigat', 100)");
+  far_gone = 1;
+  said = line("robot_move(50, 50, 1)");
+  expect(strstr(said, not_taken("robot_move(50, 50, 1)", words, sizeof words))
+         != NULL, "a line to a board gone from the air is said to be lost, "
+         "and how to send it again");
+  far_gone = 0;
+  far_busy = 0;
+  said = line("1+1");
+  expect(strstr(said, "did not answer") == NULL && strstr(far_heard, "1+1\r"),
+         "... and the next line goes when it is back");
+}
+
+// The radio's inbox: made when the first link opens, not before; with
+// none, a piece waits on the air for rx
 static void the_radio_inbox(void) {
-  uint8_t body[RADIO_INBOX_BODY];
+  uint8_t frame[RADIO_HEAD + 2] = { KIND_DATA, LINK, 1, 'h', 'i' };
+  uint8_t body[RADIO_BODY];
   int len = 0, before;
   fresh();
   before = board_allocs;
-  expect(radio_inbox_full() && !radio_inbox_take(body, &len)
+  expect(board_link.inbox == NULL && !radio_link_rx(&board_link, body, &len)
          && board_allocs == before,
          "before any link, the radio keeps nothing and made nothing");
-  radio_inbox_open();
-  expect(board_allocs == before + 1 && !radio_inbox_full(),
+  radio_link_open(&board_link, LINK, "gigat");
+  expect(board_allocs == before + 1 && board_link.inbox != NULL,
          "the first link makes the inbox");
-  radio_inbox_put((const uint8_t *)"hi", 2);
-  radio_inbox_put((const uint8_t *)"yo", 2);
-  expect(radio_inbox_full(), "... which holds two pieces");
-  expect(radio_inbox_take(body, &len) && len == 2 && body[0] == 'h'
-         && radio_inbox_take(body, &len) && body[0] == 'y'
-         && !radio_inbox_take(body, &len), "... given back in order");
-  radio_inbox_open();
+  radio_link_open(&board_link, LINK, "gigat");
   expect(board_allocs == before + 1, "a link opened again makes no other");
+  no_link();
+  board_refuses = 1;
+  radio_link_open(&board_link, LINK, "gigat");
+  air_put(&board_air, frame, sizeof frame);
+  radio_link_heard(&board_link);
+  expect(board_acks == 0 && radio_link_rx(&board_link, body, &len)
+         && len == 2 && body[0] == 'h' && board_acks == 1,
+         "with no inbox, rx takes a piece off the air, and answers it");
 }
 
 // A C stack too full to go deeper is an error a pcall catches, and the
@@ -1848,6 +2209,8 @@ int main(int argc, char **argv) {
   what_waiting_costs();
   every_drop_counted();
   serving_a_link();
+  lines_during_a_move();
+  a_full_inbox();
   a_line_not_taken();
   the_radio_inbox();
   a_full_c_stack();

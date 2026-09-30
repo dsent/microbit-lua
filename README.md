@@ -239,7 +239,8 @@ be read, what is typed while the script at boot runs included, and the REPL
 reads them when it starts.
 
 `robot_move`'s own wait handles nothing: a button pressed while the robot
-drives is handled when the move is over.
+drives is handled when the move is over. A radio link is answered all the
+same (see Radio link).
 
 A mistake in a handler goes to the serial port as `Runtime error: ` and the
 message, unless a program has redirected the port to other pins
@@ -265,6 +266,30 @@ from the prompt. The firmware arms the port itself after an `on_event` that
 fails on the port's event, and has what already waits there read.
 
 
+## Radio link
+
+`listen(name)` at the prompt waits for the board named `name` to call, then
+serves it a REPL of its own over the radio. `connect(name, timeout)` on that
+board calls, and from then on what is typed there goes over the link a line
+at a time, and what comes back is printed. The link itself is
+`microbit.radio`'s `connect`, `listen`, `answered`, `tx` and `rx`, in
+`source/radio-link.c`.
+
+`tx(message)` sends the message in pieces of 26 bytes, each sent again every
+30 ms, 8 times at most, until the other board takes it, and returns true
+once every piece is taken: the message has arrived, and a line in it may not
+have run yet. A board takes a piece whatever its Lua is doing, in the fiber
+that carries the radio's event, which runs no Lua: a line sent while the
+robot drives is taken at once, waits in the board's inbox, and runs when the
+move is over, after the lines before it; the prompt comes back once it has
+run. The inbox holds 8 pieces, 218 B of the board's heap made when the first
+link opens. A piece that finds it full is not taken, and neither is one sent
+to a board that is gone: the sending board says `The other micro:bit did not
+answer, so it did not get:` and the line, and drops what was typed after it.
+A piece that comes again, because the answer to it was lost, is answered
+again and dropped. Another pair's link on the same group is ignored.
+
+
 ## TPBot
 
 `tpbot` and the robot globals `robot_info`, `robot_move`, `turn` and
@@ -281,7 +306,11 @@ Classic at once.
   each error;
 - `source/lua-script.lua` over a stand-in board, with events through
   `source/lua-events.c`: typing at the REPL, buttons pressed while Lua sleeps,
-  and the globals the REPL uses taken away;
+  the globals the REPL uses taken away, and a radio link through
+  `source/radio-link.c`, both ends of it, with lines sent while the robot
+  drives;
+- `source/radio-link.c` built without Lua's headers, calling nothing of
+  Lua's;
 - `source/lua-cstack.c`'s limits at four stack sizes, which they follow, and
   at sizes too small for them, where none wraps round;
 - `tests/wait-audit.sh`: every binding that waits looks for `on_event` first;

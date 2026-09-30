@@ -18,7 +18,7 @@ extern "C" {
 #include "lua-events.h"
 #include "lua-modules.h"
 #include "board-alloc.h"
-#include "radio-inbox.h"
+#include "radio-link.h"
 
 extern MicroBit uBit;
 
@@ -1172,142 +1172,39 @@ static int nezha2_send(lua_State *L, int b3, int b4, int b5, int b6, int b7) {
 
 
 /*
- * A link over radio datagrams.
- *
- * Datagrams are 32 bytes and anyone on the group hears them
- * all, so a frame says what it is and which link it belongs
- * to. The link number is drawn by the side that calls
- * connect; two pairs on one group draw different numbers and
- * ignore each other's traffic. A name is always the five
- * letters of a micro:bit's friendly name, so HELLO carries
- * both ends' names in a fixed ten bytes.
+ * A link over radio datagrams, in source/radio-link.c, over this
+ * board's radio and clock.
  */
-
-#define RADIO_HEAD     3
-#define RADIO_NAME     5
-/* The radio is documented to carry 32 bytes and the driver
- * reports as many sent, but past 29 the tail arrives zeroed:
- * measured between two boards, 28 and 29 come through whole,
- * 30 loses its last byte and 31 and 32 lose two. So a frame
- * is 29, and the driver's own limit is never reached. */
-#define RADIO_FRAME    29
-#define RADIO_BODY     (RADIO_FRAME - RADIO_HEAD)
-
-/* Kinds of frame. Other software on the same group starts its
- * packets with small numbers too (MakeCode's packet types run
- * from 0 up), so these sit where nothing else puts a first
- * byte, and a stray packet is not read as one of ours. */
-#define RADIO_HELLO    0xA1
-#define RADIO_WELCOME  0xA2
-#define RADIO_DATA     0xA3
-#define RADIO_ACK      0xA4
-
-#define RADIO_TRIES    8
-#define RADIO_WAIT     30
 
 /* How long connect waits when nobody says otherwise */
 #define RADIO_TIMEOUT  5000
 
-static uint8_t radio_link = 0;
-static char radio_peer[RADIO_NAME + 1];
-static uint8_t radio_out = 0;   /* number of the last sent */
-static uint8_t radio_in = 0;    /* number of the last taken */
-
-/* kind, link, number, then body */
-static int radio_put(uint8_t kind, uint8_t link, uint8_t num,
-                     const char *body, int len)
+static void radio_air_send(RadioLink *, const uint8_t *frame, int len)
 {
-    uint8_t f[RADIO_FRAME];
-    if (len > RADIO_BODY) len = RADIO_BODY;
-    f[0] = kind;
-    f[1] = link;
-    f[2] = num;
-    if (len > 0) memcpy(f + RADIO_HEAD, body, len);
-    return uBit.radio.datagram.send(
-        PacketBuffer(f, len + RADIO_HEAD));
+    uBit.radio.datagram.send((uint8_t *)frame, len);
 }
 
-/* A frame taken off the air that the caller did not want.
- * Reading a datagram removes it, so one asked for DATA while
- * an ACK is due would throw the ACK away and leave the
- * sender waiting out its tries. It waits here instead, until
- * somebody wants it or another unwanted one takes its
- * place. */
-static uint8_t radio_held[RADIO_FRAME];
-static int radio_held_len = 0;
-
-/* Is this frame the one being waited for, and if so, what
- * does it carry? Anything longer than a frame is not ours. */
-static bool radio_wanted(uint8_t *b, int n, uint8_t kind,
-                         uint8_t link, uint8_t *from,
-                         uint8_t *num, uint8_t *body,
-                         int *len)
+static int radio_air_recv(RadioLink *, uint8_t frame[RADIO_AIR_MAX])
 {
-    if (n < RADIO_HEAD || n > RADIO_FRAME) return false;
-    if (b[0] != kind) return false;
-    if (link != 0 && b[1] != link) return false;
-    if (from) *from = b[1];
-    if (num) *num = b[2];
-    if (body) memcpy(body, b + RADIO_HEAD, n - RADIO_HEAD);
-    if (len) *len = n - RADIO_HEAD;
-    return true;
+    int n = uBit.radio.datagram.recv(frame, RADIO_AIR_MAX);
+    return n < 0 ? -1 : n;
 }
 
-/* The next frame of this kind for this link, or nothing */
-static bool radio_take(uint8_t kind, uint8_t link,
-                       uint8_t *from, uint8_t *num,
-                       uint8_t *body, int *len)
+static uint32_t radio_air_now(RadioLink *)
 {
-    if (radio_held_len > 0
-        && radio_wanted(radio_held, radio_held_len, kind,
-                        link, from, num, body, len)) {
-        radio_held_len = 0;
-        return true;
-    }
-    PacketBuffer p = uBit.radio.datagram.recv();
-    if (p == PacketBuffer::EmptyPacket) return false;
-    int n = p.length();
-    if (radio_wanted(p.getBytes(), n, kind, link, from,
-                     num, body, len)) return true;
-    if (n > 0 && n <= (int)sizeof(radio_held)) {
-        memcpy(radio_held, p.getBytes(), n);
-        radio_held_len = n;
-    }
-    return false;
+    return (uint32_t)uBit.systemTime();
 }
 
-/* Pieces the far end sends while this end waits on its own
- * wait in source/radio-inbox.c */
-static_assert(RADIO_INBOX_BODY == RADIO_BODY, "a piece fits the inbox");
-
-/* Both ends start a link the same way */
-static void radio_open(uint8_t link, const char *peer)
+static void radio_air_pause(RadioLink *, uint32_t ms)
 {
-    radio_link = link;
-    radio_held_len = 0;
-    radio_inbox_open();
-    radio_out = 0;
-    radio_in = 0;
-    memcpy(radio_peer, peer, RADIO_NAME);
-    radio_peer[RADIO_NAME] = 0;
+    uBit.sleep(ms);
 }
 
-/* The answer to a HELLO, if this is it. A WELCOME names both
- * ends, the one it goes to and the one it comes from, so a
- * frame that only happens to share a kind and a link number
- * with it, from some other board on the air, is not taken for
- * one. hello is the call: the board called, then this one. */
-static bool radio_welcomed(uint8_t link, const char *hello)
-{
-    uint8_t body[RADIO_BODY];
-    int len;
+static const RadioAir radio_air = {
+    radio_air_send, radio_air_recv, radio_air_now, radio_air_pause
+};
 
-    if (!radio_take(RADIO_WELCOME, link, NULL, NULL, body, &len))
-        return false;
-    return len == RADIO_NAME * 2
-        && memcmp(body, hello + RADIO_NAME, RADIO_NAME) == 0
-        && memcmp(body + RADIO_NAME, hello, RADIO_NAME) == 0;
-}
+static RadioLink radio_link = { &radio_air, 0, 0, 0, {0}, {0}, 0, NULL };
 
 /* A board's friendly name from a Lua argument. Names are five
  * letters, and the frames carry exactly five, so anything else
@@ -1324,83 +1221,6 @@ static const char *radio_name(lua_State *L, int arg)
 static const char *radio_opt_name(lua_State *L, int arg)
 {
     return lua_isnoneornil(L, arg) ? NULL : radio_name(L, arg);
-}
-
-/* Call once, then wait a moment for the answer */
-static bool radio_called(uint8_t link, const char *hello)
-{
-    uint64_t until;
-    radio_put(RADIO_HELLO, link, 0, hello, RADIO_NAME * 2);
-    until = uBit.systemTime() + RADIO_WAIT;
-    while (uBit.systemTime() < until) {
-        if (radio_welcomed(link, hello)) return true;
-        uBit.sleep(1);
-    }
-    return false;
-}
-
-/* A HELLO addressed to this board, from the board it waits
- * for, or from any if it waits for none: answer it and take
- * the link it names. A call from anyone else is left
- * unanswered, so the caller does not think it got through.
- * Any link the call replaces is dropped: the other end has
- * started over, which is how a reset board finds its way
- * back. */
-static bool radio_called_us(const char *from)
-{
-    const char *us = microbit_friendly_name();
-    uint8_t body[RADIO_BODY];
-    char welcome[RADIO_NAME * 2];
-    uint8_t link;
-    int len;
-
-    if (!radio_take(RADIO_HELLO, 0, &link, NULL, body, &len)
-        || len != RADIO_NAME * 2
-        || memcmp(body, us, RADIO_NAME) != 0) return false;
-    if (from && memcmp(body + RADIO_NAME, from, RADIO_NAME) != 0)
-        return false;
-    radio_open(link, (char *)body + RADIO_NAME);
-    memcpy(welcome, body + RADIO_NAME, RADIO_NAME);
-    memcpy(welcome + RADIO_NAME, us, RADIO_NAME);
-    radio_put(RADIO_WELCOME, link, 0, welcome, RADIO_NAME * 2);
-    return true;
-}
-
-/* A piece the far end sent, answered and kept, if one came
- * and there is room for it */
-static void radio_keep(void)
-{
-    uint8_t body[RADIO_BODY];
-    uint8_t num;
-    int len;
-
-    if (radio_inbox_full()
-        || !radio_take(RADIO_DATA, radio_link, NULL, &num, body, &len))
-        return;
-    radio_put(RADIO_ACK, radio_link, num, NULL, 0);
-    if (num == radio_in) return;
-    radio_in = num;
-    radio_inbox_put(body, len);
-}
-
-/* One piece, repeated until the far end answers it */
-static bool radio_one(const char *body, int len)
-{
-    radio_out++;
-    for (int n = 0; n < RADIO_TRIES; n++) {
-        uint64_t until;
-        radio_put(RADIO_DATA, radio_link, radio_out, body, len);
-        until = uBit.systemTime() + RADIO_WAIT;
-        while (uBit.systemTime() < until) {
-            uint8_t num;
-            if (radio_take(RADIO_ACK, radio_link, NULL,
-                           &num, NULL, NULL)
-                && num == radio_out) return true;
-            radio_keep();
-            uBit.sleep(1);
-        }
-    }
-    return false;
 }
 
 #define LUA_RADIO_FUNCTIONS						\
@@ -1461,86 +1281,46 @@ static bool radio_one(const char *body, int len)
 /* connect(friendlyName, timeout_ms) -> boolean */			\
     F(connect,    { lua_events_before_wait(); const char *them = radio_name(L, 1);		\
                     int timeout = luaL_optint(L, 2, RADIO_TIMEOUT);	\
-                    char hello[RADIO_NAME * 2];				\
                     uint8_t link = (uint8_t)(uBit.random(255) + 1);	\
-                    uint64_t deadline = uBit.systemTime() + timeout;	\
-                    memcpy(hello, them, RADIO_NAME);			\
-                    memcpy(hello + RADIO_NAME,				\
-                      microbit_friendly_name(), RADIO_NAME);		\
-                    while (uBit.systemTime() < deadline) {		\
-                      if (radio_called(link, hello)) {			\
-                        radio_open(link, them);				\
-                        lua_pushboolean(L, 1);				\
-                        return 1;					\
-                      }							\
-                    }							\
-                    lua_pushboolean(L, 0);				\
+                    lua_pushboolean(L, radio_link_call(&radio_link, them,	\
+                      microbit_friendly_name(), link,			\
+                      timeout > 0 ? (uint32_t)timeout : 0));		\
                     return 1;						\
                   })							\
 /* listen([name]) -> friendlyName of whoever connected; with a
  * name, only that board is answered */				\
     F(listen,     { lua_events_before_wait(); const char *from = radio_opt_name(L, 1);		\
-                    while (!radio_called_us(from)) uBit.sleep(1);	\
-                    lua_pushstring(L, radio_peer);			\
+                    while (!radio_link_called(&radio_link,		\
+                             microbit_friendly_name(), from))		\
+                      uBit.sleep(1);					\
+                    lua_pushstring(L, radio_link.peer);			\
                     return 1;						\
                   })							\
 /* tx(message) -> boolean
  * The message goes piece by piece, each taken before the
- * next one leaves. */							\
+ * next one leaves: true once the other board has them all,
+ * which it may still have to run. */					\
     F(tx,         { lua_events_before_wait(); size_t len;						\
                     const char *msg = luaL_checklstring(L, 1, &len);	\
-                    size_t sent = 0;					\
-                    if (radio_link == 0) {				\
-                      lua_pushboolean(L, 0);				\
-                      return 1;						\
-                    }							\
-                    do {						\
-                      int piece = (int)(len - sent);			\
-                      if (piece > RADIO_BODY) piece = RADIO_BODY;	\
-                      if (!radio_one(msg + sent, piece)) {		\
-                        lua_pushboolean(L, 0);				\
-                        return 1;					\
-                      }							\
-                      sent += piece;					\
-                    } while (sent < len);				\
-                    lua_pushboolean(L, 1);				\
+                    lua_pushboolean(L, radio_link_tx(&radio_link, msg, len));	\
                     return 1;						\
                   })							\
 /* rx() -> string or nil
- * One piece, acknowledged. A piece that arrives twice is
- * acknowledged again and dropped: the far end did not hear
- * the first answer. A frame that is not a new piece is passed
- * over for the next one waiting, so a piece behind it is not
- * left for a later call. */						\
+ * One piece, the oldest the other board sent. */			\
     F(rx,         { uint8_t body[RADIO_BODY];				\
-                    uint8_t num;					\
                     int len;						\
-                    if (radio_inbox_take(body, &len)) {		\
+                    if (radio_link_rx(&radio_link, body, &len))		\
                       lua_pushlstring(L, (const char *)body, len);	\
-                      return 1;						\
-                    }							\
-                    for (int n = 0; radio_link != 0			\
-                         && n <= MICROBIT_RADIO_MAXIMUM_RX_BUFFERS; n++) {	\
-                      if (radio_take(RADIO_DATA, radio_link, NULL,	\
-                                     &num, body, &len)) {		\
-                        radio_put(RADIO_ACK, radio_link, num, NULL, 0);	\
-                        if (num != radio_in) {				\
-                          radio_in = num;				\
-                          lua_pushlstring(L, (const char *)body, len);	\
-                          return 1;					\
-                        }						\
-                      } else if (uBit.radio.dataReady() == 0) {		\
-                        break;						\
-                      }							\
-                    }							\
-                    lua_pushnil(L);					\
+                    else						\
+                      lua_pushnil(L);					\
                     return 1;						\
                   })							\
 /* answered([name]) -> friendlyName if somebody, or with a
  * name that board, has just called again, or nil */		\
     F(answered,   { const char *from = radio_opt_name(L, 1);		\
-                    if (radio_called_us(from)) {			\
-                      lua_pushstring(L, radio_peer);			\
+                    if (radio_link_called(&radio_link,			\
+                          microbit_friendly_name(), from)) {		\
+                      lua_pushstring(L, radio_link.peer);		\
                     } else {						\
                       lua_pushnil(L);					\
                     }							\
@@ -1850,6 +1630,9 @@ static void lua_event_handler_fiber(void *arg) {
   codal::Event *event = (codal::Event *)arg;
   LuaEvent e = { event->source, event->value, (uint32_t)event->timestamp };
   delete event;
+  // the far end of a link is answered whatever Lua is doing
+  if (e.source == DEVICE_ID_RADIO && e.value == MICROBIT_RADIO_EVT_DATAGRAM)
+    radio_link_heard(&radio_link);
   lua_event_arrived(e);
 }
 

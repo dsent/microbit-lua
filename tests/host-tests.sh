@@ -5,8 +5,11 @@
 # - tpbot-host-test: source/tpbot.c beside the Lua it replaced
 #   (tests/tpbot-reference.lua), call by call;
 # - runtime-host-test: source/lua-script.lua, and programs in its place,
-#   over a stand-in board, with events through source/lua-events.c and
-#   modules through source/lua-modules.c;
+#   over a stand-in board, with events through source/lua-events.c,
+#   modules through source/lua-modules.c, and radio links through
+#   source/radio-link.c, both ends of them;
+# - source/radio-link.c, which the fiber carrying the radio's event runs,
+#   built without Lua's headers and calling nothing of Lua's;
 # - cstack-host-test: source/lua-cstack.c, whose limits follow the stack
 #   region's size;
 # - wait-audit.sh: every binding that waits looks for on_event first;
@@ -44,9 +47,17 @@ cc "${STRICT[@]}" -o "$DIR/tpbot" "$ROOT/tests/tpbot-host-test.c" \
 cc "${STRICT[@]}" -o "$DIR/runtime" "$ROOT/tests/runtime-host-test.c" \
   "$ROOT/tests/host-cstack.c" \
   "$ROOT/source/tpbot.c" "$ROOT/source/lua-events.c" \
-  "$ROOT/source/lua-modules.c" "$ROOT/source/radio-inbox.c" "$DIR"/*.o -lm
+  "$ROOT/source/lua-modules.c" "$ROOT/source/radio-link.c" "$DIR"/*.o -lm
 "$DIR/tpbot" "$ROOT/tests/tpbot-reference.lua"
 "$DIR/runtime" "$ROOT/source/lua-script.lua"
+mkdir "$DIR/alone"
+cc -std=gnu99 -O2 -Wall -Wextra -Werror -I"$ROOT/source" -c \
+  -o "$DIR/alone/radio-link.o" "$ROOT/source/radio-link.c"
+if nm -u "$DIR/alone/radio-link.o" | grep -i lua; then
+  echo "source/radio-link.c calls into Lua" >&2
+  exit 1
+fi
+echo "source/radio-link.c builds without Lua and calls nothing of Lua's"
 cc "${STRICT[@]}" -o "$DIR/cstack" "$ROOT/tests/cstack-host-test.c" \
   "$ROOT/source/lua-cstack.c"
 "$DIR/cstack"
