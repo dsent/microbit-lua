@@ -140,7 +140,7 @@ static const uint8_t *luaL_checkimage(lua_State *L, int narg,
   lua_pop(L, 2);
   luaL_argcheck(L, 0 <= *width && *width <= INT16_MAX
                 && 0 <= *height && *height <= INT16_MAX, narg,
-                "width and height from 0 up");
+                "width and height from 0 to 32767");
   pixels = (uint8_t *)lua_newuserdata(L, (size_t)*width * *height);
   lua_getfield(L, narg, "data");
   for (int y = 0; y < *height; y++) {
