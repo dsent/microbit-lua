@@ -1206,7 +1206,7 @@ static const RadioAir radio_air = {
 };
 
 static RadioLink radio_link = {
-    &radio_air, 0, 0, 0, false, {0}, {0}, 0, NULL
+    &radio_air, 0, 0, 0, false, 0, {0}, {0}, 0, NULL
 };
 
 /* A board's friendly name from a Lua argument. Names are five
@@ -1285,8 +1285,9 @@ static const char *radio_opt_name(lua_State *L, int arg)
     F(connect,    { lua_events_before_wait(); const char *them = radio_name(L, 1);		\
                     int timeout = luaL_optint(L, 2, RADIO_TIMEOUT);	\
                     uint8_t link = (uint8_t)(uBit.random(255) + 1);	\
+                    uint16_t call = (uint16_t)uBit.random(0x10000);	\
                     lua_pushboolean(L, radio_link_call(&radio_link, them,	\
-                      microbit_friendly_name(), link,			\
+                      microbit_friendly_name(), link, call,		\
                       timeout > 0 ? (uint32_t)timeout : 0));		\
                     return 1;						\
                   })							\

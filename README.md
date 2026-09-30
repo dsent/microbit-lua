@@ -281,12 +281,14 @@ goes over the link once it opens. The link itself is `microbit.radio`'s
 
 A frame carries its kind, the link's number and a piece's number. The link's
 number is one byte, drawn at random by the board that calls. HELLO and WELCOME
-carry both boards' names and the link's version, 4: a board whose firmware has
-an older link is not answered, and does not answer, so `connect` says
-`Connection timed out.` A board takes the pieces and answers that carry its
-link's number. A call repeated for the open link by the same board, its answer
-having come late, is answered again, and the link keeps what it took; any other
-call for the board opens the link anew.
+carry both boards' names, the link's version, 5, and the call's number, two
+bytes the calling board draws for each `connect` and sends again with every
+HELLO of that call. A board whose firmware has an older link is not answered,
+and does not answer, so `connect` says `Connection timed out.` A board takes the
+pieces and answers that carry its link's number. A HELLO that repeats the open
+link's call, with its link's number, its caller and its call's number, is
+answered again, and the link keeps what it took; any other call for the board
+opens the link anew.
 
 `tx(message)` sends the message in pieces of 25 bytes, each sent again every 30
 ms, 8 times at most, until the other board takes it, and returns true once every

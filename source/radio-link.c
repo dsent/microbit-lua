@@ -8,6 +8,9 @@
 // that carry its link's number. HELLO and WELCOME carry both ends' names in
 // a fixed ten bytes, then the version of this protocol: a board with
 // another version does not answer, and one that calls it is not answered.
+// Last comes the call's number, two bytes the caller draws for each
+// connect() and sends again with every HELLO of that call; WELCOME gives it
+// back.
 //
 // A message goes piece by piece, each sent again until the far end answers
 // it. Its first piece is marked, so the far end knows where a message
@@ -40,11 +43,14 @@
 #define FIRST   0xA5    // a piece that starts one
 
 // Version 1 marked no first pieces; version 2 numbered pieces in a byte;
-// version 3 numbered links in 4 bytes
-#define VERSION 4
+// version 3 numbered links in 4 bytes; version 4 numbered no calls
+#define VERSION 5
 
-// What a HELLO or a WELCOME carries: two names and the version
-#define CALL (RADIO_NAME * 2 + 1)
+// What a HELLO or a WELCOME carries: two names, the version and the call's
+// number
+#define AT_VERSION (RADIO_NAME * 2)
+#define AT_CALL    (AT_VERSION + 1)
+#define CALL       (AT_CALL + 2)
 
 // A piece is sent this many times, this many ms apart, before it is lost
 #define TRIES 8
@@ -169,7 +175,7 @@ void radio_link_open(RadioLink *r, uint8_t link, const char *peer) {
 // it goes to and the one it comes from, so a frame that only happens to
 // share a kind and a link number with it, from some other board on the
 // air, is not taken for one. hello is the call: the board called, then
-// this one, then the version.
+// this one, the version and the call's number, which the answer gives back.
 static bool welcomed(RadioLink *r, uint8_t link, const char *hello) {
   uint8_t kind = WELCOME, body[RADIO_BODY];
   int len;
@@ -178,7 +184,7 @@ static bool welcomed(RadioLink *r, uint8_t link, const char *hello) {
   return len == CALL
     && memcmp(body, hello + RADIO_NAME, RADIO_NAME) == 0
     && memcmp(body + RADIO_NAME, hello, RADIO_NAME) == 0
-    && body[RADIO_NAME * 2] == VERSION;
+    && memcmp(body + AT_VERSION, hello + AT_VERSION, CALL - AT_VERSION) == 0;
 }
 
 // Call once, then wait a moment for the answer
@@ -194,16 +200,19 @@ static bool called_once(RadioLink *r, uint8_t link, const char *hello) {
 }
 
 bool radio_link_call(RadioLink *r, const char *them, const char *us,
-                     uint8_t link, uint32_t timeout_ms) {
+                     uint8_t link, uint16_t call, uint32_t timeout_ms) {
   char hello[CALL];
   uint32_t start = r->air->now(r);
   memcpy(hello, them, RADIO_NAME);
   memcpy(hello + RADIO_NAME, us, RADIO_NAME);
-  hello[RADIO_NAME * 2] = VERSION;
+  hello[AT_VERSION] = VERSION;
+  hello[AT_CALL] = (char)call;
+  hello[AT_CALL + 1] = (char)(call >> 8);
   while (r->air->now(r) - start < timeout_ms) {
     if (called_once(r, link, hello)) {
       radio_link_open(r, link, them);
       r->serving = false;
+      r->call = call;
       return true;
     }
   }
@@ -215,30 +224,33 @@ bool radio_link_call(RadioLink *r, const char *them, const char *us,
 // it names. A call from anyone else is left unanswered, so the caller does
 // not think it got through. Any other link the call replaces is dropped:
 // the other end has started over, drawing a new number, which is how a
-// reset board finds its way back. A call for the link already open is the
-// caller calling again before the answer reached it: answered again, and
-// what the link holds stays.
+// reset board finds its way back. The same call again, with its link, its
+// caller and its number, is the caller calling again before the answer
+// reached it: answered again, and what the link holds stays.
 bool radio_link_called(RadioLink *r, const char *us, const char *from) {
   uint8_t kind = HELLO, body[RADIO_BODY];
   char welcome[CALL];
   uint8_t link;
+  uint16_t call;
   bool again;
   int len;
   if (take(r, &kind, 0, &link, NULL, body, &len) != 1
       || len != CALL
-      || body[RADIO_NAME * 2] != VERSION
+      || body[AT_VERSION] != VERSION
       || memcmp(body, us, RADIO_NAME) != 0) return false;
   if (from && memcmp(body + RADIO_NAME, from, RADIO_NAME) != 0)
     return false;
-  again = r->serving && link == r->link
+  call = (uint16_t)(body[AT_CALL] | body[AT_CALL + 1] << 8);
+  again = r->serving && link == r->link && call == r->call
     && memcmp(body + RADIO_NAME, r->peer, RADIO_NAME) == 0;
   if (!again) {
     radio_link_open(r, link, (const char *)body + RADIO_NAME);
     r->serving = true;
+    r->call = call;
   }
   memcpy(welcome, body + RADIO_NAME, RADIO_NAME);
   memcpy(welcome + RADIO_NAME, us, RADIO_NAME);
-  welcome[RADIO_NAME * 2] = VERSION;
+  memcpy(welcome + AT_VERSION, body + AT_VERSION, CALL - AT_VERSION);
   put(r, WELCOME, link, 0, welcome, CALL);
   return !again;
 }

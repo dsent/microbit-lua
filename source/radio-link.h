@@ -53,6 +53,7 @@ struct RadioLink {
   uint16_t out;                 // number of the last piece sent
   uint16_t in;                  // number of the last piece taken
   bool serving;                 // the other board called this one
+  uint16_t call;                // the number of the call that opened it
   char peer[RADIO_NAME + 1];
   // A frame taken off the air that the reader did not want, kept until
   // somebody wants it or another takes its place
@@ -66,9 +67,10 @@ struct RadioLink {
 void radio_link_open(RadioLink *r, uint8_t link, const char *peer);
 
 // Calls them, as us, on the given link number until they answer or the
-// time is up. The number is the caller's to draw, at random and not 0.
+// time is up. The link's number is the caller's to draw, at random and not
+// 0, and so is the call's, for each call.
 bool radio_link_call(RadioLink *r, const char *them, const char *us,
-                     uint8_t link, uint32_t timeout_ms);
+                     uint8_t link, uint16_t call, uint32_t timeout_ms);
 
 // Whether a board called this one, us, and was answered: one look. With
 // from, only that board is answered. A call repeated for the link already

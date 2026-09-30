@@ -271,8 +271,11 @@ static int board_acks;
 // The frames' kinds and the protocol's version, as the link has them
 enum {
   KIND_HELLO = 0xA1, KIND_DATA = 0xA3, KIND_ACK = 0xA4, KIND_FIRST = 0xA5,
-  VERSION = 4
+  VERSION = 5
 };
+
+// The number of the other board's call
+#define CALL_NUMBER 0x1234
 
 // The link's number this pair draws, and another link's
 #define LINK 7
@@ -407,11 +410,20 @@ static int far_says(const char *text) {
   return ok;
 }
 
+// A call to this board, from caller, with the call's number, on the link
+static void hello_from(const char *caller, uint16_t call) {
+  char hello[RADIO_NAME * 2 + 3];
+  memcpy(hello, "zezop", RADIO_NAME);
+  memcpy(hello + RADIO_NAME, caller, RADIO_NAME);
+  hello[RADIO_NAME * 2] = VERSION;
+  hello[RADIO_NAME * 2 + 1] = (char)call;
+  hello[RADIO_NAME * 2 + 2] = (char)(call >> 8);
+  air_frame(&board_air, KIND_HELLO, LINK, 0, hello, sizeof hello);
+}
+
 // The other board calls this one, and opens its end as the answer will
 static void far_calls(void) {
-  char hello[RADIO_NAME * 2 + 1] = "zezopgigat";
-  hello[RADIO_NAME * 2] = VERSION;
-  air_frame(&board_air, KIND_HELLO, LINK, 0, hello, sizeof hello);
+  hello_from("gigat", CALL_NUMBER);
   radio_link_open(&far_link, LINK, "zezop");
 }
 
@@ -442,6 +454,7 @@ static int link_connect(lua_State *L) {
   const char *them = luaL_checkstring(L, 1);
   lua_events_before_wait();
   lua_pushboolean(L, radio_link_call(&board_link, them, "zezop", LINK,
+                                     CALL_NUMBER,
                                      (uint32_t)luaL_optint(L, 2, 5000)));
   return 1;
 }
@@ -1903,10 +1916,8 @@ static void a_pair_with_the_same_link_id(void) {
 // the second call comes after a line the link took: the line stays, and
 // the session goes on
 static void far_calls_again_after_a_line(void) {
-  char hello[RADIO_NAME * 2 + 1] = "zezopgigat";
-  hello[RADIO_NAME * 2] = VERSION;
   far_says("10+1\n");
-  air_frame(&board_air, KIND_HELLO, LINK, 0, hello, sizeof hello);
+  hello_from("gigat", CALL_NUMBER);
   board_fibers();
 }
 
@@ -1925,9 +1936,7 @@ static void a_call_repeated(void) {
 // A call from another board, on the open link's number, while a link is
 // served: the link opens anew, for that board
 static void hakka_calls(void) {
-  char hello[RADIO_NAME * 2 + 1] = "zezophakka";
-  hello[RADIO_NAME * 2] = VERSION;
-  air_frame(&board_air, KIND_HELLO, LINK, 0, hello, sizeof hello);
+  hello_from("hakka", CALL_NUMBER);
   board_fibers();
 }
 
@@ -1941,6 +1950,33 @@ static void another_board_calls(void) {
   expect(board_link.link == LINK && strcmp(board_link.peer, "hakka") == 0,
          "a call from another board on the open link's id opens the link "
          "anew, for that board");
+}
+
+// The same board calls anew, drawing the same link's number, after a line
+// the link took: a new call's number opens the link anew, and the first
+// line of the new call runs
+static void far_calls_anew_after_a_line(void) {
+  far_says("10+1\n");
+  hello_from("gigat", CALL_NUMBER + 1);
+  board_fibers();
+  radio_link_open(&far_link, LINK, "zezop");
+}
+
+static void far_says_the_first_line(void) {
+  far_says("20+2\n");
+}
+
+static void a_call_anew_on_the_same_link(void) {
+  fresh();
+  real_link = 1;
+  boot("");
+  far_calls();
+  plan(far_calls_anew_after_a_line);
+  plan(far_says_the_first_line);
+  line("listen('gigat')");
+  expect(strcmp(far_heard, "> > => 22\n> ") == 0,
+         "a board that calls anew on the same link id starts the link "
+         "over, and its first line runs");
 }
 
 // Lines that find the other board's inbox full, one after another, for
@@ -2102,7 +2138,7 @@ static void a_loss_in_an_open_statement(void) {
 
 // A call from a board whose link is an older version is not answered:
 // version 1's, with no version; version 2's, whose head is 3 bytes; and
-// version 3's, whose head is 7
+// version 3's, whose head is 7; and version 4's, whose call has no number
 static void an_older_link(void) {
   static const uint8_t one[] = {
     KIND_HELLO, 7, 0, 'z', 'e', 'z', 'o', 'p', 'g', 'i', 'g', 'a', 't' };
@@ -2111,11 +2147,16 @@ static void an_older_link(void) {
   static const uint8_t three[] = {
     KIND_HELLO, 7, 0, 0, 0, 0, 0,
     'z', 'e', 'z', 'o', 'p', 'g', 'i', 'g', 'a', 't', 3 };
+  static const uint8_t four[] = {
+    KIND_HELLO, 7, 0, 0,
+    'z', 'e', 'z', 'o', 'p', 'g', 'i', 'g', 'a', 't', 4 };
   fresh();
   air_put(&board_air, one, sizeof one);
   air_put(&board_air, two, sizeof two);
   air_put(&board_air, three, sizeof three);
+  air_put(&board_air, four, sizeof four);
   expect(!radio_link_called(&board_link, "zezop", NULL)
+         && !radio_link_called(&board_link, "zezop", NULL)
          && !radio_link_called(&board_link, "zezop", NULL)
          && !radio_link_called(&board_link, "zezop", NULL)
          && board_link.link == 0 && far_air.count == 0,
@@ -2665,6 +2706,7 @@ int main(int argc, char **argv) {
   a_pair_with_the_same_link_id();
   a_call_repeated();
   another_board_calls();
+  a_call_anew_on_the_same_link();
   numbers_that_come_round();
   typing_during_a_loss();
   a_line_at_the_last_moment();
