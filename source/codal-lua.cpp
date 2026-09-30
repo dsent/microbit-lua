@@ -792,6 +792,7 @@ extern MicroBitUARTService *uart;
 
 #define LUA_BLE_FUNCTIONS						\
     F(send,       { if(!uart) { lua_pushnil(L); return 1; }		\
+                    lua_events_before_wait();				\
                     ManagedString s = luaL_checkManagedString(L, 1);	\
                     int r = uart->send(s, SYNC_SLEEP);			\
                     if(r != DEVICE_SERIAL_IN_USE &&			\
@@ -814,6 +815,7 @@ extern MicroBitUARTService *uart;
                     return 1;						\
                   })							\
     F(getChar,    { if(!uart) { lua_pushnil(L); return 1; }		\
+                    lua_events_before_wait();				\
                     char r = (char)uart->getc(SYNC_SLEEP);		\
                     lua_pushlstring(L, &r, 1);				\
                     return 1;						\
@@ -830,6 +832,7 @@ extern MicroBitUARTService *uart;
                     return 1;						\
                   })							\
     F(read,       { if(!uart) { lua_pushnil(L); return 1; }		\
+                    lua_events_before_wait();				\
                     int size = luaL_checkint(L, 1);			\
                     lua_pushManagedString(L,				\
                       uart->read(size, SYNC_SLEEP));			\
@@ -842,6 +845,7 @@ extern MicroBitUARTService *uart;
                     return 1;						\
                   })							\
     F(readUntil,  { if(!uart) { lua_pushnil(L); return 1; }		\
+                    lua_events_before_wait();				\
                     ManagedString delimiters =				\
                       luaL_checkManagedString(L, 1);			\
                     lua_pushManagedString(L,				\
@@ -849,6 +853,7 @@ extern MicroBitUARTService *uart;
                     return 1;						\
                   })							\
     F(eventOn,    { if(!uart) { return 0; }				\
+                    lua_events_before_wait();				\
                     uart->eventOn(luaL_checkManagedString(L, 1),	\
                                            SYNC_SLEEP);			\
                     return 0;						\
@@ -860,6 +865,7 @@ extern MicroBitUARTService *uart;
                     return 0;						\
                   })							\
     F(eventAfter, { if(!uart) { return 0; }				\
+                    lua_events_before_wait();				\
                     uart->eventAfter(luaL_checkint(L, 1),		\
                                            SYNC_SLEEP);			\
                     return 0;						\

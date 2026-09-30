@@ -66,7 +66,8 @@ void lua_events_sleep(uint32_t ms);
 
 // Every other binding that waits, letting other fibers run, calls this
 // first, in the fiber that runs Lua: an on_event the program has just set
-// then gets the events that come while it waits.
+// then gets the events that come while it waits. tests/wait-audit.sh
+// checks the bindings in source/codal-lua.cpp.
 void lua_events_before_wait(void);
 
 // microbit.eventsDropped(), microbit.eventFallback(f) and

@@ -6,7 +6,8 @@
 #   (tests/tpbot-reference.lua), call by call;
 # - runtime-host-test: source/lua-script.lua, and programs in its place,
 #   over a stand-in board, with events through source/lua-events.c and
-#   modules through source/lua-modules.c.
+#   modules through source/lua-modules.c;
+# - wait-audit.sh: every binding that waits looks for on_event first.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -42,3 +43,4 @@ cc "${STRICT[@]}" -o "$DIR/runtime" "$ROOT/tests/runtime-host-test.c" \
   "$ROOT/source/lua-modules.c" "$ROOT/source/radio-inbox.c" "$DIR"/*.o -lm
 "$DIR/tpbot" "$ROOT/tests/tpbot-reference.lua"
 "$DIR/runtime" "$ROOT/source/lua-script.lua"
+bash "$ROOT/tests/wait-audit.sh"

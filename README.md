@@ -257,7 +257,8 @@ Classic at once.
   each error;
 - `source/lua-script.lua` over a stand-in board, with events through
   `source/lua-events.c`: typing at the REPL, buttons pressed while Lua sleeps,
-  and the globals the REPL uses taken away.
+  and the globals the REPL uses taken away;
+- `tests/wait-audit.sh`: every binding that waits looks for `on_event` first.
 
 It needs `cc`, `patch`, and the Lua tarball a firmware build leaves in
 `libraries/`, which it patches as the build does.
