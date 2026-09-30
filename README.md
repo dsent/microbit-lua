@@ -237,8 +237,10 @@ A mistake in a handler goes to the serial port as `Runtime error: ` and the
 message, and scrolls by on the display, if the display is free, while the
 program goes on. A script that stops on a mistake at boot sends it to the
 port the same way, then shows `Lua error!` and the message on the display,
-once, before anything else happens. The board then handles events with the
-`on_event` the script set before it stopped, if any.
+once, before anything else happens; the board then handles events with the
+`on_event` the script set before it stopped, if any. A script that does not
+compile sends `Compile error: ` and the message to the port, and scrolls
+them by.
 
 Lua's own `print` writes to stdout, which goes nowhere on this board; the
 firmware's script puts its own in its place, writing to the serial port.

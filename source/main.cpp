@@ -187,6 +187,8 @@ int main() {
     else
     {
         const char* err = lua_tostring(L, -1);
+        if (err)
+            port_mistake("Compile error: ", err);
         uBit.display.scroll("Compile error: ");
         if (err) {
             uBit.display.scroll(err);
