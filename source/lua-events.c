@@ -250,7 +250,9 @@ static void handle(LuaEvent e, bool port) {
     lua_pop(state, 1);
     if (port) {
       bool unread = lua_events_arm_port();
-      port_waiting = port_waiting || (unread && !port_again);
+      // only ever set here: an interrupt may set it meanwhile
+      if (unread && !port_again)
+        port_waiting = true;
       port_again = unread && !port_again;
     }
   } else if (port) {
