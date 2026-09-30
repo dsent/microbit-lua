@@ -34,6 +34,9 @@ TPBOT_GLOBALS
 // Sets the globals above.
 void tpbot_register_globals(lua_State *L);
 
+// What a robot command says when no robot answers on the bus
+extern const char tpbot_no_answer[];
+
 // What the commands need of the board, given by the firmware, or by the
 // host test in its place.
 

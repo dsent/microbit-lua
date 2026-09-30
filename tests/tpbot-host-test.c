@@ -282,6 +282,20 @@ static const char *CALLS[] = {
   "tpbot.turn(180.5)", "tpbot.turn(-0.5)", "tpbot.turn(65535)",
   "tpbot.turn(65536)", "tpbot.turn('90')", "tpbot.turn('x')",
   "tpbot.turn(nil)", "tpbot.turn()", "tpbot.turn(false)",
+  // turn and straight look tpbot's commands up when called
+  "local got tpbot.turn = function(d) got = d end turn(3) return got",
+  "local got tpbot.run_distance = function(d) got = d end straight(2) "
+  "return got",
+  "tpbot.turn = function() error('mine') end turn(3)",
+  "tpbot.turn = nil turn(3)", "tpbot.turn = 5 turn(3)",
+  "tpbot.run_distance = false straight(1)", "tpbot = nil turn(3)",
+  "tpbot = nil straight(1)", "tpbot = nil straight('x')",
+  "tpbot = 7 turn(1)", "tpbot = 'x' turn(1)",
+  "tpbot = setmetatable({}, { __index = function(t, k) return "
+  "function(d) error(k .. d) end end }) turn(1)",
+  "tpbot.turn = setmetatable({}, { __call = function(self, d) "
+  "error('called ' .. d) end }) turn(2)",
+  "turn = nil return pcall(straight, 1)",
   // a mistake in the call itself, then one after a command
   "robot_move(50, 50, 1) turn(3) return 1",
   "tpbot.set_motors_speed(50, 50) robot_move(10, 10, 1)",

@@ -917,15 +917,20 @@ static uint8_t robot_byte(lua_State *L, int narg, int value) {
   return (uint8_t)value;
 }
 
+// A robot that does not answer is told in the words tpbot uses.
 static int robot_send(lua_State *L, uint8_t *data, int length) {
-  if (i2c.write(32, data, length) != MICROBIT_OK)
-    return luaL_error(L, "i2c write error");
+  if (i2c.write(32, data, length) != MICROBIT_OK) {
+    lua_pushstring(L, tpbot_no_answer);
+    return lua_error(L);
+  }
   return 0;
 }
 
 static void robot_read(lua_State *L, uint8_t *data, int length) {
-  if (i2c.read(32, data, length) != MICROBIT_OK)
-    luaL_error(L, "i2c read error");
+  if (i2c.read(32, data, length) != MICROBIT_OK) {
+    lua_pushstring(L, tpbot_no_answer);
+    lua_error(L);
+  }
 }
 
 // Width in microseconds of the next high pulse on pin, -1 on timeout.

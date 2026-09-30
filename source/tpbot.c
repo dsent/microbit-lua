@@ -32,7 +32,7 @@ static int say(lua_State *L, const char *message) {
   return lua_error(L);
 }
 
-static const char NO_ANSWER[] =
+const char tpbot_no_answer[] =
   "The robot does not answer. Check that it is "
   "switched on, or switch it off and on again.";
 
@@ -111,10 +111,10 @@ int tpbot_set_car_light(lua_State *L) {
       || byte_at(L, 3, &frame[3]))
     return lua_error(L);
   if (send(48, frame + 1, 3))
-    return say(L, NO_ANSWER);
+    return say(L, tpbot_no_answer);
   frame[0] = 32;
   if (to_robot(frame, 4))
-    return say(L, NO_ANSWER);
+    return say(L, tpbot_no_answer);
   return 0;
 }
 
@@ -143,10 +143,10 @@ static int set_motors_speed(lua_State *L, int left, int right) {
   classic[3] = (char)(d + e);
   unanswered = 1;
   if (send(16, edu, 3))
-    return stop_with(L, NO_ANSWER);
+    return stop_with(L, tpbot_no_answer);
   unanswered = 0;
   if (to_robot(classic, 4))
-    return stop_with(L, NO_ANSWER);
+    return stop_with(L, tpbot_no_answer);
   return 0;
 }
 
@@ -215,7 +215,7 @@ int tpbot_robot_move(lua_State *L) {
   if (failed)
     return lua_error(L);
   if (stop_failed)
-    return say(L, NO_ANSWER);
+    return say(L, tpbot_no_answer);
   return 0;
 }
 
@@ -245,7 +245,7 @@ static int run_distance(lua_State *L, int arg) {
       || byte_of(L, (lua_Number)f, &params[2]))
     return 1;
   if (send(65, params, 3))
-    return stop_with(L, NO_ANSWER);
+    return stop_with(L, tpbot_no_answer);
   return 0;
 }
 
@@ -268,7 +268,7 @@ static int turn(lua_State *L, int arg) {
   params[2] = params[0];
   params[3] = params[1];
   if (send(66, params, 5))
-    return stop_with(L, NO_ANSWER);
+    return stop_with(L, tpbot_no_answer);
   return 0;
 }
 
@@ -291,6 +291,51 @@ static int arithmetic_on(lua_State *L, int arg, lua_Number *out) {
   return 0;
 }
 
+// Whether a value can be indexed: a table, or one whose metatable says how
+static int indexable(lua_State *L, int at) {
+  if (lua_istable(L, at))
+    return 1;
+  if (luaL_getmetafield(L, at, "__index")) {
+    lua_pop(L, 1);
+    return 1;
+  }
+  return 0;
+}
+
+static int callable(lua_State *L, int at) {
+  if (lua_isfunction(L, at))
+    return 1;
+  if (luaL_getmetafield(L, at, "__call")) {
+    lua_pop(L, 1);
+    return 1;
+  }
+  return 0;
+}
+
+// tpbot.<name>, pushed, looked up at the call as the Lua looked it up, so
+// that a tpbot.turn of a person's own is the one turn() calls.
+static int command(lua_State *L, const char *name) {
+  lua_getglobal(L, "tpbot");
+  if (!indexable(L, -1)) {
+    lua_pushfstring(L, "attempt to index global 'tpbot' (a %s value)",
+                    luaL_typename(L, -1));
+    return 1;
+  }
+  lua_getfield(L, -1, name);
+  lua_remove(L, -2);
+  return 0;
+}
+
+static int call_command(lua_State *L, const char *name) {
+  if (!callable(L, -2)) {
+    lua_pushfstring(L, "attempt to call field '%s' (a %s value)", name,
+                    luaL_typename(L, -2));
+    return 1;
+  }
+  lua_call(L, 1, 0);
+  return 0;
+}
+
 // turn(h): h hours on a clock face, the shorter way round.
 int tpbot_turn_hours(lua_State *L) {
   lua_Number h;
@@ -300,8 +345,10 @@ int tpbot_turn_hours(lua_State *L) {
   h = h - floor(h / (lua_Number)12) * (lua_Number)12;
   if (6 < h)
     h = h - 12;
+  if (command(L, "turn"))
+    return lua_error(L);
   lua_pushnumber(L, (lua_Number)-30 * h);
-  if (turn(L, 2))
+  if (call_command(L, "turn"))
     return lua_error(L);
   return 0;
 }
@@ -310,10 +357,10 @@ int tpbot_turn_hours(lua_State *L) {
 int tpbot_straight(lua_State *L) {
   lua_Number l;
   lua_settop(L, 1);
-  if (arithmetic_on(L, 1, &l))
+  if (command(L, "run_distance") || arithmetic_on(L, 1, &l))
     return lua_error(L);
   lua_pushnumber(L, (lua_Number)110 * l);
-  if (run_distance(L, 2))
+  if (call_command(L, "run_distance"))
     return lua_error(L);
   return 0;
 }
