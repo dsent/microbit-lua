@@ -158,8 +158,10 @@ int tpbot_i2c_write(int address, const char *data, size_t length) {
   bus_writes++;
   return 0;
 }
+// robot_move's sleep, as the firmware binds it
 void tpbot_sleep(uint32_t ms) {
   char text[32];
+  lua_events_before_wait();
   snprintf(text, sizeof text, "<move %lu>", (unsigned long)ms);
   note(text);
   lua_events_pause(ms);
@@ -284,7 +286,7 @@ static const LuaApi l_microbit[] = {
   {"version", l_version, 0}, {"friendlyName", l_name, 0},
   {"sleep", l_sleep, 0}, {"eventsDropped", lua_events_dropped, 0},
   {"eventFallback", lua_events_fallback, 0}, {"post", l_post, 0},
-  {"eventLine", lua_events_line, 0},
+  {"eventLine", lua_events_line, 0}, {"eventRepl", lua_events_repl, 0},
   {"DEVICE_ID_BUTTON_A", NULL, ID_BUTTON_A},
   {"DEVICE_ID_BUTTON_B", NULL, ID_BUTTON_B},
   {"DEVICE_ID_BUTTON_AB", NULL, ID_BUTTON_AB},
@@ -1176,6 +1178,37 @@ static void deep_sleeps(void) {
          "a sleep 4,400 bytes deep leaves them for after the call");
 }
 
+// An uploaded program that sets on_event and then drives: a press during
+// its first move reaches on_event when the move ends. And the guide's
+// forwarding on_event, which passes what it does not handle to the REPL's:
+// a command typed through it still handles presses while it sleeps.
+static void codex_round_nine(void) {
+  static const char *const forwarded[] = {
+    "microbit.sleep(50)", "<sleep>", "<scroll hi>", "</sleep>", NULL };
+  fresh();
+  plan(press_a);
+  boot_alone("require('microbit')\nrequire('microbit.display')\n"
+             "require('tpbot')\n"
+             "function on_event(s, v) microbit.display.scroll('got' .. s) end\n"
+             "robot_move(40, 40, 2)\n");
+  expect(strstr(out, "<move 2000><scroll got1>") != NULL
+         && strstr(out, "<booted>") > strstr(out, "<scroll got1>"),
+         "a press during an uploaded program's first move reaches its "
+         "on_event when the move ends");
+  fresh();
+  boot("local original = on_event\n"
+       "function on_event(s,v,t)\n"
+       "if s == microbit.DEVICE_ID_BUTTON_A and "
+       "v == microbit.DEVICE_BUTTON_EVT_CLICK then\n"
+       "microbit.display.scroll('hi')\n"
+       "else original(s,v,t) end end\n");
+  plan(press_a);
+  line("microbit.sleep(50)");
+  expect(in_order(out, forwarded),
+         "a command typed through a forwarding on_event handles a press "
+         "while it sleeps");
+}
+
 int main(int argc, char **argv) {
   host_cstack_start();
   signal(SIGALRM, too_long);
@@ -1197,6 +1230,7 @@ int main(int argc, char **argv) {
   the_radio_inbox();
   a_full_c_stack();
   deep_sleeps();
+  codex_round_nine();
   programs_alone();
   printf("%d checks, %d failed\n", checks, failures);
   return failures != 0;

@@ -60,9 +60,15 @@ void lua_events_boot(lua_State *L);
 // events that wait (see source/lua-events.c).
 void lua_events_sleep(uint32_t ms);
 
+// Every other binding that waits, letting other fibers run, calls this
+// first, in the fiber that runs Lua: an on_event the program has just set
+// then gets the events that come while it waits.
+void lua_events_before_wait(void);
+
 // microbit.eventsDropped(), microbit.eventFallback(f) and
 // microbit.eventLine(n)
 int lua_events_dropped(lua_State *L);
+int lua_events_repl(lua_State *L);
 int lua_events_fallback(lua_State *L);
 int lua_events_line(lua_State *L);
 

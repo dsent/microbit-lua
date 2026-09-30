@@ -178,7 +178,11 @@ only noise to a program never reach it: the serial port saying it has data,
 or that it is full, and a scroll that has ended.
 
 One Lua call runs at a time. An event that comes while one runs waits in a
-line, in the order the events came. The line holds 16 events unless
+line, in the order the events came, once the program has an `on_event`:
+the firmware looks for one at every wait that lets other fibers run
+(`microbit.sleep`, `robot_move`, a scroll, a serial or radio wait), so a
+program that sets `on_event` and then drives keeps the presses made during
+the move. The line holds 16 events unless
 `microbit.eventLine(n)` says otherwise (0 drops every event that would have
 to wait); it is made the first time an event has to wait for a program that
 has an `on_event` or a fallback, and a program with neither pays nothing
@@ -190,7 +194,9 @@ however many events come, but lasts as long as the handlers it runs. The
 running call is the script at boot, or a command at the REPL; a handler's
 own `microbit.sleep` handles nothing, so one handler always ends before the
 next starts, and so does a program's own `on_event` when it gets the serial
-port's event. Nor does a sleep that is already more than 4,352 bytes deep
+port's event. The firmware's REPL marks the command it runs for that event
+with `microbit.eventRepl()`, so a command typed through an `on_event` that
+passes the port's event on to the REPL's still handles events at its sleeps. Nor does a sleep that is already more than 4,352 bytes deep
 in the C stack, so the handlers it would run keep 1.5 KB before the limit;
 their events wait for the call to return. A call from C into Lua, or a
 level of the parser, that finds more than 5,888 bytes of the 8 KB stack in

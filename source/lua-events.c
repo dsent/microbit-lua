@@ -64,6 +64,7 @@ static Line *line;
 static uint8_t line_size = 16;
 static bool running = false;
 static bool sleep_handles = false;   // the running call's sleeps handle events
+static bool port_call = false;       // the port's event is being handled
 static bool wants = false;           // there is on_event, or a fallback
 static volatile bool port_waiting = false;
 
@@ -174,9 +175,8 @@ typedef struct {
 // put in on_event by mistake leaves the REPL answering, so the mistake can
 // be put right from the prompt. With neither, the event goes nowhere.
 // on_event is read raw from the globals: a metamethod of _G's has no say.
-// The sleeps of a REPL command handle events; that is the port's event
-// going to the firmware's own handler. A program's own on_event gets it
-// as any other event, and its sleeps handle none.
+// Its sleeps handle nothing, unless the REPL says, through
+// microbit.eventRepl(), that it runs a command for the port's event.
 static int call_handler(lua_State *L) {
   Call *c = (Call *)lua_touserdata(L, 1);
   lua_pushlightuserdata(L, &fallback_key);
@@ -189,7 +189,7 @@ static int call_handler(lua_State *L) {
     if (!callable(L, 3))
       return 0;
   }
-  sleep_handles = c->port_call && lua_rawequal(L, 2, 3);
+  sleep_handles = false;
   lua_pushinteger(L, c->e.source);
   lua_pushinteger(L, c->e.value);
   lua_pushinteger(L, (lua_Integer)c->e.timestamp);
@@ -199,11 +199,12 @@ static int call_handler(lua_State *L) {
 
 // A mistake in a handler is shown without waiting for it to scroll by:
 // the call that is running goes on.
-static void handle(LuaEvent e, bool port_call) {
-  bool outer = sleep_handles;
+static void handle(LuaEvent e, bool port) {
+  bool outer = sleep_handles, outer_port = port_call;
   Call c;
   c.e = e;
-  c.port_call = port_call;
+  c.port_call = port;
+  port_call = port;
   if (lua_cpcall(state, call_handler, &c) != 0) {
     const char *err = lua_tostring(state, -1);
     if (err)
@@ -211,6 +212,7 @@ static void handle(LuaEvent e, bool port_call) {
     lua_pop(state, 1);
   }
   sleep_handles = outer;
+  port_call = outer_port;
 }
 
 static int look_for_on_event(lua_State *L) {
@@ -232,6 +234,15 @@ static void look_for_a_handler(void) {
   lua_pop(state, 1);
   if (!wants && lua_cpcall(state, look_for_on_event, NULL) != 0)
     lua_pop(state, 1);
+}
+
+// Before any wait that lets other fibers run while Lua runs: a program
+// that has just set on_event has somewhere for the events of that wait to
+// go, and they are kept for it. Looked at here, in the fiber that owns
+// Lua, and at once when there is a handler already.
+void lua_events_before_wait(void) {
+  if (running)
+    look_for_a_handler();
 }
 
 void lua_call_begin(void) {
@@ -274,12 +285,12 @@ static void handle_what_waits(void) {
 void lua_events_sleep(uint32_t ms) {
   uint32_t start, elapsed;
   bool paused = false;
+  lua_events_before_wait();
   if (!running || !sleep_handles
       || lua_events_stack_used() > SAFE_POINT_STACK) {
     lua_events_pause(ms);
     return;
   }
-  look_for_a_handler();
   start = lua_events_now();
   for (;;) {
     handle_what_waits();
@@ -305,6 +316,19 @@ void lua_events_boot(lua_State *L) {
     lua_pop(L, 1);
   }
   lua_call_end();
+}
+
+// microbit.eventRepl(): the REPL runs a command for the port's event, and
+// its sleeps are safe points, as the script's at boot are. It holds only
+// while the port's event is being handled as the running call, so it lets
+// no handler run inside another; whatever on_event passed the event on to
+// the REPL, the REPL's own or one a program put in front of it, the
+// command's sleeps handle events.
+int lua_events_repl(lua_State *L) {
+  (void)L;
+  if (port_call)
+    sleep_handles = true;
+  return 0;
 }
 
 int lua_events_dropped(lua_State *L) {

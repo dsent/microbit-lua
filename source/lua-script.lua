@@ -316,6 +316,9 @@ end
 -- more: a character that came before it was armed raises no event.
 local function port_to_console(value)
   if value == HEAD_MATCH then
+    -- a command's sleeps handle events, whichever on_event passed the
+    -- port's event on to here
+    uBit.eventRepl()
     local c
     repeat
       serial_session.run(read_port, c)

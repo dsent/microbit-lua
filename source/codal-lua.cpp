@@ -82,6 +82,7 @@ const char firmware_version_mark[] = FIRMWARE_VERSION_MARK FIRMWARE_VERSION;
     F(eventsDropped, { return lua_events_dropped(L); })		\
     F(eventFallback, { return lua_events_fallback(L); })		\
     F(eventLine,  { return lua_events_line(L); })			\
+    F(eventRepl,  { return lua_events_repl(L); })			\
     F(panic,      { int statusCode = (int)luaL_checkinteger(L, 1);      \
                     microbit_panic(statusCode);				\
                     return 0;						\
@@ -196,7 +197,7 @@ Image luaL_checkimage(lua_State *L, int narg) {
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(print,      { const char *s = luaL_checkstring(L, 1);		\
+    F(print,      { lua_events_before_wait(); const char *s = luaL_checkstring(L, 1);		\
                     int delay = luaL_optint(L, 2,			\
                       DISPLAY_DEFAULT_PRINT_SPEED);			\
                     int r = uBit.display.print(s, delay);		\
@@ -210,7 +211,7 @@ Image luaL_checkimage(lua_State *L, int narg) {
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(scroll,     { const char *s = luaL_checkstring(L, 1);		\
+    F(scroll,     { lua_events_before_wait(); const char *s = luaL_checkstring(L, 1);		\
                     int delay = luaL_optint(L, 2,			\
                       DISPLAY_DEFAULT_SCROLL_SPEED);			\
                     int r = uBit.display.scroll(s, delay);		\
@@ -232,7 +233,7 @@ Image luaL_checkimage(lua_State *L, int narg) {
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(animate,    { Image image = luaL_checkimage(L, 1);		\
+    F(animate,    { lua_events_before_wait(); Image image = luaL_checkimage(L, 1);		\
                     int delay = luaL_checkint(L, 2);			\
                     int stride = luaL_checkint(L, 3);			\
                     int startingPosition =				\
@@ -554,7 +555,7 @@ Pin *luaL_checkPin(lua_State *L, int narg) {
                     }							\
                     return 1;						\
                   })							\
-    F(getPulseUs, { Pin *pin = luaL_checkPin(L, 1);			\
+    F(getPulseUs, { lua_events_before_wait(); Pin *pin = luaL_checkPin(L, 1);			\
                     int timeout = luaL_checkint(L, 2);			\
                     int r = pin->getPulseUs(timeout);			\
                     if(r != DEVICE_CANCELLED) {				\
@@ -633,7 +634,7 @@ ManagedString luaL_checkManagedString(lua_State *L, int narg) {
 }
 
 #define LUA_SERIAL_FUNCTIONS						\
-    F(send,       { ManagedString s = luaL_checkManagedString(L, 1);	\
+    F(send,       { lua_events_before_wait(); ManagedString s = luaL_checkManagedString(L, 1);	\
                     int r = uBit.serial.send(s, SYNC_SLEEP);		\
                     if(r != DEVICE_SERIAL_IN_USE &&			\
                        r != DEVICE_INVALID_PARAMETER) {			\
@@ -653,7 +654,7 @@ ManagedString luaL_checkManagedString(lua_State *L, int narg) {
                     }							\
                     return 1;						\
                   })							\
-    F(getByte,    { int r = uBit.serial.getChar(SYNC_SLEEP);		\
+    F(getByte,    { lua_events_before_wait(); int r = uBit.serial.getChar(SYNC_SLEEP);		\
                     lua_pushinteger(L, r);				\
                     return 1;						\
                   })							\
@@ -666,7 +667,7 @@ ManagedString luaL_checkManagedString(lua_State *L, int narg) {
                     }							\
                     return 1;						\
                   })							\
-    F(getChar,    { char r = (char)uBit.serial.getChar(SYNC_SLEEP);	\
+    F(getChar,    { lua_events_before_wait(); char r = (char)uBit.serial.getChar(SYNC_SLEEP);	\
                     lua_pushlstring(L, &r, 1);				\
                     return 1;						\
                   })							\
@@ -680,7 +681,7 @@ ManagedString luaL_checkManagedString(lua_State *L, int narg) {
                     }							\
                     return 1;						\
                   })							\
-    F(read,       { int size = luaL_checkint(L, 1);			\
+    F(read,       { lua_events_before_wait(); int size = luaL_checkint(L, 1);			\
                     lua_pushManagedString(L,				\
                       uBit.serial.read(size, SYNC_SLEEP));		\
                     return 1;						\
@@ -690,7 +691,7 @@ ManagedString luaL_checkManagedString(lua_State *L, int narg) {
                       uBit.serial.read(size, ASYNC));			\
                     return 1;						\
                   })							\
-    F(readUntil,  { ManagedString delimiters =				\
+    F(readUntil,  { lua_events_before_wait(); ManagedString delimiters =				\
                       luaL_checkManagedString(L, 1);			\
                     lua_pushManagedString(L,				\
                       uBit.serial.readUntil(delimiters, SYNC_SLEEP));	\
@@ -707,7 +708,7 @@ ManagedString luaL_checkManagedString(lua_State *L, int narg) {
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(eventAfter, { uBit.serial.eventAfter(luaL_checkint(L, 1),		\
+    F(eventAfter, { lua_events_before_wait(); uBit.serial.eventAfter(luaL_checkint(L, 1),		\
                                            SYNC_SLEEP);			\
                     return 0;						\
                   })							\
@@ -716,7 +717,7 @@ ManagedString luaL_checkManagedString(lua_State *L, int narg) {
                                            ASYNC);			\
                     return 0;						\
                   })							\
-    F(eventOn,    { uBit.serial.eventOn(luaL_checkManagedString(L, 1),	\
+    F(eventOn,    { lua_events_before_wait(); uBit.serial.eventOn(luaL_checkManagedString(L, 1),	\
                                            SYNC_SLEEP);			\
                     return 0;						\
                   })							\
@@ -963,6 +964,7 @@ extern "C" int tpbot_i2c_write(int address, const char *data, size_t length) {
 }
 
 extern "C" void tpbot_sleep(uint32_t ms) {
+  lua_events_before_wait();
   uBit.sleep(ms);
 }
 
@@ -1072,7 +1074,7 @@ static int nezha2_send(lua_State *L, int b3, int b4, int b5, int b6, int b7) {
                     return nezha2_send(L, speed < 0 ? 2 : 1, 96,	\
                       robot_byte(L, 2, abs(speed)), 245, 0);		\
                   })							\
-    F(motor_position, {							\
+    F(motor_position, { lua_events_before_wait();							\
                     uint8_t p[4];					\
                     nezha2_send(L, 0, 70, 0, 245, 0);			\
                     uBit.sleep(4);					\
@@ -1082,7 +1084,7 @@ static int nezha2_send(lua_State *L, int b3, int b4, int b5, int b6, int b7) {
                     lua_pushnumber(L, (v % 3600) * 0.1f);		\
                     return 1;						\
                   })							\
-    F(motor_speed, {							\
+    F(motor_speed, { lua_events_before_wait();							\
                     uint8_t s[2];					\
                     nezha2_send(L, 0, 71, 0, 245, 0);			\
                     uBit.sleep(3);					\
@@ -1372,7 +1374,7 @@ static bool radio_one(const char *body, int len)
                     return 1;						\
                   })							\
 /* connect(friendlyName, timeout_ms) -> boolean */			\
-    F(connect,    { const char *them = radio_name(L, 1);		\
+    F(connect,    { lua_events_before_wait(); const char *them = radio_name(L, 1);		\
                     int timeout = luaL_optint(L, 2, RADIO_TIMEOUT);	\
                     char hello[RADIO_NAME * 2];				\
                     uint8_t link = (uint8_t)(uBit.random(255) + 1);	\
@@ -1392,7 +1394,7 @@ static bool radio_one(const char *body, int len)
                   })							\
 /* listen([name]) -> friendlyName of whoever connected; with a
  * name, only that board is answered */				\
-    F(listen,     { const char *from = radio_opt_name(L, 1);		\
+    F(listen,     { lua_events_before_wait(); const char *from = radio_opt_name(L, 1);		\
                     while (!radio_called_us(from)) uBit.sleep(1);	\
                     lua_pushstring(L, radio_peer);			\
                     return 1;						\
@@ -1400,7 +1402,7 @@ static bool radio_one(const char *body, int len)
 /* tx(message) -> boolean
  * The message goes piece by piece, each taken before the
  * next one leaves. */							\
-    F(tx,         { size_t len;						\
+    F(tx,         { lua_events_before_wait(); size_t len;						\
                     const char *msg = luaL_checklstring(L, 1, &len);	\
                     size_t sent = 0;					\
                     if (radio_link == 0) {				\
