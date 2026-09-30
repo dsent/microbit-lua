@@ -26,6 +26,7 @@
 #include "lua-modules.h"
 #include "board-alloc.h"
 #include "radio-link.h"
+#include "link-words.h"
 #include "host-cstack.h"
 #include "tpbot.h"
 
@@ -262,10 +263,7 @@ static Air board_air, far_air;  // what each end hears
 static int far_gone, far_listens, far_busy, far_sending, neighbours;
 static int far_echoes, far_echo_fails, far_unheard;
 
-// Another pair, whose link's number shares this one's low byte, answering
-// whatever this board sends; and what happens at this board's next wait
-// on the radio
-static int alike_answers;
+// What happens at this board's next wait on the radio
 static Action on_air;
 static char far_heard[1024];
 static int board_acks;
@@ -273,13 +271,12 @@ static int board_acks;
 // The frames' kinds and the protocol's version, as the link has them
 enum {
   KIND_HELLO = 0xA1, KIND_DATA = 0xA3, KIND_ACK = 0xA4, KIND_FIRST = 0xA5,
-  VERSION = 3
+  VERSION = 4
 };
 
-// The link's number this pair draws, and another pair's that shares its
-// low byte, the whole number a link had before
-#define LINK 0x5EED0007u
-#define LINK_ALIKE 0x6A110007u
+// The link's number this pair draws, and another link's
+#define LINK 7
+#define LINK_OTHER 8
 
 static void air_put(Air *a, const uint8_t *frame, int len) {
   int at;
@@ -293,11 +290,10 @@ static void air_put(Air *a, const uint8_t *frame, int len) {
 }
 
 // A frame as the link puts one, put on the air: kind, link, number, body
-static void air_frame(Air *a, uint8_t kind, uint32_t link, uint16_t num,
+static void air_frame(Air *a, uint8_t kind, uint8_t link, uint16_t num,
                       const char *body, int len) {
   uint8_t f[RADIO_FRAME] = {
-    kind, (uint8_t)link, (uint8_t)(link >> 8), (uint8_t)(link >> 16),
-    (uint8_t)(link >> 24), (uint8_t)num, (uint8_t)(num >> 8)
+    kind, link, (uint8_t)num, (uint8_t)(num >> 8)
   };
   memcpy(f + RADIO_HEAD, body, len);
   air_put(a, f, RADIO_HEAD + len);
@@ -346,8 +342,6 @@ static void air_pause(RadioLink *r, uint32_t ms) {
     on_air = NULL;
     then();
   }
-  if (alike_answers)
-    air_frame(&board_air, KIND_ACK, LINK_ALIKE, board_link.out, "", 0);
   others_run();
 }
 
@@ -377,7 +371,7 @@ static void far_runs(void) {
     radio_link_heard(&far_link);
   }
   if (neighbours)
-    air_frame(&board_air, KIND_DATA, LINK_ALIKE, 1, "hi", 2);
+    air_frame(&board_air, KIND_DATA, LINK_OTHER, 1, "hi", 2);
   while (!far_busy && !far_sending && radio_link_rx(&far_link, body, &len,
                                                           &starts)) {
     size_t n = strlen(far_heard);
@@ -487,7 +481,6 @@ static void no_link(void) {
   memset(&far_air, 0, sizeof far_air);
   real_link = far_gone = far_listens = far_busy = far_sending = 0;
   neighbours = far_echoes = far_echo_fails = far_unheard = 0;
-  alike_answers = 0;
   on_air = NULL;
   empty_brings = NULL;
   far_heard[0] = 0;
@@ -687,7 +680,8 @@ static const LuaApi l_serial[] = {
 static const LuaApi l_radio[] = {
   {"enable", l_nothing, 0}, {"listen", l_listen, 0},
   {"connect", l_connect, 0}, {"answered", l_answered, 0},
-  {"tx", l_tx, 0}, {"rx", l_rx, 0}, {NULL, NULL, 0}
+  {"tx", l_tx, 0}, {"rx", l_rx, 0}, {"notSent", link_words_not_sent, 0},
+  {NULL, NULL, 0}
 };
 #define X(name, function) {#name, function, 0},
 static const LuaApi l_tpbot[] = { TPBOT_FUNCTIONS {NULL, NULL, 0} };
@@ -1647,7 +1641,7 @@ static void every_drop_counted(void) {
 // listen() serves a board that calls over the radio: a prompt, and the
 // answer to a line. The session it serves is made then: booted, the
 // firmware's script holds no more Lua heap than this, on the 64-bit host.
-#define BOOTED_HEAP 47300
+#define BOOTED_HEAP 45100
 
 static void serving_a_link(void) {
   const char *said;
@@ -1886,35 +1880,23 @@ static void a_line_that_arrived(void) {
          "... though the other board got it, as the words allow");
 }
 
-// Another pair on the group, whose link's number shares this one's low
-// byte: its line does not run here, and its answers do not stand for the
-// other board's
-static void alike_sends_a_line(void) {
-  air_frame(&board_air, KIND_FIRST, LINK_ALIKE, 1, "6*111\n", 6);
+// A board the robot is not linked with, sending on the link's number: the
+// robot takes its line, and answers on that number
+static void same_link_sends_a_line(void) {
+  air_frame(&board_air, KIND_FIRST, LINK, 1, "6*111\n", 6);
   board_fibers();
 }
 
-static void another_pair(void) {
-  const char *said;
+static void a_pair_with_the_same_link_id(void) {
   fresh();
   real_link = 1;
   boot("");
   far_calls();
-  plan(alike_sends_a_line);
+  plan(same_link_sends_a_line);
   line("listen('gigat')");
-  expect(strcmp(far_heard, "> ") == 0,
-         "a line from another pair whose link's number shares this one's "
-         "low byte does not run");
-  fresh();
-  real_link = 1;
-  far_listens = 1;
-  boot("");
-  line("connect('gigat', 100)");
-  far_gone = 1;
-  alike_answers = 1;
-  said = line("1+1");
-  expect(strstr(said, "did not answer") != NULL,
-         "... and its answers do not stand for the other board's");
+  expect(strcmp(far_heard, "> => 666\n> ") == 0,
+         "a line sent with the same link id reaches the board, and its "
+         "answer goes out on that id");
 }
 
 // The caller calls again before the answer reaches it, and the answer to
@@ -1938,6 +1920,27 @@ static void a_call_repeated(void) {
   expect(strcmp(far_heard, "> => 11\n> ") == 0,
          "a call repeated for the open link keeps the line it took, and "
          "the session");
+}
+
+// A call from another board, on the open link's number, while a link is
+// served: the link opens anew, for that board
+static void hakka_calls(void) {
+  char hello[RADIO_NAME * 2 + 1] = "zezophakka";
+  hello[RADIO_NAME * 2] = VERSION;
+  air_frame(&board_air, KIND_HELLO, LINK, 0, hello, sizeof hello);
+  board_fibers();
+}
+
+static void another_board_calls(void) {
+  fresh();
+  real_link = 1;
+  boot("");
+  far_calls();
+  plan(hakka_calls);
+  line("listen()");
+  expect(board_link.link == LINK && strcmp(board_link.peer, "hakka") == 0,
+         "a call from another board on the open link's id opens the link "
+         "anew, for that board");
 }
 
 // Lines that find the other board's inbox full, one after another, for
@@ -1999,17 +2002,6 @@ static void a_line_at_the_last_moment(void) {
   type_in("2+2\r");
   expect(strstr(far_heard, "2+2\r") && strstr(far_heard, "1+1\r"),
          "a line that reaches the port as it is found empty goes");
-}
-
-// Two boards whose noise is the same, as two seeded alike would draw from
-// one generator, draw different link numbers, and none draws 0
-static void link_numbers(void) {
-  uint32_t same = 0x1234ABCDu;
-  expect(radio_link_number(same, 0x9F3C1122u)
-         != radio_link_number(same, 0x0B7E5530u)
-         && radio_link_number(0x5EEDu, 0x5EEDu) != 0,
-         "two boards whose noise is the same draw different link numbers, "
-         "and never 0");
 }
 
 // Over the link, the string functions the link's REPL reads lines with
@@ -2102,53 +2094,29 @@ static void a_loss_in_an_open_statement(void) {
   far_says(">> ");
   far_gone = 1;
   said = line("x = 1");
-  expect(strstr(said, "It was part of a statement you had not finished. If "
-                "the other micro:bit shows >>, type ) and press Enter to "
-                "drop the statement, then type all of it again. If it shows "
-                ">, check whether the statement ran first.\r\n") != NULL,
+  expect(strstr(said, "may not have got: x = 1\r\nType ) and press Enter, "
+                "then the whole statement again.\r\n") != NULL,
          "a line lost inside an open statement says how to start the "
          "statement over");
 }
 
-// Output the calling board could not take while it was busy is said to be
-// missing, before what comes next
-static void far_busy_asks_for_much(void) {
-  far_busy = 1;
-  far_says("string.rep('x', 300)\n");
-}
-
-static void far_free_asks_again(void) {
-  far_busy = 0;
-  far_says("1+1\n");
-}
-
-static void output_lost_on_the_way(void) {
-  static const char *const order[] = {
-    "=> \"xxx", "\n[Some of the answer was lost on the way.]\n=> 2\n> ",
-    NULL };
-  fresh();
-  real_link = 1;
-  boot("");
-  far_calls();
-  plan(far_busy_asks_for_much);
-  plan(far_free_asks_again);
-  line("listen('gigat')");
-  expect(in_order(far_heard, order),
-         "output the other board could not take is said to be missing, "
-         "before the next answer");
-}
-
 // A call from a board whose link is an older version is not answered:
-// version 1's, with no version, and version 2's, whose head is 3 bytes
+// version 1's, with no version; version 2's, whose head is 3 bytes; and
+// version 3's, whose head is 7
 static void an_older_link(void) {
   static const uint8_t one[] = {
     KIND_HELLO, 7, 0, 'z', 'e', 'z', 'o', 'p', 'g', 'i', 'g', 'a', 't' };
   static const uint8_t two[] = {
     KIND_HELLO, 7, 0, 'z', 'e', 'z', 'o', 'p', 'g', 'i', 'g', 'a', 't', 2 };
+  static const uint8_t three[] = {
+    KIND_HELLO, 7, 0, 0, 0, 0, 0,
+    'z', 'e', 'z', 'o', 'p', 'g', 'i', 'g', 'a', 't', 3 };
   fresh();
   air_put(&board_air, one, sizeof one);
   air_put(&board_air, two, sizeof two);
+  air_put(&board_air, three, sizeof three);
   expect(!radio_link_called(&board_link, "zezop", NULL)
+         && !radio_link_called(&board_link, "zezop", NULL)
          && !radio_link_called(&board_link, "zezop", NULL)
          && board_link.link == 0 && far_air.count == 0,
          "a call from a board with an older link is not answered");
@@ -2185,7 +2153,7 @@ static void a_full_inbox(void) {
     uint32_t start = clock_ms;
     said = line("0");
     expect(strstr(said, "did not answer") == NULL && clock_ms - start < 30,
-           "... and a line goes on the first try while another pair talks "
+           "... and a line goes on the first try while another link talks "
            "on the air");
   }
   neighbours = 0;
@@ -2694,17 +2662,16 @@ int main(int argc, char **argv) {
   a_press_while_serving();
   a_paste_over_the_link();
   a_line_that_arrived();
-  another_pair();
+  a_pair_with_the_same_link_id();
   a_call_repeated();
+  another_board_calls();
   numbers_that_come_round();
   typing_during_a_loss();
   a_line_at_the_last_moment();
-  link_numbers();
   strings_taken_over_the_link();
   typing_while_calling();
   the_rest_of_a_line();
   a_loss_in_an_open_statement();
-  output_lost_on_the_way();
   an_older_link();
   a_full_inbox();
   a_line_not_taken();

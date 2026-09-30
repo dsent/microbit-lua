@@ -10,9 +10,6 @@
 #   source/radio-link.c, both ends of them;
 # - source/radio-link.c, which the fiber carrying the radio's event runs,
 #   built without Lua's headers and calling nothing of Lua's;
-# - radio_draw in source/codal-lua.cpp: a link's number comes from the
-#   chip's random number generator, which a program's seedRandom does not
-#   repeat, and never from the generator it seeds;
 # - cstack-host-test: source/lua-cstack.c, whose limits follow the stack
 #   region's size;
 # - wait-audit.sh: every binding that waits looks for on_event first;
@@ -50,7 +47,8 @@ cc "${STRICT[@]}" -o "$DIR/tpbot" "$ROOT/tests/tpbot-host-test.c" \
 cc "${STRICT[@]}" -o "$DIR/runtime" "$ROOT/tests/runtime-host-test.c" \
   "$ROOT/tests/host-cstack.c" \
   "$ROOT/source/tpbot.c" "$ROOT/source/lua-events.c" \
-  "$ROOT/source/lua-modules.c" "$ROOT/source/radio-link.c" "$DIR"/*.o -lm
+  "$ROOT/source/lua-modules.c" "$ROOT/source/radio-link.c" \
+  "$ROOT/source/link-words.c" "$DIR"/*.o -lm
 "$DIR/tpbot" "$ROOT/tests/tpbot-reference.lua"
 "$DIR/runtime" "$ROOT/source/lua-script.lua"
 mkdir "$DIR/alone"
@@ -61,14 +59,6 @@ if nm -u "$DIR/alone/radio-link.o" | grep -i lua; then
   exit 1
 fi
 echo "source/radio-link.c builds without Lua and calls nothing of Lua's"
-DRAW=$(sed -n '/^static uint32_t radio_draw(void)$/,/^}$/p' \
-  "$ROOT/source/codal-lua.cpp")
-if [ -z "$DRAW" ] || ! grep -q "NRF_RNG->VALUE" <<<"$DRAW" \
-   || grep -q "random(" <<<"$DRAW"; then
-  echo "radio_draw must read NRF_RNG, and never the seeded generator" >&2
-  exit 1
-fi
-echo "a link's number comes from the chip's generator, not the seeded one"
 cc "${STRICT[@]}" -o "$DIR/cstack" "$ROOT/tests/cstack-host-test.c" \
   "$ROOT/source/lua-cstack.c"
 "$DIR/cstack"

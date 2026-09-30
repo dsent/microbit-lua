@@ -76,51 +76,38 @@ local function is_identifier(str)
     and match(str, "^[%a_][%w_]*$")
 end
 
-local prettyprint = { }
-
-local function serialize(value, visited)
-  visited = visited or {}
-  local pp = prettyprint[type(value)]
-  if pp then
-    return pp(value, visited)
-  end
-  return tostring(value)
-end
-
-function prettyprint.string(value)
-  return format("%q", value)
-end
+local serialize
 
 local function key(k, visited)
   if is_identifier(k) then
     return k
-  else
-    return "[" .. serialize(k, visited) .. "]"
   end
+  return "[" .. serialize(k, visited) .. "]"
 end
 
-local function table_tokens(value, visited)
-  local out = {"{"}
-  local first = true
-  for k, v in pairs(value) do
-    if not first then
-       table.insert(out, ", ")
-    end
-    first = false
-    table.insert(out, key(k, visited) .. " = " .. serialize(v, visited))
+-- A value as a line of Lua: a string quoted, a table with its
+-- keys and values, a table inside itself as <cycle>
+function serialize(value, visited)
+  local t = type(value)
+  if t == "string" then
+    return format("%q", value)
+  elseif t ~= "table" then
+    return tostring(value)
   end
-  table.insert(out, "}")
-  return out
-end
-
-function prettyprint.table(value, visited)
+  visited = visited or { }
   if visited[value] then
     return "<cycle>"
   end
   visited[value] = true
-  local out = table_tokens(value, visited)
+  local out, n = { "{" }, 1
+  for k, v in pairs(value) do
+    n = n + 1
+    out[n] = (n > 2 and ", " or "") .. key(k, visited) .. " = "
+      .. serialize(v, visited)
+  end
+  out[n + 1] = "}"
   visited[value] = nil
-  return table.concat(out)
+  return concat(out)
 end
 
 local function print_values(serialize, ...)
@@ -422,7 +409,7 @@ uBit.eventFallback(dispatch)
 local radio_session
 
 -- the link's, taken by listen() and connect()
-local tx, rx
+local tx, rx, not_sent_words
 
 
 -- A piece of the link, as much or as little as arrived: what
@@ -451,27 +438,12 @@ local function greet()
   radio_session.run(radio_session.prompt)
 end
 
--- What the session says, over the link. What the other board
--- could not take, while it was busy, is said to be missing
--- before what comes next.
-local lost_on_the_way = false
-
-local function send_over(text)
-  if lost_on_the_way
-     and tx("\n[Some of the answer was lost on the way.]\n") then
-    lost_on_the_way = false
-  end
-  if not tx(text) then
-    lost_on_the_way = true
-  end
-end
-
 function listen(name)
   local answered, pause = radio.answered, uBit.sleep
   tx, rx = radio.tx, radio.rx
   radio_session = radio_session or make_session({
     crlf_before_result = false,
-    send = send_over
+    send = tx
   })
   radio.enable()
   radio.listen(name)
@@ -516,22 +488,6 @@ end
 -- line ending finishes a line that goes with it
 local dropping = false
 
--- What to say when a line did not go: the other board may have
--- it all the same, when only its answers were lost
-local function not_sent(line, after)
-  local open = link_said == ">> "
-  write("\nThe other micro:bit did not answer, so it may not have got: "
-        .. sub(line, 1, -2) .. "\n"
-        .. (after and "What you typed after it was not sent either.\n"
-            or "")
-        .. (open and "It was part of a statement you had not finished."
-              .. " If the other micro:bit shows >>, type ) and press Enter"
-              .. " to drop the statement, then type all of it again. If it"
-              .. " shows >, check whether the statement ran first.\n"
-            or "It may still be running a command. Once it has finished,"
-              .. " check whether the line ran before you type it again.\n"))
-end
-
 -- Whoever has the port serves it: the console's own session
 -- to start with, the link once connect() has opened one.
 -- connect puts the other one in place; nothing asks which.
@@ -566,7 +522,10 @@ local function port_to_link(value)
         write(came)
         typed_here = ""
         dropping = find(rest, "[^\r\n]$") ~= nil
-        not_sent(line, find(rest, "[^\r\n]") ~= nil)
+        -- the other board may have the line all the same, when only its
+        -- answers were lost
+        write(not_sent_words(sub(line, 1, -2), find(rest, "[^\r\n]") ~= nil,
+                             link_said == ">> "))
         return
       end
       -- what the other board said meanwhile, before its inbox here fills
@@ -586,7 +545,7 @@ function connect(name, timeout)
     return
   end
   say(name .. " connected.")
-  tx, rx = radio.tx, radio.rx
+  tx, rx, not_sent_words = radio.tx, radio.rx, radio.notSent
   typed_here = ""
   link_said = ""
   dropping = false

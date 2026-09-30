@@ -21,9 +21,9 @@ extern "C" {
 // sent, but past 29 the tail arrives zeroed: measured between two boards,
 // 28 and 29 come through whole, 30 loses its last byte and 31 and 32 lose
 // two. So a frame is 29, and the driver's own limit is never reached. Its
-// head is the kind of frame, the link's number (4 bytes) and the piece's
+// head is the kind of frame, the link's number (1 byte) and the piece's
 // number (2 bytes).
-#define RADIO_HEAD  7
+#define RADIO_HEAD  4
 #define RADIO_FRAME 29
 #define RADIO_BODY  (RADIO_FRAME - RADIO_HEAD)
 
@@ -49,7 +49,7 @@ typedef struct {
 
 struct RadioLink {
   const RadioAir *air;
-  uint32_t link;                // 0 while no link is open
+  uint8_t link;                 // 0 while no link is open
   uint16_t out;                 // number of the last piece sent
   uint16_t in;                  // number of the last piece taken
   bool serving;                 // the other board called this one
@@ -63,17 +63,12 @@ struct RadioLink {
 
 // Both ends start a link the same way: numbering from nothing, the inbox
 // made if it is not yet, and emptied
-void radio_link_open(RadioLink *r, uint32_t link, const char *peer);
-
-// A link's number, never 0, from noise the board draws and its serial
-// number: two boards differ even when their noise is the same
-uint32_t radio_link_number(uint32_t noise, uint32_t serial);
+void radio_link_open(RadioLink *r, uint8_t link, const char *peer);
 
 // Calls them, as us, on the given link number until they answer or the
-// time is up. The number is radio_link_number's: it is all that tells this
-// pair's frames from another's on the same group.
+// time is up. The number is the caller's to draw, at random and not 0.
 bool radio_link_call(RadioLink *r, const char *them, const char *us,
-                     uint32_t link, uint32_t timeout_ms);
+                     uint8_t link, uint32_t timeout_ms);
 
 // Whether a board called this one, us, and was answered: one look. With
 // from, only that board is answered. A call repeated for the link already

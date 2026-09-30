@@ -100,7 +100,7 @@ What moved it, measured the same way:
 - the dispatcher's state: 18 B of `.bss`; its line of 16 events is 144 B
   of the board's heap, made the first time an event has to wait for a
   program with somewhere to send it;
-- the radio's inbox of 8 pieces: 194 B of the board's heap when the first
+- the radio's inbox of 8 pieces: 218 B of the board's heap when the first
   link opens.
  The same markers on the double build (S1+S2,
 no S6) ended at 30,837 B, so S6 saves a further 5,600 B; against the original

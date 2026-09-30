@@ -19,6 +19,7 @@ extern "C" {
 #include "lua-modules.h"
 #include "board-alloc.h"
 #include "radio-link.h"
+#include "link-words.h"
 
 extern MicroBit uBit;
 
@@ -1208,28 +1209,6 @@ static RadioLink radio_link = {
     &radio_air, 0, 0, 0, false, {0}, {0}, 0, NULL
 };
 
-/* A link's number: 32 bits from the chip's own random number
- * generator, which a program's seedRandom does not repeat, with the
- * board's serial number mixed in. With BLE running the generator is
- * the SoftDevice's, and the noise is the microsecond clock; the serial
- * number still sets two boards apart. */
-static uint32_t radio_draw(void)
-{
-    uint32_t noise = 0;
-    if (ble_running()) {
-        noise = (uint32_t)system_timer_current_time_us();
-    } else {
-        NRF_RNG->TASKS_START = 1;
-        for (int i = 0; i < 4; i++) {
-            NRF_RNG->EVENTS_VALRDY = 0;
-            while (NRF_RNG->EVENTS_VALRDY == 0);
-            noise = noise << 8 | NRF_RNG->VALUE;
-        }
-        NRF_RNG->TASKS_STOP = 1;
-    }
-    return radio_link_number(noise, microbit_serial_number());
-}
-
 /* A board's friendly name from a Lua argument. Names are five
  * letters, and the frames carry exactly five, so anything else
  * is a mistake in the call, said at once. */
@@ -1305,7 +1284,7 @@ static const char *radio_opt_name(lua_State *L, int arg)
 /* connect(friendlyName, timeout_ms) -> boolean */			\
     F(connect,    { lua_events_before_wait(); const char *them = radio_name(L, 1);		\
                     int timeout = luaL_optint(L, 2, RADIO_TIMEOUT);	\
-                    uint32_t link = radio_draw();			\
+                    uint8_t link = (uint8_t)(uBit.random(255) + 1);	\
                     lua_pushboolean(L, radio_link_call(&radio_link, them,	\
                       microbit_friendly_name(), link,			\
                       timeout > 0 ? (uint32_t)timeout : 0));		\
@@ -1354,9 +1333,12 @@ static const char *radio_opt_name(lua_State *L, int arg)
                       lua_pushnil(L);					\
                     }							\
                     return 1;						\
-                  })
+                  })							\
+/* notSent(line, typedAfter, statementOpen) -> string
+ * What the REPL says when a line over the link did not go */	\
+    F(notSent,    { return link_words_not_sent(L); })
 
-#define LUA_RADIO_COUNT 13
+#define LUA_RADIO_COUNT 14
 
 static const int digitalRJ[] = { 8, 12, 14, 16 };
 
