@@ -394,6 +394,8 @@ lua_patch(lstrlib.c lstrlib-number-text.patch "luai_numformat")
 lua_patch(luaconf.h luaconf-cstack.patch "luai_cstack")
 lua_patch(ldo.c ldo-cstack.patch "luai_cstack")
 lua_patch(lparser.c lparser-cstack.patch "luai_cstack")
+# A smaller string buffer on the C stack, so the check leaves more of it.
+lua_patch(luaconf.h luaconf-buffer.patch "leaves that check more")
 # Application sources build at -O2; this file is 1.3 KB smaller at -Os.
 set_source_files_properties("${CMAKE_SOURCE_DIR}/source/lua-number.c"
     PROPERTIES COMPILE_OPTIONS "-Os")

@@ -76,6 +76,9 @@ const char firmware_version_mark[] = FIRMWARE_VERSION_MARK FIRMWARE_VERSION;
     F(stackReset, { stack_probe_paint();				\
                     return 0;						\
                   })							\
+    F(stackCurrent, { lua_pushinteger(L, (lua_Integer)stack_probe_current()); \
+                    return 1;						\
+                  })							\
     F(eventsDropped, { return lua_events_dropped(L); })		\
     F(eventFallback, { return lua_events_fallback(L); })		\
     F(eventLine,  { return lua_events_line(L); })			\

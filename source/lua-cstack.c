@@ -8,16 +8,23 @@
 // before each call it makes from C, and at each level of the parser: past
 // CSTACK_FULL it raises "C stack overflow", which a pcall catches, and past
 // CSTACK_OVERFULL, where even the message could overflow, it throws with
-// none. What lies between the limits and the region's end is left for the
-// error's own frames and for interrupts.
+// none. The 2,304 bytes left above CSTACK_FULL are what one Lua call can
+// take without passing a check again, from the ARM build's -fstack-usage
+// and call graph: luaD_call, luaD_precall, luaV_execute and luaD_precall
+// again (216 bytes); the deepest C function below them, string.format
+// stopping on a bad argument, with a 256-byte luaL_Buffer (1,584 bytes, an
+// upper bound); and an interrupt that raises an event, the UART's through
+// MessageBus to a new fiber, with the exception frame (about 500 bytes).
+// Past CSTACK_OVERFULL there is room for the error's own frames (480
+// bytes) and an interrupt.
 
 #include <stdint.h>
 
 #include "luaconf.h"
 #include "stack-probe.h"
 
-#define CSTACK_FULL     7168
-#define CSTACK_OVERFULL 7680
+#define CSTACK_FULL     5888
+#define CSTACK_OVERFULL 6400
 
 int luai_cstack(void) {
   uint32_t used = stack_probe_current();

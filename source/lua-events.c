@@ -46,8 +46,8 @@
 #define SLICE 10
 
 // The deepest a sleep may be, in bytes of C stack in use, and still run
-// handlers: what is left of the 8 KB region, 3 KB, is theirs.
-#define SAFE_POINT_STACK 5120
+// handlers: they have 1.5 KB before Lua's C stack check (lua-cstack.c).
+#define SAFE_POINT_STACK 4352
 
 // The waiting line, made the first time an event has to wait for a
 // program that has somewhere to send it, of the size microbit.eventLine()

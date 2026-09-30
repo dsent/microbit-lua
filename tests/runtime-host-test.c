@@ -1165,15 +1165,15 @@ static void deep_sleeps(void) {
   const char *said;
   fresh();
   boot("");
-  stack_used_now = 5000;
+  stack_used_now = 4300;
   plan(press_a);
   said = line("microbit.sleep(50)");
-  expect(in_order(said, shallow), "a sleep 5,000 bytes deep runs handlers");
-  stack_used_now = 5200;
+  expect(in_order(said, shallow), "a sleep 4,300 bytes deep runs handlers");
+  stack_used_now = 4400;
   plan(press_a);
   said = line("microbit.sleep(50)");
   expect(in_order(said, deep) && count(said, "<scroll A>") == 1,
-         "a sleep 5,200 bytes deep leaves them for after the call");
+         "a sleep 4,400 bytes deep leaves them for after the call");
 }
 
 int main(int argc, char **argv) {
