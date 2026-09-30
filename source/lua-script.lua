@@ -22,19 +22,13 @@ uBit.audio.express("giggle")
 uBit.display.animate(heart, 1000, 5)
 uBit.display.scrollAsync(uBit.friendlyName())
 
--- Output goes wherever the session being served takes it.
--- The serial session names no other way out, so it falls to
--- the port.
+-- Output goes wherever the session being served takes it, a
+-- line ending in CR LF as on the port. The serial session
+-- names no other way out, so it falls to the port.
 local function write(s)
   local session = active_session
-  local out = session and session.transport.send
-  if out then return out(s) end
-  for c in string.gmatch(s, ".") do
-    if c == "\n" then
-      serial.send("\r")
-    end
-    serial.send(c)
-  end
+  local out = session and session.send or serial.send
+  out((string.gsub(s, "\n", "\r\n")))
 end
 
 io = {
@@ -212,21 +206,20 @@ local function execute(chunk)
   end
 end
 
--- A REPL session: a buffer plus the compile-driven submit loop. The
--- same engine is used for the serial console and the BLE UART service.
-local function make_session(transport)
+-- A REPL session: a buffer plus the compile-driven submit loop.
+-- The serial console and the radio link each have one; send is
+-- where its output goes, the port when there is none.
+local function make_session(send)
   local s = {
-    transport = transport,
+    send = send,
     buffer = "",
   }
   function s.prompt()
     write(s.buffer == "" and "> " or ">> ")
   end
-  function s.submit(text)
-    s.buffer = s.buffer .. text .. "\n"
-    if s.transport.crlf_before_result then
-      write("\r\n")
-    end
+  function s.submit()
+    s.buffer = s.buffer .. "\n"
+    write("\n")
     local chunk, err, incomplete = compile(s.buffer)
     if not incomplete then
       if chunk then
@@ -239,6 +232,27 @@ local function make_session(transport)
     collectgarbage("collect")
     s.prompt()
   end
+  function s.backspace()
+    if #s.buffer > 0 then
+      s.buffer = s.buffer:sub(1, -2)
+      write("\b \b")
+    end
+  end
+  --- What was typed: a run of plain characters goes into the
+  --- line and is echoed; the key after it erases or enters
+  function s.keys(text)
+    for plain, key in string.gmatch(text, "([^\r\n\b\127]*)(.?)") do
+      if #plain > 0 then
+        s.buffer = s.buffer .. plain
+        write(plain)
+      end
+      if key == "\b" or key == "\127" then
+        s.backspace()
+      elseif #key > 0 then
+        s.submit()
+      end
+    end
+  end
   function s.run(f)
     local saved = active_session
     active_session = s
@@ -248,62 +262,42 @@ local function make_session(transport)
   return s
 end
 
-local serial_session = make_session({
-  crlf_before_result = true,
-  getChar = serial.getCharAsync,
-  arm = function() serial.eventAfterAsync(1) end
-})
+local serial_session = make_session()
 
 local handler = { }
 
 microbit.handler = handler
 
-local function enter()
-  serial_session.submit("")
+-- Whatever has been typed since the last look
+local function typing()
+  local chars = { }
+  local c = serial.getCharAsync()
+  while c do
+    chars[#chars + 1] = c
+    c = serial.getCharAsync()
+  end
+  return table.concat(chars)
 end
 
-local function backspace()
-  if #serial_session.buffer > 0 then
-    serial_session.buffer = serial_session.buffer:sub(1, -2)
-    write("\b \b")
+-- A handler for the port that gives what is typed to take, a
+-- piece at a time, and watches the port again only once it is
+-- empty: a piece is dealt with before the next one is taken.
+local function port_to(take)
+  return function(value)
+    if value == microbit.CODAL_SERIAL_EVT_HEAD_MATCH then
+      local text = typing()
+      while #text > 0 do
+        take(text)
+        text = typing()
+      end
+      serial.eventAfterAsync(1)
+    end
   end
 end
 
-local keypress = {
-  ["\r"] = enter,
-  ["\n"] = enter,
-  ["\b"] = backspace,
-  ["\127"] = backspace
-}
-
-local typed_here = ""
-
-local function port_to_console(value)
-  if value == microbit.CODAL_SERIAL_EVT_HEAD_MATCH then
-    serial_session.run(function()
-      local c = serial_session.transport.getChar()
-      local echo = ""
-      while c do
-        local input = keypress[c]
-        if input then
-          if #echo > 0 then
-            write(echo)
-            echo = ""
-          end
-          input()
-        else
-          serial_session.buffer = serial_session.buffer .. c
-          echo = echo .. c
-        end
-        c = serial_session.transport.getChar()
-      end
-      if #echo > 0 then
-        write(echo)
-      end
-      serial_session.transport.arm()
-    end)
-  end
-end
+local port_to_console = port_to(function(text)
+  serial_session.run(function() serial_session.keys(text) end)
+end)
 
 handler[microbit.DEVICE_ID_SERIAL] = port_to_console
 
@@ -365,28 +359,11 @@ end
 -- own, and what the session says goes back the same way.
 --
 -- connect(name, timeout) calls, then carries the port over:
--- what is typed here goes out, what comes back is printed.
+-- what is typed here goes out, what comes back goes on the
+-- port as it is, and the console here says no more.
 
-local radio_session = make_session({
-  crlf_before_result = false,
-  send = function(text) radio.tx(text) end
-})
+local radio_session = make_session(radio.tx)
 
-
--- A piece of the link, as much or as little as arrived: what
--- stands before a line ending is entered, what follows it
--- waits for the rest to come.
-local function typed(piece)
-  local at = string.find(piece, "[\r\n]")
-  while at do
-    radio_session.buffer =
-      radio_session.buffer .. piece:sub(1, at - 1)
-    radio_session.submit("")
-    piece = piece:sub(at + 1)
-    at = string.find(piece, "[\r\n]")
-  end
-  radio_session.buffer = radio_session.buffer .. piece
-end
 
 --- A fresh session for a caller that has just arrived
 local function greet()
@@ -402,49 +379,25 @@ function listen(name)
     if radio.answered(name) then greet() end
     local piece = radio.rx()
     if piece then
-      radio_session.run(function() typed(piece) end)
+      radio_session.run(function() radio_session.keys(piece) end)
     end
     microbit.sleep(5)
   end
 end
 
--- Whatever has been typed since the last look
-local function typing()
-  local chars = { }
-  local c = serial.getCharAsync()
-  while c do
-    chars[#chars + 1] = c
-    c = serial.getCharAsync()
-  end
-  return table.concat(chars)
-end
-
 -- Whoever has the port serves it: the console's own session
 -- to start with, the link once connect() has opened one.
 -- connect puts the other one in place; nothing asks which.
--- A line at a time goes over the link: tx waits to be
--- answered, and a character each would spend that wait while
--- the next ones pile up in the port. So the typing is echoed
--- as it comes and held until its line is whole.
-local function port_to_link(value)
-  if value == microbit.CODAL_SERIAL_EVT_HEAD_MATCH then
-    local text = typing()
-    serial.eventAfterAsync(1)
-    write(text)
-    typed_here = typed_here .. text
-    local at = string.find(typed_here, "[\r\n]")
-    while at do
-      radio.tx(typed_here:sub(1, at))
-      typed_here = typed_here:sub(at + 1)
-      at = string.find(typed_here, "[\r\n]")
-    end
-  end
-end
+-- What is typed goes over as it is, and the far end echoes
+-- and edits it, as a session does with what comes from its
+-- port. tx waits to be answered; what is typed meanwhile
+-- waits in the port and goes with the next piece.
+local port_to_link = port_to(radio.tx)
 
 --- What the link says goes to the port
 local function link_to_port()
   local piece = radio.rx()
-  if piece then write(piece) end
+  if piece then serial.send(piece) end
 end
 
 function connect(name, timeout)
@@ -454,9 +407,9 @@ function connect(name, timeout)
     return
   end
   print(name .. " connected.")
-  typed_here = ""
   handler[microbit.DEVICE_ID_SERIAL] = port_to_link
   handler[microbit.DEVICE_ID_RADIO] = link_to_port
+  serial_session.send = function() end
 end
 
 -- Script-level setup (runs once before the main fiber
