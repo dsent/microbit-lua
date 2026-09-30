@@ -224,8 +224,11 @@ stack slots; the number formatting/parsing macros move to `"%.9g"`/`strtof`.
 The Cortex-M4 single-precision FPU also makes arithmetic faster. On device the
 steady-state heap fell by a further 5,600 B (`ran` 30,837→25,237 B).
 
-Caveat: a 24-bit mantissa makes integers above 2^24 approximate
-(`microbit.systemTime()` and event timestamps past ~4 h 39 m, large literals).
+Caveat: a 24-bit mantissa makes integers above 2^24 approximate:
+`microbit.systemTime()` past ~4 h 39 m, and large literals. Event timestamps
+are microseconds, the low 32 bits of CODAL's, handed to Lua as a signed
+integer: exact only up to 16.8 s, off by up to 64 µs after that, negative
+from 35.8 min on, and they wrap every 71.6 min.
 `microbit.serialNumber()` now returns an exact decimal **string** to keep the
 32-bit device ID lossless (API change). `LUAI_USER_ALIGNMENT_T` and the string
 layout are untouched.
@@ -233,9 +236,10 @@ layout are untouched.
 ### S7. Flash-resident Protos — todo, ~4–10 KB
 
 Compile `lua-script.lua` to bytecode (`luac -s`) and embed that in the
-`.lua_script` flash section instead of the text (`f_parser` auto-detects the
-`\033Lua` signature), then point `Proto` fields at it. This is also the
-prerequisite for a build-time compiled payload generally.
+`.lua_script` flash section instead of the text, loaded by a loader of its
+own (`f_parser` refuses binary chunks: `source/ldo-text-only.patch`), then
+point `Proto` fields at it. This is also the prerequisite for a build-time
+compiled payload generally.
 
 The dump cannot be aliased: `luaU_undump` deserializes it with `luaF_newproto`,
 `luaM_newvector` and `luaS_newlstr`, and the on-disk stream is not the in-memory

@@ -209,10 +209,10 @@ before the next starts, and so does a program's own `on_event` when it gets
 the serial port's event. The firmware's REPL marks the command it runs for
 that event with `microbit.eventRepl()`, so a command typed through an
 `on_event` that passes the port's event on to the REPL's still handles
-events at its sleeps. Nor does a sleep that is already more than 4,352 bytes
-deep in the C stack, so the handlers it would run keep 1.5 KB before the
-limit; their events wait for the call to return. A call from C into Lua, a
-coroutine's resume, or a level of the parser, that finds more than 5,888
+events at its sleeps. A sleep that is already more than 4,352 bytes deep in
+the C stack handles none, so the handlers it would run keep 1.5 KB before
+the limit; their events wait for the call to return. A call from C into Lua,
+a coroutine's resume, or a level of the parser, that finds more than 5,888
 bytes of the 8 KB stack in use stops with "C stack overflow", and a pattern
 that would match deeper stops with "pattern too complex"
 (`microbit.stackCurrent()` says how much is in use now,

@@ -1300,7 +1300,7 @@ static void the_radio_inbox(void) {
 }
 
 // A C stack too full to go deeper is an error a pcall catches, and the
-// prompt comes back; the host's limit stands in for the board's 7 KB
+// prompt comes back; the host's limit stands in for the board's 5,888 bytes
 static void a_full_c_stack(void) {
   const char *said;
   fresh();

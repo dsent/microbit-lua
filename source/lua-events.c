@@ -188,11 +188,6 @@ static bool callable(lua_State *L, int at) {
   return yes;
 }
 
-typedef struct {
-  LuaEvent e;
-  bool port_call;   // the handling of the port's event, a REPL command
-} Call;
-
 // The call for one event, run protected: on_event, or when that cannot be
 // called, the handler the script gave microbit.eventFallback(). A value
 // put in on_event by mistake leaves the REPL answering, so the mistake can
@@ -201,7 +196,7 @@ typedef struct {
 // Its sleeps handle nothing, unless the REPL says, through
 // microbit.eventRepl(), that it runs a command for the port's event.
 static int call_handler(lua_State *L) {
-  Call *c = (Call *)lua_touserdata(L, 1);
+  LuaEvent *e = (LuaEvent *)lua_touserdata(L, 1);
   lua_pushlightuserdata(L, &fallback_key);
   lua_rawget(L, LUA_REGISTRYINDEX);
   lua_pushliteral(L, "on_event");
@@ -213,9 +208,9 @@ static int call_handler(lua_State *L) {
       return 0;
   }
   sleep_handles = false;
-  lua_pushinteger(L, c->e.source);
-  lua_pushinteger(L, c->e.value);
-  lua_pushinteger(L, (lua_Integer)c->e.timestamp);
+  lua_pushinteger(L, e->source);
+  lua_pushinteger(L, e->value);
+  lua_pushinteger(L, (lua_Integer)e->timestamp);
   lua_call(L, 3, 0);
   return 0;
 }
@@ -242,11 +237,8 @@ static const char *mistake(lua_State *L, char text[LUAI_MAXNUMBER2STR]) {
 static void handle(LuaEvent e, bool port) {
   bool outer = sleep_handles, outer_port = port_call;
   char text[LUAI_MAXNUMBER2STR];
-  Call c;
-  c.e = e;
-  c.port_call = port;
   port_call = port;
-  if (lua_cpcall(state, call_handler, &c) != 0) {
+  if (lua_cpcall(state, call_handler, &e) != 0) {
     const char *err = mistake(state, text);
     if (err) {
       lua_events_port_error(err);
