@@ -14,6 +14,7 @@ extern "C" {
 #include "I2C.h"
 #include "neopixel.h"
 #include "stack-probe.h"
+#include "tpbot.h"
 
 extern MicroBit uBit;
 
@@ -936,40 +937,34 @@ static int pulse_width(Pin &pin, uint32_t timeout) {
   return system_timer_current_time_us() - rise;
 }
 
-// TPBot Classic; sonar trigger on P16, echo on P15.
+// The longest a sonar's echo lasts, with nothing in front of it.
+#define ECHO_LONGEST_US 60000
 
-#define LUA_TPBOT_FUNCTIONS						\
-    F(set_car_light, {							\
-                    uint8_t data[4];					\
-                    data[0] = 32;					\
-                    data[1] = robot_byte(L, 1, luaL_checkint(L, 1));	\
-                    data[2] = robot_byte(L, 2, luaL_checkint(L, 2));	\
-                    data[3] = robot_byte(L, 3, luaL_checkint(L, 3));	\
-                    return robot_send(L, data, 4);			\
-                  })							\
-    F(set_motors_speed, {						\
-                    int left = luaL_checkint(L, 1);			\
-                    int right = luaL_checkint(L, 2);			\
-                    uint8_t data[4];					\
-                    data[0] = 1;					\
-                    data[1] = robot_byte(L, 1, abs(left));		\
-                    data[2] = robot_byte(L, 2, abs(right));		\
-                    data[3] = (left < 0) + 2 * (right < 0);		\
-                    return robot_send(L, data, 4);			\
-                  })							\
-    F(get_distance, {							\
-                    Pin &trigger = uBit.io.pin[16];			\
-                    Pin &echo = uBit.io.pin[15];			\
-                    trigger.setDigitalValue(1);				\
-                    system_timer_wait_us(10);				\
-                    trigger.setDigitalValue(0);				\
-                    int width = pulse_width(echo, 25000);		\
-                    if (width < 0)					\
-                      lua_pushnil(L);					\
-                    else						\
-                      lua_pushnumber(L, width * 0.01715f);		\
-                    return 1;						\
-                  })
+// What source/tpbot.c needs of the board. The bus and the sleep are the
+// ones microbit.i2c.write and microbit.sleep use.
+
+extern "C" int tpbot_i2c_write(int address, const char *data, size_t length) {
+  return i2c.write(address, (char *)data, length) == MICROBIT_OK ? 0 : -1;
+}
+
+extern "C" void tpbot_sleep(uint32_t ms) {
+  uBit.sleep(ms);
+}
+
+// The sonar, trigger on P16 and echo on P15. An echo still high from the
+// reading before is let end first, so that its tail is not timed as this
+// one: the echo timed is the first to rise after the trigger.
+extern "C" int tpbot_echo_us(void) {
+  Pin &trigger = uBit.io.pin[16];
+  Pin &echo = uBit.io.pin[15];
+  uint64_t start = system_timer_current_time_us();
+  while (echo.getDigitalValue() == 1)
+    if (system_timer_current_time_us() - start > ECHO_LONGEST_US) return -1;
+  trigger.setDigitalValue(1);
+  system_timer_wait_us(10);
+  trigger.setDigitalValue(0);
+  return pulse_width(echo, 25000);
+}
 
 // TPBot 2 (TPBot Edu) frames a command as 255, 249, its code, the number
 // of parameters, then the parameters. Its sonar is the TPBot Classic one.
@@ -1421,10 +1416,13 @@ static bool radio_one(const char *body, int len)
 
 #define LUA_RADIO_COUNT 13
 
-int digitalRJ[] = { 8, 12, 14, 16 };
+static const int digitalRJ[] = { 8, 12, 14, 16 };
 
 #define LUA_PLANETX_FUNCTIONS						\
-   F(getDigitalPin, { int pin = digitalRJ[luaL_checkint(L, 1) - 1];	\
+   F(getDigitalPin, { int port = luaL_checkint(L, 1);			\
+                    luaL_argcheck(L, 1 <= port && port <= 4, 1,	\
+                                  "RJ port 1 to 4");			\
+                    int pin = digitalRJ[port - 1];			\
                     lua_pushlightuserdata(L, &uBit.io.pin[pin]);	\
                     return 1;						\
                   })							\
@@ -1514,10 +1512,6 @@ LUA_RADIO_FUNCTIONS
 LUA_I2C_FUNCTIONS
 #undef F
 
-#define F(name, body) static int l_tpbot_##name(lua_State *L) body
-LUA_TPBOT_FUNCTIONS
-#undef F
-
 #define F(name, body) static int l_tpbot2_##name(lua_State *L) body
 LUA_TPBOT2_FUNCTIONS
 #undef F
@@ -1602,17 +1596,18 @@ static const LuaApi l_i2c[] = {
 };
 #undef F
 
-#define F(name, body) {#name, l_tpbot_##name, 0},
+// The TPBot commands, from source/tpbot.c
+#define X(name, function) {#name, function, 0},
 static const LuaApi l_tpbot[] = {
-    LUA_TPBOT_FUNCTIONS
+    TPBOT_FUNCTIONS
     {NULL, NULL, 0}
 };
-#undef F
+#undef X
 
 #define F(name, body) {#name, l_tpbot2_##name, 0},
 static const LuaApi l_tpbot2[] = {
     LUA_TPBOT2_FUNCTIONS
-    {"get_distance", l_tpbot_get_distance, 0},
+    {"get_distance", tpbot_get_distance, 0},
     {NULL, NULL, 0}
 };
 #undef F
@@ -1703,8 +1698,9 @@ static void modinit (lua_State *L, const char *modname) {
 }
 
 
-/* push the module's table, creating it (and _LOADED[modname]) if needed */
-static void push_module (lua_State *L, const char *modname) {
+/* push the module's table, creating it (and _LOADED[modname]) if needed,
+   with no fields of its own */
+static void push_module_table (lua_State *L, const char *modname) {
   lua_getfield(L, LUA_REGISTRYINDEX, "_LOADED");
   lua_getfield(L, -1, modname);  /* get _LOADED[modname] */
   if (!lua_istable(L, -1)) {  /* not found? */
@@ -1716,6 +1712,12 @@ static void push_module (lua_State *L, const char *modname) {
     lua_setfield(L, -3, modname);  /* _LOADED[modname] = new table */
   }
   lua_remove(L, -2);  /* remove _LOADED */
+}
+
+
+/* push the module's table as push_module_table does, initialised */
+static void push_module (lua_State *L, const char *modname) {
+  push_module_table(L, modname);
   /* check whether table already has a _NAME field */
   lua_getfield(L, -1, "_NAME");
   if (!lua_isnil(L, -1))  /* is table an initialized module? */
@@ -1740,12 +1742,13 @@ static int ll_module (lua_State *L) {
 
 // Modules
 //
-// Nothing is loaded before the embedded script runs. require(name)
-// makes a module from the list below the first time it is asked for:
-// its table is made as module() makes it, so microbit.audio lands in
-// microbit.audio, and gets the lazy __index over the module's API.
-// A parent made on the way (microbit, for microbit.audio) is a plain
-// table; requiring it later gives that same table its API.
+// require(name) makes a module from the list below the first time it is
+// asked for: its table is found or made where module() would put it, so
+// microbit.audio lands in microbit.audio, and gets the lazy __index over
+// the module's API. It holds nothing else: the _M, _NAME and _PACKAGE
+// module() adds would cost heap in every table, and nothing reads them. A
+// parent made on the way (microbit, for microbit.audio) is a plain table;
+// requiring it later gives that same table its API.
 
 typedef struct {
   const char *name;
@@ -1781,14 +1784,36 @@ static int l_require(lua_State *L) {
   while (m->name != NULL && strcmp(m->name, name) != 0) m++;
   if (m->name == NULL)
     return luaL_error(L, "module " LUA_QS " not found", name);
-  push_module(L, name);
+  push_module_table(L, name);
   lua_set_lazy_index(L, lua_gettop(L), m->api);
   return 1;
 }
 
+// What is there before the script runs, as it was before require came:
+// the global microbit with its tables, and tpbot. A script that is only
+// a person's program, put into the image in place of this firmware's
+// own, finds them all the same.
+static const char *const lua_at_start[] = {
+  "microbit",
+  "microbit.display",
+  "microbit.accelerometer",
+  "microbit.compass",
+  "microbit.audio",
+  "microbit.io",
+  "microbit.serial",
+  "microbit.i2c",
+  "microbit.radio",
+#if CONFIG_ENABLED(DEVICE_BLE)
+  "microbit.ble.uart",
+#endif
+  "tpbot",
+  NULL
+};
 
-// package, module and require: all there is before the script runs.
-// package.loaded is the registry's _LOADED, which module() relies on.
+
+// package, module and require, the modules above, and the robot
+// commands that are globals (source/tpbot.c). package.loaded is the
+// registry's _LOADED, which module() relies on.
 void register_lua_modules(lua_State *L) {
   lua_newtable(L);                                    // package
   lua_getfield(L, LUA_REGISTRYINDEX, "_LOADED");

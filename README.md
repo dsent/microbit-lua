@@ -148,6 +148,17 @@ deepest user is the Lua parser (~4 KB) parsing the embedded chunk; see
 `docs/ram-usage.md` for the breakdown and sizing guidance.
 
 
+## TPBot
+
+`tpbot` and the robot globals `robot_info`, `robot_move`, `turn` and
+`straight` are in C, in `source/tpbot.c`, for the TPBot Edu and the TPBot
+Classic at once. `bash tests/tpbot-host-tests.sh` builds this firmware's Lua for
+the host and runs every command beside the Lua it replaced
+(`tests/tpbot-reference.lua`), comparing the bytes each writes to the bus, what
+it returns and the words of each error. It needs `cc` and the patched Lua a
+firmware build leaves in `libraries/`.
+
+
 ## Numbers as text
 
 The firmware leaves printf's float support out to save flash, so

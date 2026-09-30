@@ -1,0 +1,54 @@
+// -*- mode: c; indent-tabs-mode: nil; -*-
+#ifndef TPBOT_H
+#define TPBOT_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include "lua.h"
+
+// The tpbot module's functions, as X(Lua name, C function).
+#define TPBOT_FUNCTIONS                                 \
+    X(set_car_light,    tpbot_set_car_light)            \
+    X(set_motors_speed, tpbot_set_motors_speed)         \
+    X(get_distance,     tpbot_get_distance)             \
+    X(run_distance,     tpbot_run_distance)             \
+    X(turn,             tpbot_turn)
+
+// The robot commands that are globals.
+#define TPBOT_GLOBALS                                   \
+    X(robot_info,       tpbot_robot_info)               \
+    X(robot_move,       tpbot_robot_move)               \
+    X(turn,             tpbot_turn_hours)               \
+    X(straight,         tpbot_straight)
+
+#define X(name, function) int function(lua_State *L);
+TPBOT_FUNCTIONS
+TPBOT_GLOBALS
+#undef X
+
+// Sets the globals above.
+void tpbot_register_globals(lua_State *L);
+
+// What the commands need of the board, given by the firmware, or by the
+// host test in its place.
+
+// Write length bytes to the device at address on the I2C bus: 0 when it
+// took them, anything else when it did not.
+int tpbot_i2c_write(int address, const char *data, size_t length);
+
+// Sleep, letting other fibers run.
+void tpbot_sleep(uint32_t ms);
+
+// The sonar's echo in microseconds, or -1 when none came.
+int tpbot_echo_us(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
