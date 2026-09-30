@@ -56,8 +56,8 @@ As defined by the two linker scripts:
  - `libraries/codal-microbit-v2/ld/nrf52833-softdevice.ld` (used when
    BLE support is included/enabled)
 
-We patch these ld scripts in our build to add a LUA_META block at
-`0x7FFF0`, i.e. the last `4 * i32 = 16` bytes of the flash.
+We patch these ld scripts in our build to add a `.lua_meta` block and a
+`.lua_script` section after the `.data` LMA in FLASH.
 
 ### Lua Metadata Block
 
@@ -144,39 +144,7 @@ Output:
 - Resizes the containing block to match the new script length
 - If `<output.hex>` is omitted and `--overwrite` is not set, prompts for confirmation
 - If `<output.hex>` is omitted and `--overwrite` is set, writes back to the input file
-- Rejects scripts larger than `LUA_META_ADDR - Start` (space between script start and metadata)
-
-### Example
-
-```
-$ ./utils/hextract structure MICROBIT.hex
-=== DATA REGIONS ===
-  Region 1: 0x00000000 - 0x00033A76  (206.6 KB)
-  Region 2: 0x0007FFF0 - 0x0007FFFF  (16 B)
-  Region 3: 0x10001014 - 0x1000101B  (8 B)
-
-=== LUA METADATA (0x0007FFF0) ===
-  Magic: 0x4C554131 ("LUA1")
-  Start: 0x00032BD8 (207832)
-  End:   0x00033A77 (211575)
-  Size:  0x00000E9F (3743)
-
-  Sanity checks:
-    Magic: OK
-    Start < End: OK (difference = 3743 bytes)
-    Size == End - Start: OK (3743 bytes)
-
-  Script preview:
-    local uBit = microbit
-    [...]
-
-=== SUMMARY ===
-  Total records: 13235
-  Total data bytes: 211599 (206.6 KB)
-  Address range: 0x00000000 - 0x1000101B
-  Gaps: 2 (total 255.8 MB)
-  Checksums: 13235/13235 valid
-```
+- Rejects scripts larger than `Space`, the space the metadata reports
 
 ## Tests
 
