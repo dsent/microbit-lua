@@ -662,9 +662,11 @@ Pin *luaL_checkPin(lua_State *L, int narg) {
 
 // Text CODAL makes, pushed onto Lua's stack. A Lua error raised while a
 // C++ object is alive jumps past its destructor, and what the object holds
-// on the heap is never given back; pushing text can run out of memory. So
-// the text is pushed in a protected call, and an error raised only once
-// its owner is gone.
+// on the heap is never given back. Pushing text can raise one: the string
+// it makes can start a step of the collector, which runs a program's __gc
+// finalizers (newproxy), unprotected, and one may fail, or find the C
+// stack full. So the text is pushed in a protected call, and an error
+// raised only once its owner is gone.
 static int push_text_ref = LUA_NOREF;
 
 static int push_text(lua_State *L) {
