@@ -234,7 +234,9 @@ reads them when it starts.
 drives is handled when the move is over.
 
 A mistake in a handler goes to the serial port as `Runtime error: ` and the
-message, unless a program has redirected the port to other pins, and scrolls
+message, unless a program has redirected the port to other pins
+(`microbit.serial.redirect(microbit.io.getPin(30), microbit.io.getPin(31))`
+puts it back on USB), and scrolls
 by on the display, if the display is free, while the program goes on. A
 script that stops on a mistake at boot sends it to the port the same way,
 then shows `Lua error!` and the message on the display, once, before

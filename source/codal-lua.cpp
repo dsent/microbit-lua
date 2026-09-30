@@ -662,6 +662,10 @@ Pin *luaL_checkPin(lua_State *L, int narg) {
                     return 0;						\
                   })							\
     F(getPin,     { int pin = luaL_checkint(L, 1);			\
+                    /* 30 and 31 are the USB serial pins, to redirect	\
+                       the port back to the console */			\
+                    luaL_argcheck(L, 0 <= pin && pin < uBit.io.pins, 1,	\
+                                  "from 0 to 32");			\
                     lua_pushlightuserdata(L, &uBit.io.pin[pin]);	\
                     return 1;						\
                   })
