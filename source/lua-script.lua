@@ -52,10 +52,11 @@ local function write(s)
   local session = active_session
   local out = session and session.transport.send
   if out then return out(s) end
-  -- one send for each 64 characters, each a copy on CODAL's heap
-  s = gsub(s, "\n", "\r\n")
+  -- one send for each 64 characters, each a copy on CODAL's heap, "\n"
+  -- made "\r\n" in the piece: a copy of the whole of s could need as
+  -- much heap again as s itself
   for i = 1, #s, 64 do
-    serial.send(sub(s, i, i + 63))
+    serial.send((gsub(sub(s, i, i + 63), "\n", "\r\n")))
   end
 end
 
@@ -297,12 +298,17 @@ local keypress = {
 local typed_here = ""
 
 -- The characters typed since the last key the REPL acts on, held to be
--- added to the line, and echoed, in one piece
+-- added to the line, and echoed, in one piece: 64 at most, and a table
+-- that held more than 16 is let go, so that a paste leaves no table of
+-- its size behind
 local held, held_count = { }, 0
 
 local function flush_held()
   if held_count > 0 then
     local text = concat(held, "", 1, held_count)
+    if held_count > 16 then
+      held = { }
+    end
     held_count = 0
     serial_session.buffer = serial_session.buffer .. text
     write(text)
@@ -322,6 +328,9 @@ local function read_port(c)
     else
       held_count = held_count + 1
       held[held_count] = c
+      if held_count == 64 then
+        flush_held()
+      end
     end
     c = serial_session.transport.getChar()
   end

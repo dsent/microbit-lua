@@ -632,7 +632,8 @@ static const char *GLOBALS[] = {
 };
 
 static const char *LIBRARY_FIELDS[] = {
-  "string.format", "string.find", "string.gmatch", "string.match",
+  "string.format", "string.find", "string.gmatch", "string.gsub",
+  "string.match",
   "string.sub", "table.insert", "table.concat", "microbit.display.scroll",
   "microbit.serial.send", "microbit.serial.getCharAsync",
   "microbit.serial.eventAfterAsync", "microbit.handler",
@@ -749,10 +750,10 @@ static void on_event_and_print(void) {
   expect(strstr(said, "=> 2\r\n> ") != NULL, "... and the REPL still answers");
 }
 
-// The REPL keeps loadstring, setfenv, pcall and gmatch of its own: a
-// global it uses, taken away, can stop what a line shows, but the prompt
-// comes back and the port is armed, so the global can be put back from the
-// prompt. print is the REPL's own too.
+// The REPL keeps loadstring, setfenv, pcall, gsub, sub and concat of its
+// own: a global it uses, taken away, can stop what a line shows, but the
+// prompt comes back and the port is armed, so the global can be put back
+// from the prompt. print is the REPL's own too.
 static void globals_taken_away(void) {
   const char *said;
   char what[256], take[128];
@@ -916,6 +917,50 @@ static void echo_in_pieces(void) {
          && strstr(said, "aaaaaaaaaa\"\r\n> ") != NULL
          && count(said, "a") == 150 + 1,
          "a result longer than 64 characters goes out whole, in pieces");
+}
+
+// A paste of 248 characters while a command runs, read in one pass
+static void paste_a_comment(void) {
+  static char text[256];
+  memset(text, 0, sizeof text);
+  strcpy(text, "--");
+  memset(text + 2, 'b', 246);
+  strcat(text, "\r");
+  type_in(text);
+}
+
+// What a big result, or a paste, costs the heap: printing a string takes
+// little more than the string, and a paste leaves nothing behind
+static void big_output_and_paste(void) {
+  const char *said;
+  size_t before;
+  char what[160];
+  fresh();
+  boot("");
+  line("x = string.rep('a', 4000)");
+  lua_gc(board_L, LUA_GCCOLLECT, 0);
+  heap_limit = heap_used + 12000;
+  said = line("print(x)");
+  heap_limit = (size_t)-1;
+  expect(count(said, "a") >= 4000 && strstr(said, "not enough memory") == NULL,
+         "print() of 4,000 characters fits in 12 KB of heap to spare");
+  line("x = string.rep('a', 1900)");
+  lua_gc(board_L, LUA_GCCOLLECT, 0);
+  heap_limit = heap_used + 12000;
+  said = line("x");
+  heap_limit = (size_t)-1;
+  expect(count(said, "a") >= 1900 && strstr(said, "not enough memory") == NULL,
+         "... and a 1,900-character result");
+  line("x = nil");
+  line("microbit.sleep(50)");
+  lua_gc(board_L, LUA_GCCOLLECT, 0);
+  before = heap_used;
+  plan(paste_a_comment);
+  line("microbit.sleep(50)");
+  lua_gc(board_L, LUA_GCCOLLECT, 0);
+  snprintf(what, sizeof what, "a 248-character paste read in one pass leaves "
+           "%ld bytes of heap behind, under 1,000", (long)(heap_used - before));
+  expect(heap_used < before + 1000, what);
 }
 
 // Lines sent together run one after another: a line that sleeps ends
@@ -1770,6 +1815,7 @@ int main(int argc, char **argv) {
   the_repl_always_comes_back();
   lines_in_turn();
   echo_in_pieces();
+  big_output_and_paste();
   robot_file();
   round_two();
   what_waiting_costs();
