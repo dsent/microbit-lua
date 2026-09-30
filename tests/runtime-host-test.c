@@ -140,8 +140,9 @@ void lua_events_show_error(const char *message, bool wait) {
     then();
 }
 
-void lua_events_port_error(const char *message) {
-  note("\r\nRuntime error: ");
+void lua_events_port_error(const char *what, const char *message) {
+  note("\r\n");
+  note(what);
   note(message);
   note("\r\n");
 }
@@ -477,12 +478,7 @@ static void boot_script(const char *text, size_t length) {
   lua_settop(L, 0);
   lua_modules_open(L, modules);
   lua_events_open(L, &events_config);
-  if (luaL_loadbuffer(L, text, length, "=program")) {
-    fprintf(stderr, "%s\n", lua_tostring(L, -1));
-    exit(2);
-  }
-  lua_strip_debug(L);
-  lua_events_boot(L);
+  lua_events_boot_program(L, text, length, NULL);
   note("<booted>");
 }
 
@@ -1623,19 +1619,15 @@ static void mistakes_named(void) {
          && strstr(out, ":0:") == NULL,
          "a mistake in the stripped script at boot is named \"program\", "
          "with no line");
-  {
-    // One the parser finds names its line: the lines are stripped only
-    // once the script has loaded
-    static const char BAD[] = "x = 1\ny = = 2\n";
-    fresh();
-    boot("");
-    i = luaL_loadbuffer(board_L, BAD, sizeof BAD - 1, "=program");
-    expect(i != 0 && strcmp(lua_tostring(board_L, -1),
-                            "program:2: unexpected symbol near '='") == 0,
-           "a script at boot that does not compile names its line: "
-           "program:2: ...");
-    lua_pop(board_L, 1);
-  }
+  // One the parser finds names its line, the lines being stripped only
+  // once the script has loaded, through the loader main.cpp boots with
+  fresh();
+  boot_alone("x = 1\ny = = 2\n");
+  expect(strstr(out, "\r\nCompile error: program:2: unexpected symbol near "
+                "'='\r\n<error Compile error: ><error program:2: unexpected "
+                "symbol near '='><booted>") != NULL,
+         "a script at boot that does not compile is said so, naming its "
+         "line: program:2: ...");
   fresh();
   boot("");
   said = line("local t t.x = 1");

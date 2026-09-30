@@ -1817,9 +1817,10 @@ void port_mistake(const char *what, const char *message) {
 
 // A handler's mistake goes to the console, and never into the stream of a
 // device a program has put on the port
-extern "C" void lua_events_port_error(const char *message) {
+extern "C" void lua_events_port_error(const char *what,
+                                      const char *message) {
   if (port_is_console)
-    port_mistake("Runtime error: ", message);
+    port_mistake(what, message);
 }
 
 extern "C" bool lua_events_arm_port(void) {

@@ -66,6 +66,13 @@ static void lua_mem_report(lua_State *L, const char *tag) {
 
 MicroBit uBit;
 
+// The memory reports between loading the script at boot and running it
+static void boot_stage(lua_State *L, const char *name) {
+    (void)L;
+    LUA_MEM_REPORT(L, name);
+    report_stack(name);
+}
+
 #if CONFIG_ENABLED(DEVICE_BLE)
 // UART service (Nordic UART over BLE)
 MicroBitUARTService *uart;
@@ -172,30 +179,8 @@ int main() {
 
     LUA_MEM_REPORT(L, "api");
 
-    // Its mistakes are "program: ...", with no line: the line info is
-    // stripped below (source/ldebug-no-line.patch)
-    if (luaL_loadbuffer(L, (const char*)__lua_meta.start,
-                        __lua_meta.size, "=program") == LUA_OK)
-    {
-        LUA_MEM_REPORT(L, "loaded");
-        report_stack("loaded");
-
-        // Release the parsed chunk's debug arrays before running it.
-        lua_strip_debug(L);
-        LUA_MEM_REPORT(L, "stripped");
-
-        lua_events_boot(L);
-    }
-    else
-    {
-        const char* err = lua_tostring(L, -1);
-        if (err)
-            port_mistake("Compile error: ", err);
-        uBit.display.scroll("Compile error: ");
-        if (err) {
-            uBit.display.scroll(err);
-        }
-    }
+    lua_events_boot_program(L, (const char*)__lua_meta.start,
+                            __lua_meta.size, boot_stage);
 
     LUA_MEM_REPORT(L, "ran");
     report_stack("ran");

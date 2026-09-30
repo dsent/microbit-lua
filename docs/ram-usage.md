@@ -176,19 +176,26 @@ Trade-offs:
 
 ### S2. Strip debug info from the embedded chunk — done
 
-Implemented in `source/lua-strip-debug.c` and called from `source/main.cpp`
-right after `luaL_loadbuffer` succeeds. `lua_strip_debug()` walks the loaded
-`Proto` recursively and frees `lineinfo`, `locvars`, and `upvalues` with
-`luaM_freearray`, zeroing the counts: line numbers, local variable names and
-upvalue names. The `debug` library is not opened, so what a program loses is
-in its errors, which have no line and name no local or upvalue: `local t
-t.x = 1` gives `program: attempt to index a nil value`, where unstripped it
-gives `program:1: attempt to index local 't' (a nil value)`, and an upvalue
-shows as `'?'`; globals and fields keep their names. The chunk is loaded as
-`=program`, and its errors name it with no line: from the VM
-(`source/ldebug-no-line.patch`), and from `error`, `assert` or a function's
-bad argument, `program: boom` (`source/lauxlib-no-line.patch`). REPL chunks
-compiled later keep their debug info, their lines and their names.
+Implemented in `source/lua-strip-debug.c` and called by
+`lua_events_boot_program` (`source/lua-events.c`), which `source/main.cpp`
+boots with, right after `luaL_loadbuffer` succeeds. `lua_strip_debug()`
+walks the loaded `Proto` recursively and frees `lineinfo`, `locvars`, and
+`upvalues` with `luaM_freearray`, zeroing the counts: line numbers, local
+variable names and upvalue names. The `debug` library is not opened, so what
+a program loses is in its errors, which have no line and name no local or
+upvalue: `local t t.x = 1` gives `program: attempt to index a nil value`,
+where unstripped it gives `program:1: attempt to index local 't' (a nil
+value)`, and an upvalue shows as `'?'`; globals and fields keep their names.
+The chunk is loaded as `=program`, and where Lua gives an error a position
+it names the chunk with no line: an error the VM finds
+(`source/ldebug-no-line.patch`), and `error`, `assert` or a library
+function's bad argument, `program: boom` (`source/lauxlib-no-line.patch`). A
+message a C function makes itself, as the TPBot commands do, `error(msg,
+0)`, and a bad argument raised for a C caller have none; `coroutine.wrap`
+puts a second one in front of what it passes on, as Lua 5.1 does with lines.
+With no program uploaded the chunk is the firmware's own script, so a bad
+argument the REPL passes on says `program:` too. REPL chunks compiled later
+keep their debug info, their lines and their names.
 
 ### S4. Resolve constants through `__index` — done
 

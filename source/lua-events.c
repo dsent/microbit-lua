@@ -242,7 +242,7 @@ static void handle(LuaEvent e, bool port) {
   if (lua_cpcall(state, call_handler, &e) != 0) {
     const char *err = mistake(state, text);
     if (err) {
-      lua_events_port_error(err);
+      lua_events_port_error("Runtime error: ", err);
       lua_events_show_error(err, false);
     }
     lua_pop(state, 1);
@@ -358,13 +358,41 @@ void lua_events_boot(lua_State *L) {
   if (lua_pcall(L, 0, 0, 0) != 0) {
     const char *err = mistake(L, text);
     if (err)
-      lua_events_port_error(err);
+      lua_events_port_error("Runtime error: ", err);
     lua_events_show_error("Lua error!", true);
     if (err)
       lua_events_show_error(err, true);
     lua_pop(L, 1);
   }
   lua_call_end();
+}
+
+void lua_strip_debug(lua_State *L);
+
+// The script at boot is loaded as "=program": where Lua gives one of its
+// mistakes a position, the position is "program", with no line once its
+// line info is stripped (ldebug-no-line.patch, lauxlib-no-line.patch),
+// which is done as soon as it has loaded; a mistake the parser finds still
+// names its line. One that
+// does not compile is said as a compile error, and shown, and nothing runs.
+void lua_events_boot_program(lua_State *L, const char *text, size_t size,
+                             void (*stage)(lua_State *L, const char *name)) {
+  if (luaL_loadbuffer(L, text, size, "=program") != 0) {
+    const char *err = lua_tostring(L, -1);
+    if (err)
+      lua_events_port_error("Compile error: ", err);
+    lua_events_show_error("Compile error: ", true);
+    if (err)
+      lua_events_show_error(err, true);
+    lua_pop(L, 1);
+    return;
+  }
+  if (stage)
+    stage(L, "loaded");
+  lua_strip_debug(L);
+  if (stage)
+    stage(L, "stripped");
+  lua_events_boot(L);
 }
 
 // microbit.eventRepl(): the REPL runs a command for the port's event, and

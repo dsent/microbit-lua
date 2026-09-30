@@ -55,6 +55,13 @@ void lua_event_arrived(LuaEvent e);
 void lua_call_begin(void);
 void lua_call_end(void);
 
+// The program at boot, size bytes of text: loaded, stripped of its line
+// info, and run as lua_events_boot runs it, or said as a compile error.
+// stage(), if given, is called once it has loaded and once it is stripped,
+// with "loaded" and "stripped", for the firmware's memory reports.
+void lua_events_boot_program(lua_State *L, const char *text, size_t size,
+                             void (*stage)(lua_State *L, const char *name));
+
 // The script at boot, loaded and on top of the stack, run as such a call;
 // a mistake goes to the port and is shown ("Lua error!", then the
 // message), and the board goes on handling events.
@@ -82,9 +89,10 @@ int lua_events_line(lua_State *L);
 // lets other fibers run.
 void lua_events_show_error(const char *message, bool wait);
 
-// A mistake, written to the serial port on a line of its own, "Runtime
-// error: " first, with nothing taken from the heap
-void lua_events_port_error(const char *message);
+// A mistake, written to the serial port on a line of its own, what it is
+// first ("Runtime error: ", "Compile error: "), with nothing taken from the
+// heap
+void lua_events_port_error(const char *what, const char *message);
 
 // The port armed for its next event, as microbit.serial.eventAfterAsync(1)
 // arms it; whether characters wait there to be read
