@@ -394,6 +394,7 @@ lua_patch(lstrlib.c lstrlib-number-text.patch "luai_numformat")
 lua_patch(luaconf.h luaconf-cstack.patch "luai_cstack")
 lua_patch(ldo.c ldo-cstack.patch "luai_cstack")
 lua_patch(lparser.c lparser-cstack.patch "luai_cstack")
+lua_patch(lparser.c lparser-assign-cstack.patch "no enterlevel on the way")
 lua_patch(ldo.c ldo-resume-cstack.patch "the call that resumes it")
 lua_patch(lstrlib.c lstrlib-cstack.patch "pattern too complex")
 # Only text is loaded, so every function's nesting passed the parser's check;

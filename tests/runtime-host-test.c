@@ -1295,6 +1295,28 @@ static void deep_coroutines(void) {
   expect(strstr(said, "=> 42\r\n> ") != NULL, "... and the REPL answers");
 }
 
+// A multiple assignment with many targets: the parser goes a level deeper
+// for each, and stops within a level of the limit
+static void many_targets(void) {
+  char text[1024] = "a";
+  int i, status;
+  size_t limit;
+  fresh();
+  boot("");
+  for (i = 0; i < 150; i++) strcat(text, ",a");
+  strcat(text, " = 1");
+  limit = host_cstack_used() + 3000;
+  host_cstack_limit = limit;
+  host_cstack_first_over = 0;
+  status = luaL_loadstring(board_L, text);
+  host_cstack_limit = (size_t)-1;
+  expect(status != 0 && strstr(lua_tostring(board_L, -1), "C stack overflow")
+         && host_cstack_first_over - limit < 1024,
+         "an assignment to 151 targets stops with \"C stack overflow\" within "
+         "a level of the limit");
+  lua_pop(board_L, 1);
+}
+
 // A pattern whose match goes a C call deeper for each character it takes,
 // as a? does, stops before it fills the C stack: in each function that
 // matches
@@ -1550,6 +1572,7 @@ int main(int argc, char **argv) {
   the_radio_inbox();
   a_full_c_stack();
   deep_coroutines();
+  many_targets();
   deep_patterns();
   text_only();
   a_move_that_fails();

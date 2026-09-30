@@ -14,6 +14,7 @@
 
 static uintptr_t base;
 size_t host_cstack_limit = (size_t)-1;
+size_t host_cstack_first_over;
 
 void host_cstack_start(void) {
   base = (uintptr_t)__builtin_frame_address(0);
@@ -26,9 +27,9 @@ size_t host_cstack_used(void) {
 
 int luai_cstack(void) {
   size_t used = host_cstack_used();
-  if (host_cstack_limit == (size_t)-1)
+  if (host_cstack_limit == (size_t)-1 || used <= host_cstack_limit)
     return 0;
-  if (used > host_cstack_limit + 1024)
-    return 2;
-  return used > host_cstack_limit;
+  if (host_cstack_first_over == 0)
+    host_cstack_first_over = used;
+  return used > host_cstack_limit + 1024 ? 2 : 1;
 }
