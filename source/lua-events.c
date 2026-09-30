@@ -68,6 +68,7 @@ static bool sleep_handles = false;   // the running call's sleeps handle events
 static bool port_call = false;       // the port's event is being handled
 static bool wants = false;           // there is on_event, or a fallback
 static volatile bool port_waiting = false;
+static bool port_again = false;      // the port's event runs again, once
 static volatile uint32_t dropped = 0;  // since boot, the line or none
 
 // The registry's key for the handler used when on_event is not a function
@@ -233,7 +234,9 @@ static const char *mistake(lua_State *L, char text[LUAI_MAXNUMBER2STR]) {
 // A mistake in a handler goes to the port, and is shown without waiting
 // for it to scroll by: the call that is running goes on, and a display
 // that is busy shows nothing. One in the handling of the port's event may
-// have left the port unarmed, and so the REPL deaf: it is armed.
+// have left the port unarmed, and so the REPL deaf: it is armed, and when
+// characters already wait there, which raise no event, the port's event
+// runs again, once, so that they are read.
 static void handle(LuaEvent e, bool port) {
   bool outer = sleep_handles, outer_port = port_call;
   char text[LUAI_MAXNUMBER2STR];
@@ -245,8 +248,13 @@ static void handle(LuaEvent e, bool port) {
       lua_events_show_error(err, false);
     }
     lua_pop(state, 1);
-    if (port)
-      lua_events_arm_port();
+    if (port) {
+      bool unread = lua_events_arm_port();
+      port_waiting = port_waiting || (unread && !port_again);
+      port_again = unread && !port_again;
+    }
+  } else if (port) {
+    port_again = false;
   }
   sleep_handles = outer;
   port_call = outer_port;

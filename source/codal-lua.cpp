@@ -1754,8 +1754,9 @@ extern "C" void lua_events_port_error(const char *message) {
     port_mistake("Runtime error: ", message);
 }
 
-extern "C" void lua_events_arm_port(void) {
+extern "C" bool lua_events_arm_port(void) {
   uBit.serial.eventAfter(1, ASYNC);
+  return uBit.serial.isReadable() == 1;
 }
 
 extern "C" uint32_t lua_events_stack_used(void) {

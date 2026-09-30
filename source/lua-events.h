@@ -87,8 +87,8 @@ void lua_events_show_error(const char *message, bool wait);
 void lua_events_port_error(const char *message);
 
 // The port armed for its next event, as microbit.serial.eventAfterAsync(1)
-// arms it
-void lua_events_arm_port(void);
+// arms it; whether characters wait there to be read
+bool lua_events_arm_port(void);
 
 // The C stack in use, in bytes
 uint32_t lua_events_stack_used(void);

@@ -251,7 +251,8 @@ armed. The REPL keeps `loadstring`, `setfenv`, `pcall`, `string.gmatch`,
 `microbit.serial.eventAfterAsync` and `microbit.eventRepl` of its own for
 that; a line that takes away another global it uses can stop what the REPL
 shows, and the global can be put back from the prompt. The firmware arms the
-port itself after an `on_event` that fails on the port's event.
+port itself after an `on_event` that fails on the port's event, and has what
+already waits there read.
 
 
 ## TPBot

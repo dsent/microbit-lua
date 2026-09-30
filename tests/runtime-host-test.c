@@ -146,8 +146,9 @@ void lua_events_port_error(const char *message) {
   note("\r\n");
 }
 
-void lua_events_arm_port(void) {
+bool lua_events_arm_port(void) {
   armed = 1;
+  return typed_at < typed_len;
 }
 
 // The stack in use a safe point sees: 0, or what a test says
@@ -808,11 +809,22 @@ static void globals_taken_away(void) {
   line("local original = on_event _G.on_event = function(s, v, t) "
        "if s == 12 and not failed then failed = true error('once') end "
        "original(s, v, t) end");
-  line("6*8");
-  said = line("6*7");
+  type_in("6*8\r");
   expect(armed && strstr(out, "<error, going on ") != NULL
-         && strstr(said, "=> 42\r\n> ") != NULL,
-         "the port is armed after an on_event fails on its event");
+         && strstr(out, "=> 48\r\n> ") != NULL,
+         "the port is armed after an on_event fails on its event, and what "
+         "waits there is read");
+  said = line("6*7");
+  expect(strstr(said, "=> 42\r\n> ") != NULL, "... and the REPL answers");
+  // An on_event that always fails on the port's event: it runs once more
+  // for what waits, and no more
+  fresh();
+  boot("");
+  line("_G.on_event = function(s, v, t) if s == 12 then error('no') end end");
+  type_in("6*8\r");
+  expect(count(out, "<error, going on ") == 2 && armed,
+         "... and an on_event that always fails on it runs once more, "
+         "not for ever");
   fresh();
   boot("");
   line("_G.pcall = nil");
