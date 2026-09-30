@@ -1831,6 +1831,10 @@ extern "C" uint32_t lua_events_stack_used(void) {
   return stack_probe_current();
 }
 
+extern "C" uint32_t lua_events_stack_region(void) {
+  return stack_probe_region();
+}
+
 extern "C" uint32_t lua_events_now(void) {
   return (uint32_t)uBit.systemTime();
 }

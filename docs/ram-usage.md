@@ -53,7 +53,9 @@ parsed inside the event chain — so a large user chunk can reach roughly
 (dtoa) and nested IRQ/SoftDevice frames: 8 KB is a comfortable field value,
 7 KB is a plausible trim, and going lower needs the worst-case chunk measured.
 The guard panics (`DEVICE_STACK_OVERFLOW`) on overrun, and reducing `__StackSize`
-grows the heap, since heap end = `stack_limit()`.
+grows the heap, since heap end = `stack_limit()`. Lua's C stack limits
+(`source/lua-cstack.h`) are the region's size, read at run time, less fixed
+margins: 5,888, 6,400 and 4,352 bytes at 8 KB, and 2 KB lower each at 6 KB.
 
 ### Lua heap (the tunable part)
 

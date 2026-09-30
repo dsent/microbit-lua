@@ -7,6 +7,8 @@
 # - runtime-host-test: source/lua-script.lua, and programs in its place,
 #   over a stand-in board, with events through source/lua-events.c and
 #   modules through source/lua-modules.c;
+# - cstack-host-test: source/lua-cstack.c, whose limits follow the stack
+#   region's size;
 # - wait-audit.sh: every binding that waits looks for on_event first.
 set -euo pipefail
 
@@ -43,4 +45,7 @@ cc "${STRICT[@]}" -o "$DIR/runtime" "$ROOT/tests/runtime-host-test.c" \
   "$ROOT/source/lua-modules.c" "$ROOT/source/radio-inbox.c" "$DIR"/*.o -lm
 "$DIR/tpbot" "$ROOT/tests/tpbot-reference.lua"
 "$DIR/runtime" "$ROOT/source/lua-script.lua"
+cc "${STRICT[@]}" -o "$DIR/cstack" "$ROOT/tests/cstack-host-test.c" \
+  "$ROOT/source/lua-cstack.c"
+"$DIR/cstack"
 bash "$ROOT/tests/wait-audit.sh"

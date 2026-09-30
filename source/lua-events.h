@@ -90,8 +90,9 @@ void lua_events_port_error(const char *message);
 // arms it; whether characters wait there to be read
 bool lua_events_arm_port(void);
 
-// The C stack in use, in bytes
+// The C stack in use, and the stack region's size, in bytes
 uint32_t lua_events_stack_used(void);
+uint32_t lua_events_stack_region(void);
 uint32_t lua_events_now(void);
 void lua_events_pause(uint32_t ms);
 

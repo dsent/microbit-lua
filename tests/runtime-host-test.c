@@ -158,6 +158,13 @@ uint32_t lua_events_stack_used(void) {
   return stack_used_now;
 }
 
+// The stack region's size: the board's 8 KB, or what a test says
+static uint32_t stack_region = 8192;
+
+uint32_t lua_events_stack_region(void) {
+  return stack_region;
+}
+
 uint32_t lua_events_now(void) {
   return clock_ms;
 }
@@ -406,6 +413,7 @@ static void plan(Action a) {
 
 static void fresh(void) {
   stack_used_now = 0;
+  stack_region = 8192;
   board_allocs = 0;
   board_bytes = 0;
   board_refuses = 0;
@@ -1619,6 +1627,20 @@ static void deep_sleeps(void) {
   said = line("microbit.sleep(50)");
   expect(in_order(said, deep) && count(said, "<scroll A>") == 1,
          "a sleep 4,400 bytes deep leaves them for after the call");
+  // on a stack of 6 KB the limit is 2 KB lower
+  fresh();
+  boot("");
+  stack_region = 6144;
+  stack_used_now = 2300;
+  plan(press_a);
+  said = line("microbit.sleep(50)");
+  expect(in_order(said, shallow),
+         "on a 6 KB stack, a sleep 2,300 bytes deep runs handlers");
+  stack_used_now = 2400;
+  plan(press_a);
+  said = line("microbit.sleep(50)");
+  expect(in_order(said, deep) && count(said, "<scroll A>") == 1,
+         "... and one 2,400 bytes deep leaves them for after the call");
 }
 
 // An uploaded program that sets on_event and then drives: a press during

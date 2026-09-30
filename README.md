@@ -221,11 +221,13 @@ a coroutine's resume, or a level of the parser, that finds more than 5,888
 bytes of the 8 KB stack in use stops with "C stack overflow", and a pattern
 that would match deeper stops with "pattern too complex"
 (`microbit.stackCurrent()` says how much is in use now,
-`microbit.stackUsage()` the most since boot). What still waits when the call
-is over is handled then. When the line is full the oldest event in it is
-dropped, as is an event for which an allocation fails, for the line or for a
-fiber to carry it (see Stack and heap for what the board does then);
-`microbit.eventsDropped()` says how many have been since boot.
+`microbit.stackUsage()` the most since boot). These limits are the stack's
+size less fixed margins (`source/lua-cstack.h`), so they follow
+`__StackSize`. What still waits when the call is over is handled then. When
+the line is full the oldest event in it is dropped, as is an event for which
+an allocation fails, for the line or for a fiber to carry it (see Stack and
+heap for what the board does then); `microbit.eventsDropped()` says how many
+have been since boot.
 
 The serial port's event the REPL waits for is kept apart and never lost,
 even when no fiber can be made to carry it: the running call takes it, or

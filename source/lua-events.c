@@ -15,8 +15,9 @@
 //   running call is the script at boot, or a command typed at the REPL
 //   (the firmware's own handler of the port's event); a handler's own sleep
 //   handles nothing, so it never nests another, and nor does a sleep that
-//   is already deep in the stack (SAFE_POINT_STACK). A sleep ends on time
-//   however many events come, but lasts as long as the handlers it runs;
+//   is already deep in the stack (lua_safe_point_stack). A sleep ends on
+//   time however many events come, but lasts as long as the handlers it
+//   runs;
 // - when the running call is over.
 //
 // The line is made the first time an event has to wait, and only for a
@@ -42,14 +43,11 @@
 #include "lua.h"
 #include "lauxlib.h"
 #include "board-alloc.h"
+#include "lua-cstack.h"
 #include "lua-events.h"
 
 // How long a sleep that handles events sleeps at a time, in ms
 #define SLICE 10
-
-// The deepest a sleep may be, in bytes of C stack in use, and still run
-// handlers: they have 1.5 KB before Lua's C stack check (lua-cstack.c).
-#define SAFE_POINT_STACK 4352
 
 // The waiting line, made the first time an event has to wait for a
 // program that has somewhere to send it, of the size microbit.eventLine()
@@ -334,7 +332,8 @@ void lua_events_sleep(uint32_t ms) {
   bool paused = false;
   lua_events_before_wait();
   if (!running || !sleep_handles
-      || lua_events_stack_used() > SAFE_POINT_STACK) {
+      || lua_events_stack_used()
+         > lua_safe_point_stack(lua_events_stack_region())) {
     lua_events_pause(ms);
     return;
   }
