@@ -471,8 +471,17 @@ local function port_to_link(value)
     typed_here = typed_here .. text
     local at = string.find(typed_here, "[\r\n]")
     while at do
-      radio.tx(string.sub(typed_here, 1, at))
+      local line = string.sub(typed_here, 1, at)
       typed_here = string.sub(typed_here, at + 1)
+      if not radio.tx(line) then
+        -- tx has tried for a quarter of a second; what was typed after
+        -- the line would arrive without it, and goes too
+        typed_here = ""
+        write("\nThe other micro:bit did not answer, so it did not get: "
+              .. string.sub(line, 1, -2) .. "\nIt may still be running"
+              .. " a command. Type the line again once it has finished.\n")
+        return
+      end
       at = string.find(typed_here, "[\r\n]")
     end
   end

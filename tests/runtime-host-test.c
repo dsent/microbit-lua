@@ -248,9 +248,16 @@ static int l_connect(lua_State *L) {
   return 1;
 }
 
+// A far end that does not answer, as one running a command does
+static int far_end_deaf;
+
 static int l_tx(lua_State *L) {
   const char *text = luaL_checkstring(L, 1);
   size_t n = strlen(far_end);
+  if (far_end_deaf) {
+    lua_pushboolean(L, 0);
+    return 1;
+  }
   if (listening) {
     n = strlen(caller_hears);
     snprintf(caller_hears + n, sizeof caller_hears - n, "%s", text);
@@ -430,6 +437,7 @@ static void fresh(void) {
   lost = 0;
   linked = 0;
   far_end[0] = 0;
+  far_end_deaf = 0;
   caller_types = NULL;
   caller_hears[0] = 0;
   listening = looks = 0;
@@ -1350,7 +1358,7 @@ static void every_drop_counted(void) {
 // listen() serves a board that calls over the radio: a prompt, and the
 // answer to a line. The session it serves is made then: booted, the
 // firmware's script holds no more Lua heap than this, on the 64-bit host.
-#define BOOTED_HEAP 44700
+#define BOOTED_HEAP 45100
 
 static void serving_a_link(void) {
   const char *said;
@@ -1367,6 +1375,25 @@ static void serving_a_link(void) {
          "listen() gives a caller the prompt, and the answer to its line");
   expect(strstr(said, "hung up") != NULL && armed,
          "... and the prompt is back when the caller hangs up");
+}
+
+// A line the far end of a link does not take is said to be lost, in
+// words, and what was typed after it goes with it
+static void a_line_not_taken(void) {
+  const char *said;
+  fresh();
+  boot("");
+  line("connect('zezop', 10)");
+  far_end_deaf = 1;
+  said = line("robot_move(50, 50, 1)");
+  expect(strstr(said, "\r\nThe other micro:bit did not answer, so it did "
+                "not get: robot_move(50, 50, 1)\r\nIt may still be running a "
+                "command. Type the line again once it has finished.\r\n")
+         != NULL, "a line the other micro:bit does not take is said to be "
+         "lost, and how to send it again");
+  far_end_deaf = 0;
+  said = line("1+1");
+  expect(strstr(said, "=> 1+1") != NULL, "... and the next line goes");
 }
 
 // The radio's inbox: made when the first link opens, not before
@@ -1821,6 +1848,7 @@ int main(int argc, char **argv) {
   what_waiting_costs();
   every_drop_counted();
   serving_a_link();
+  a_line_not_taken();
   the_radio_inbox();
   a_full_c_stack();
   deep_coroutines();
