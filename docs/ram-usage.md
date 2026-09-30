@@ -83,7 +83,7 @@ loaded, stripped and run as `main()` does, then collected. Static RAM
 |---|---:|---:|
 | daa2f77, before `require` (TPBot commands in Lua) | 29,080 B | 14,704 B |
 | upstream 1733ccd (`require`, TPBot in C for tpbot2) | 26,191 B | 14,712 B |
-| this firmware | 26,601 B | 14,736 B |
+| this firmware | 26,033 B | 14,736 B |
 
 What moved it, measured the same way:
 

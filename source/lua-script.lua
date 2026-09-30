@@ -12,9 +12,8 @@ require("tpbot")
 
 -- What the REPL cannot do without, taken here so that the prompt comes
 -- back even after a line takes away the global: a line runs under pcall,
--- every character goes out through gmatch, and a session passes on a
--- mistake with error.
-local pcall, gmatch, error = pcall, string.gmatch, error
+-- and every character goes out through gmatch.
+local pcall, gmatch = pcall, string.gmatch
 local HEAD_MATCH = uBit.CODAL_SERIAL_EVT_HEAD_MATCH
 local CLICK = uBit.DEVICE_BUTTON_EVT_CLICK
 local LONG_CLICK = uBit.DEVICE_BUTTON_EVT_LONG_CLICK
@@ -201,8 +200,16 @@ local function execute(chunk)
   end
 end
 
+-- A mistake on the way from a line to its result, said
+local function say_error(err)
+  say("Runtime error: " .. tostring(err))
+end
+
 -- A REPL session: a buffer plus the compile-driven submit loop. The
 -- same engine is used for the serial console and the BLE UART service.
+-- Each function stands at most one level inside another: the parser's
+-- frame for a function nested deeper costs over half a kilobyte of stack
+-- while the script is read at boot.
 local function make_session(transport)
   local s = {
     transport = transport,
@@ -211,7 +218,7 @@ local function make_session(transport)
   function s.prompt()
     write(s.buffer == "" and "> " or ">> ")
   end
-  local function run_line(text)
+  function s.submit(text)
     s.buffer = s.buffer .. text .. "\n"
     if s.transport.crlf_before_result then
       write("\r\n")
@@ -225,31 +232,29 @@ local function make_session(transport)
       end
       s.buffer = ""
     end
-  end
-  -- Whatever goes wrong on the way, even showing a result that cannot
-  -- be shown or running out of memory, the line is over and the prompt
-  -- comes back.
-  function s.submit(text)
-    local ran, err = pcall(run_line, text)
-    if not ran then
-      s.buffer = ""
-      pcall(collectgarbage, "collect")
-      local said = pcall(function()
-        say("Runtime error: " .. tostring(err))
-      end)
-      if not said then
-        pcall(say, "Runtime error: the result cannot be shown")
-      end
-    end
     pcall(collectgarbage, "collect")
-    pcall(s.prompt)
+    s.prompt()
   end
+  -- f, with what it says going to this session. Whatever goes wrong in
+  -- it, even showing a result that cannot be shown or running out of
+  -- memory, the line is over, the mistake is said if it can be, and the
+  -- prompt comes back. One pcall here covers the reading of the port,
+  -- the line and its result: each pcall more on the way to a command
+  -- would cost the C stack about 440 bytes.
   function s.run(f, ...)
     local saved = active_session
     active_session = s
     local ran, err = pcall(f, ...)
+    if not ran then
+      s.buffer = ""
+      pcall(collectgarbage, "collect")
+      if not pcall(say_error, err) then
+        pcall(say, "Runtime error: the result cannot be shown")
+      end
+      pcall(collectgarbage, "collect")
+      pcall(s.prompt)
+    end
     active_session = saved
-    if not ran then error(err, 0) end
   end
   return s
 end
@@ -311,14 +316,12 @@ end
 -- more: a character that came before it was armed raises no event.
 local function port_to_console(value)
   if value == HEAD_MATCH then
-    serial_session.run(function()
-      local c
-      repeat
-        pcall(read_port, c)
-        serial_session.transport.arm()
-        c = serial_session.transport.getChar()
-      until not c
-    end)
+    local c
+    repeat
+      serial_session.run(read_port, c)
+      serial_session.transport.arm()
+      c = serial_session.transport.getChar()
+    until not c
   end
 end
 
@@ -406,7 +409,7 @@ function listen(name)
     if radio.answered(name) then greet() end
     local piece = radio.rx()
     if piece then
-      radio_session.run(function() typed(piece) end)
+      radio_session.run(typed, piece)
     end
     uBit.sleep(5)
   end
