@@ -15,6 +15,7 @@ extern "C" {
 #include "neopixel.h"
 #include "stack-probe.h"
 #include "tpbot.h"
+#include "lua-events.h"
 
 extern MicroBit uBit;
 
@@ -32,9 +33,6 @@ I2C &i2c = uBit.i2c;
 #define FIRMWARE_VERSION_MARK "microbit-lua firmware "
 extern "C" __attribute__((used))
 const char firmware_version_mark[] = FIRMWARE_VERSION_MARK FIRMWARE_VERSION;
-
-// Events dropped while Lua was busy, see lua_event_wait()
-static uint32_t lua_events_dropped;
 
 #define LUA_MICROBIT_FUNCTIONS						\
     F(reset,      { uBit.reset();					\
@@ -75,9 +73,8 @@ static uint32_t lua_events_dropped;
     F(stackReset, { stack_probe_paint();				\
                     return 0;						\
                   })							\
-    F(eventsDropped, { lua_pushinteger(L, (lua_Integer)lua_events_dropped); \
-                    return 1;						\
-                  })							\
+    F(eventsDropped, { return lua_events_dropped(L); })		\
+    F(eventFallback, { return lua_events_fallback(L); })		\
     F(panic,      { int statusCode = (int)luaL_checkinteger(L, 1);      \
                     microbit_panic(statusCode);				\
                     return 0;						\
@@ -1188,11 +1185,25 @@ static bool radio_take(uint8_t kind, uint8_t link,
     return false;
 }
 
+/* Pieces the far end sent while this end waited on its own
+ * to be answered: each answered at once, since the far end
+ * may be waiting in the same way, and kept here for rx(). Lua
+ * runs one call at a time, so the rx() that would have
+ * answered them waits until the tx() that is waiting is
+ * done. A piece that finds the inbox full is left unanswered,
+ * and the far end sends it again. */
+#define RADIO_INBOX 4
+static uint8_t radio_inbox[RADIO_INBOX][RADIO_BODY];
+static int radio_inbox_len[RADIO_INBOX];
+static int radio_inbox_first = 0;
+static int radio_inbox_count = 0;
+
 /* Both ends start a link the same way */
 static void radio_open(uint8_t link, const char *peer)
 {
     radio_link = link;
     radio_held_len = 0;
+    radio_inbox_count = 0;
     radio_out = 0;
     radio_in = 0;
     memcpy(radio_peer, peer, RADIO_NAME);
@@ -1273,6 +1284,26 @@ static bool radio_called_us(const char *from)
     return true;
 }
 
+/* A piece the far end sent, answered and kept, if one came
+ * and there is room for it */
+static void radio_keep(void)
+{
+    uint8_t body[RADIO_BODY];
+    uint8_t num;
+    int len;
+
+    if (radio_inbox_count == RADIO_INBOX
+        || !radio_take(RADIO_DATA, radio_link, NULL, &num, body, &len))
+        return;
+    radio_put(RADIO_ACK, radio_link, num, NULL, 0);
+    if (num == radio_in) return;
+    radio_in = num;
+    int at = (radio_inbox_first + radio_inbox_count) % RADIO_INBOX;
+    memcpy(radio_inbox[at], body, len);
+    radio_inbox_len[at] = len;
+    radio_inbox_count++;
+}
+
 /* One piece, repeated until the far end answers it */
 static bool radio_one(const char *body, int len)
 {
@@ -1286,6 +1317,7 @@ static bool radio_one(const char *body, int len)
             if (radio_take(RADIO_ACK, radio_link, NULL,
                            &num, NULL, NULL)
                 && num == radio_out) return true;
+            radio_keep();
             uBit.sleep(1);
         }
     }
@@ -1394,6 +1426,15 @@ static bool radio_one(const char *body, int len)
     F(rx,         { uint8_t body[RADIO_BODY];				\
                     uint8_t num;					\
                     int len;						\
+                    if (radio_inbox_count > 0) {			\
+                      int at = radio_inbox_first;			\
+                      radio_inbox_first = (at + 1) % RADIO_INBOX;	\
+                      radio_inbox_count--;				\
+                      lua_pushlstring(L,				\
+                        (const char *)radio_inbox[at],			\
+                        radio_inbox_len[at]);				\
+                      return 1;						\
+                    }							\
                     if (radio_link == 0					\
                          || !radio_take(RADIO_DATA, radio_link, NULL,	\
                          &num, body, &len)){				\
@@ -1835,106 +1876,18 @@ void register_lua_modules(lua_State *L) {
   tpbot_register_globals(L);
 }
 
-static lua_State *lua_state;
-
-// One Lua call at a time. The script at boot and every handler run on the
-// one lua_State; a handler started while another call sleeps would run on
-// top of it, and the state breaks when the two end out of order. So an
-// event that comes while Lua runs waits, and is handled when the call is
-// over, in the order the events came. The line is short and fixed: an
-// event that finds it full is dropped, and counted
-// (microbit.eventsDropped()). The port's event that the REPL waits for
-// never is: the port is armed for one at a time, so one lost would leave
-// the REPL deaf. It waits apart, one at most, and goes first.
-
-#define LUA_EVENTS_WAITING 16
-
-typedef struct {
-  uint16_t source;
-  uint16_t value;
-  CODAL_TIMESTAMP timestamp;
-} LuaEvent;
-
-static bool lua_running = false;
-static LuaEvent lua_waiting[LUA_EVENTS_WAITING];
-static int lua_waiting_first = 0;
-static int lua_waiting_count = 0;
-static bool lua_port_waiting = false;
-static LuaEvent lua_port_event;
-
-static void lua_event_wait(const LuaEvent &e) {
-  if (e.source == DEVICE_ID_SERIAL && e.value == CODAL_SERIAL_EVT_HEAD_MATCH) {
-    lua_port_event = e;
-    lua_port_waiting = true;
-  } else if (lua_waiting_count == LUA_EVENTS_WAITING) {
-    lua_events_dropped++;
-  } else {
-    int at = (lua_waiting_first + lua_waiting_count) % LUA_EVENTS_WAITING;
-    lua_waiting[at] = e;
-    lua_waiting_count++;
-  }
-}
-
-static bool lua_event_next(LuaEvent &e) {
-  if (lua_port_waiting) {
-    e = lua_port_event;
-    lua_port_waiting = false;
-    return true;
-  }
-  if (lua_waiting_count == 0)
-    return false;
-  e = lua_waiting[lua_waiting_first];
-  lua_waiting_first = (lua_waiting_first + 1) % LUA_EVENTS_WAITING;
-  lua_waiting_count--;
-  return true;
-}
-
-// The script's on_event, called for one event
-static void lua_event_handle(const LuaEvent &e) {
-  lua_getglobal(lua_state, "on_event");
-  if (!lua_isfunction(lua_state, -1)) {
-    lua_pop(lua_state, 1);
-    return;
-  }
-  lua_pushinteger(lua_state, e.source);
-  lua_pushinteger(lua_state, e.value);
-  lua_pushinteger(lua_state, e.timestamp);
-  if (lua_pcall(lua_state, 3, 0, 0) != LUA_OK) {
-    const char *err = lua_tostring(lua_state, -1);
-    if (err) {
-      uBit.display.scroll(err);
-    }
-    lua_pop(lua_state, 1);
-  }
-}
-
-void lua_call_begin(void) {
-  lua_running = true;
-}
-
-// The events that waited, then Lua is free. Fibers take turns only where
-// one sleeps or waits, so nothing comes between the last look at the line
-// and lua_running going false.
-void lua_call_end(void) {
-  LuaEvent e;
-  while (lua_event_next(e))
-    lua_event_handle(e);
-  lua_running = false;
+// A handler's mistake, on the display (source/lua-events.c)
+extern "C" void lua_events_show_error(const char *message) {
+  uBit.display.scroll(message);
 }
 
 // Runs in a dedicated fiber (spawned by on_codal_event).  Has a full
 // fiber stack so lua_pcall won't overflow the idle or interrupt stacks.
 static void lua_event_handler_fiber(void *arg) {
   codal::Event *event = (codal::Event *)arg;
-  LuaEvent e = { event->source, event->value, event->timestamp };
+  LuaEvent e = { event->source, event->value, (uint64_t)event->timestamp };
   delete event;
-  if (lua_running) {
-    lua_event_wait(e);
-    return;
-  }
-  lua_call_begin();
-  lua_event_handle(e);
-  lua_call_end();
+  lua_event_arrived(e);
 }
 
 // Called by the MessageBus for every event matching DEVICE_ID_ANY /
@@ -1972,7 +1925,7 @@ static void on_codal_event(codal::Event e, void *arg) {
 }
 
 void register_lua_event_listener(lua_State *L) {
-  lua_state = L;
+  lua_events_open(L, DEVICE_ID_SERIAL, CODAL_SERIAL_EVT_HEAD_MATCH);
   uBit.messageBus.listen(DEVICE_ID_ANY, DEVICE_EVT_ANY,
                          on_codal_event, NULL,
                          MESSAGE_BUS_LISTENER_IMMEDIATE);

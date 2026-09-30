@@ -27,7 +27,11 @@ extern const LuaMeta __lua_meta;
 #include "MicroBitUARTService.h"
 #endif
 #include "codal-lua.h"
+#include "lua-events.h"
 #include "stack-probe.h"
+
+// Characters the port holds for the REPL while the script at boot runs
+#define LUA_TYPED_AHEAD 64
 
 // Stack high-water reporting (see stack-probe.c). The probe is always active;
 // the output only appears when DMESG is enabled (DMESG_SERIAL_DEBUG).
@@ -156,6 +160,10 @@ int main() {
     luaopen_math(L);
 
     LUA_MEM_REPORT(L, "stdlib");
+
+    // The port keeps what is typed while the script runs, for the REPL to
+    // read when it starts: up to LUA_TYPED_AHEAD characters.
+    uBit.serial.setRxBufferSize(LUA_TYPED_AHEAD);
 
     register_lua_modules(L);
     // Register the MessageBus listener BEFORE running the script so that
