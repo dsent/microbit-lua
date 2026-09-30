@@ -20,10 +20,11 @@ extern "C" {
 
 // The smallest region the limits fit in: below 3,840 bytes the safe point's
 // margin and the first limit's leave nothing. The linker patches refuse a
-// __StackSize below it (their ASSERT), so no such firmware is built; that
-// stops it where the size is set, where a check at boot would stop a board
-// already flashed. The Compy's own script needs more to be read at all,
-// about 7 KB (docs/ram-usage.md).
+// __StackSize below it (their ASSERT, 0x1000 there): no such firmware is
+// built, which stops it where the size is set, where a check at boot would
+// stop a board already flashed. lua-cstack.c checks, as it compiles, that
+// it holds the margins. The Compy's own script needs more to be read at
+// all, about 7 KB (docs/ram-usage.md).
 #define LUA_CSTACK_REGION_MIN       4096
 
 // Each limit is 0 where its margin does not fit, and no less: a stack too

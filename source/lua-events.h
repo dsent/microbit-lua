@@ -56,10 +56,11 @@ void lua_call_begin(void);
 void lua_call_end(void);
 
 // The program at boot, size bytes of text: loaded, stripped of its line
-// info, and run as lua_events_boot runs it, or said as a compile error.
+// info, and run as lua_events_boot runs it, or said as a compile error, or
+// as too big for the heap; whether it loaded.
 // stage(), if given, is called once it has loaded and once it is stripped,
 // with "loaded" and "stripped", for the firmware's memory reports.
-void lua_events_boot_program(lua_State *L, const char *text, size_t size,
+bool lua_events_boot_program(lua_State *L, const char *text, size_t size,
                              void (*stage)(lua_State *L, const char *name));
 
 // The script at boot, loaded and on top of the stack, run as such a call;

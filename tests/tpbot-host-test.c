@@ -23,7 +23,7 @@
 #include "tpbot.h"
 #include "host-cstack.h"
 
-void lua_strip_debug(lua_State *L);
+#include "lua-strip-debug.h"
 
 // What the bus does with each write in a case.
 enum plan { ALL_TAKEN, NONE_TAKEN, ONE_REFUSED, REFUSED_FROM, EDU_ONLY };

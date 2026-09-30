@@ -33,6 +33,12 @@
 #include "lua-cstack.h"
 #include "stack-probe.h"
 
+// The smallest region the linker takes must hold the limits' margins
+_Static_assert(LUA_CSTACK_REGION_MIN
+               >= LUA_CSTACK_FULL_MARGIN + LUA_SAFE_POINT_MARGIN
+               && LUA_CSTACK_REGION_MIN >= LUA_CSTACK_OVERFULL_MARGIN,
+               "LUA_CSTACK_REGION_MIN is below the margins it must hold");
+
 int luai_cstack(void) {
   return lua_cstack_level(stack_probe_current(), stack_probe_region());
 }

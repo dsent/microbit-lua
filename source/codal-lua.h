@@ -21,6 +21,6 @@ void port_mistake(const char *what, const char *message);
 // Whether the serial port is the USB one, the Compy's console
 extern bool port_is_console;
 
-extern "C" void lua_strip_debug(lua_State *L);
+#include "lua-strip-debug.h"
 
 #endif

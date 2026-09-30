@@ -29,7 +29,7 @@
 #include "host-cstack.h"
 #include "tpbot.h"
 
-void lua_strip_debug(lua_State *L);
+#include "lua-strip-debug.h"
 
 enum {
   ID_BUTTON_A = 1, ID_BUTTON_B = 2, ID_BUTTON_AB = 3, ID_DISPLAY = 7,
@@ -466,6 +466,10 @@ static int panic(lua_State *L) {
   exit(3);
 }
 
+// A script at boot that does not load stops the tests, but where a test
+// looks for that
+static int boot_may_fail;
+
 // Boot the board with text as its script, as the firmware does
 static void boot_script(const char *text, size_t length) {
   lua_State *L;
@@ -481,7 +485,10 @@ static void boot_script(const char *text, size_t length) {
   lua_settop(L, 0);
   lua_modules_open(L, modules);
   lua_events_open(L, &events_config);
-  lua_events_boot_program(L, text, length, NULL);
+  if (!lua_events_boot_program(L, text, length, NULL) && !boot_may_fail) {
+    fprintf(stderr, "the script at boot did not load:%s\n", out);
+    exit(2);
+  }
   note("<booted>");
 }
 
@@ -1646,12 +1653,34 @@ static void mistakes_named(void) {
   // One the parser finds names its line, the lines being stripped only
   // once the script has loaded, through the loader main.cpp boots with
   fresh();
+  boot_may_fail = 1;
   boot_alone("x = 1\ny = = 2\n");
+  boot_may_fail = 0;
   expect(strstr(out, "\r\nCompile error: program:2: unexpected symbol near "
                 "'='\r\n<error Compile error: ><error program:2: unexpected "
                 "symbol near '='><booted>") != NULL,
          "a script at boot that does not compile is said so, naming its "
          "line: program:2: ...");
+  {
+    // One too big for the heap is said so, not as a mistake in it
+    static char big[8192];
+    int i, loaded;
+    for (i = 0; i < 400; i++)
+      strcat(big, "x = 1 ");
+    fresh();
+    boot("");
+    lua_gc(board_L, LUA_GCCOLLECT, 0);
+    heap_limit = heap_used + 2000;
+    out[0] = 0;
+    loaded = lua_events_boot_program(board_L, big, strlen(big), NULL);
+    heap_limit = (size_t)-1;
+    expect(!loaded && strstr(out, "\r\nToo big: the program does not fit in "
+                             "the micro:bit's memory; make it smaller\r\n"
+                             "<error Too big>")
+           != NULL && strstr(out, "Compile error") == NULL,
+           "a script too big for the heap is said to be, not a compile "
+           "error");
+  }
   fresh();
   boot("");
   said = line("local t t.x = 1");

@@ -6,7 +6,7 @@
  
 -    __StackSize = 0x800;    /* DEVICE_STACK_SIZE = 2048 */
 +    __StackSize = 0x2000;    /* increased: DEVICE_STACK_SIZE = 8192 */
-+    /* the C stack limits (source/lua-cstack.h) need 4 KB */
++    /* LUA_CSTACK_REGION_MIN (source/lua-cstack.h): the limits need 4 KB */
 +    ASSERT(__StackSize >= 0x1000, "__StackSize is below the 4 KB the C stack limits need (source/lua-cstack.h)")
  
      .bss :

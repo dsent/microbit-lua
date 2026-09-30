@@ -45,6 +45,7 @@
 #include "board-alloc.h"
 #include "lua-cstack.h"
 #include "lua-events.h"
+#include "lua-strip-debug.h"
 
 // How long a sleep that handles events sleeps at a time, in ms
 #define SLICE 10
@@ -367,17 +368,24 @@ void lua_events_boot(lua_State *L) {
   lua_call_end();
 }
 
-void lua_strip_debug(lua_State *L);
-
 // The script at boot is loaded as "=program": where Lua gives one of its
 // mistakes a position, the position is "program", with no line once its
 // line info is stripped (ldebug-no-line.patch, lauxlib-no-line.patch),
 // which is done as soon as it has loaded; a mistake the parser finds still
-// names its line. One that
-// does not compile is said as a compile error, and shown, and nothing runs.
-void lua_events_boot_program(lua_State *L, const char *text, size_t size,
+// names its line. One that does not compile is said as a compile error, and
+// shown, and nothing runs; one too big for the heap is said so, not as a
+// mistake in it.
+bool lua_events_boot_program(lua_State *L, const char *text, size_t size,
                              void (*stage)(lua_State *L, const char *name)) {
-  if (luaL_loadbuffer(L, text, size, "=program") != 0) {
+  int status = luaL_loadbuffer(L, text, size, "=program");
+  if (status == LUA_ERRMEM) {
+    lua_events_port_error("Too big: ", "the program does not fit in the "
+                          "micro:bit's memory; make it smaller");
+    lua_events_show_error("Too big", true);
+    lua_pop(L, 1);
+    return false;
+  }
+  if (status != 0) {
     const char *err = lua_tostring(L, -1);
     if (err)
       lua_events_port_error("Compile error: ", err);
@@ -385,7 +393,7 @@ void lua_events_boot_program(lua_State *L, const char *text, size_t size,
     if (err)
       lua_events_show_error(err, true);
     lua_pop(L, 1);
-    return;
+    return false;
   }
   if (stage)
     stage(L, "loaded");
@@ -393,6 +401,7 @@ void lua_events_boot_program(lua_State *L, const char *text, size_t size,
   if (stage)
     stage(L, "stripped");
   lua_events_boot(L);
+  return true;
 }
 
 // microbit.eventRepl(): the REPL runs a command for the port's event, and
