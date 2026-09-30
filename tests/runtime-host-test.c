@@ -213,6 +213,26 @@ int tpbot_echo_us(void) { return -1; }
 static char far_end[1024];
 static int linked;
 
+// Or, once listen() is called, a board that calls this one: it types what
+// the test gives it, and hears what this one says. It hangs up after a few
+// looks, which ends listen() with an error.
+static const char *caller_types;
+static char caller_hears[1024];
+static int listening, looks;
+
+static int l_listen(lua_State *L) {
+  (void)L;
+  listening = 1;
+  return 0;
+}
+
+static int l_answered(lua_State *L) {
+  if (listening && ++looks > 3)
+    return luaL_error(L, "hung up");
+  lua_pushboolean(L, 0);
+  return 1;
+}
+
 static int l_connect(lua_State *L) {
   linked = 1;
   lua_pushboolean(L, 1);
@@ -222,6 +242,12 @@ static int l_connect(lua_State *L) {
 static int l_tx(lua_State *L) {
   const char *text = luaL_checkstring(L, 1);
   size_t n = strlen(far_end);
+  if (listening) {
+    n = strlen(caller_hears);
+    snprintf(caller_hears + n, sizeof caller_hears - n, "%s", text);
+    lua_pushboolean(L, 1);
+    return 1;
+  }
   snprintf(far_end + n, sizeof far_end - n, "=> %s\n", text);
   lua_pushboolean(L, 1);
   post(ID_RADIO, 1);
@@ -229,6 +255,11 @@ static int l_tx(lua_State *L) {
 }
 
 static int l_rx(lua_State *L) {
+  if (listening && caller_types) {
+    lua_pushstring(L, caller_types);
+    caller_types = NULL;
+    return 1;
+  }
   if (!linked || !far_end[0]) {
     lua_pushnil(L);
     return 1;
@@ -348,8 +379,8 @@ static const LuaApi l_serial[] = {
   {"eventAfterAsync", l_arm, 0}, {NULL, NULL, 0}
 };
 static const LuaApi l_radio[] = {
-  {"enable", l_nothing, 0}, {"listen", l_nothing, 0},
-  {"connect", l_connect, 0}, {"answered", l_nothing, 0},
+  {"enable", l_nothing, 0}, {"listen", l_listen, 0},
+  {"connect", l_connect, 0}, {"answered", l_answered, 0},
   {"tx", l_tx, 0}, {"rx", l_rx, 0}, {NULL, NULL, 0}
 };
 #define X(name, function) {#name, function, 0},
@@ -386,6 +417,9 @@ static void fresh(void) {
   lost = 0;
   linked = 0;
   far_end[0] = 0;
+  caller_types = NULL;
+  caller_hears[0] = 0;
+  listening = looks = 0;
   out[0] = 0;
   typed_at = typed_len = 0;
   armed = 0;
@@ -1220,6 +1254,28 @@ static void every_drop_counted(void) {
          "... and a program with no on_event counts none");
 }
 
+// listen() serves a board that calls over the radio: a prompt, and the
+// answer to a line. The session it serves is made then: booted, the
+// firmware's script holds no more Lua heap than this, on the 64-bit host.
+#define BOOTED_HEAP 44100
+
+static void serving_a_link(void) {
+  const char *said;
+  char what[128];
+  fresh();
+  boot("");
+  lua_gc(board_L, LUA_GCCOLLECT, 0);
+  snprintf(what, sizeof what, "booted, the firmware's script holds %zu "
+           "bytes of Lua heap, at most %d", heap_used, BOOTED_HEAP);
+  expect(heap_used <= BOOTED_HEAP, what);
+  caller_types = "6*7\r";
+  said = line("listen('zezop')");
+  expect(strcmp(caller_hears, "> => 42\n> ") == 0,
+         "listen() gives a caller the prompt, and the answer to its line");
+  expect(strstr(said, "hung up") != NULL && armed,
+         "... and the prompt is back when the caller hangs up");
+}
+
 // The radio's inbox: made when the first link opens, not before
 static void the_radio_inbox(void) {
   uint8_t body[RADIO_INBOX_BODY];
@@ -1583,6 +1639,7 @@ int main(int argc, char **argv) {
   round_two();
   what_waiting_costs();
   every_drop_counted();
+  serving_a_link();
   the_radio_inbox();
   a_full_c_stack();
   deep_coroutines();

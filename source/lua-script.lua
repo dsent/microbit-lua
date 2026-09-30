@@ -383,10 +383,8 @@ uBit.eventFallback(dispatch)
 -- connect(name, timeout) calls, then carries the port over:
 -- what is typed here goes out, what comes back is printed.
 
-local radio_session = make_session({
-  crlf_before_result = false,
-  send = function(text) radio.tx(text) end
-})
+-- made when listen() is first called: most boards never serve a link
+local radio_session
 
 
 -- A piece of the link, as much or as little as arrived: what
@@ -411,6 +409,10 @@ local function greet()
 end
 
 function listen(name)
+  radio_session = radio_session or make_session({
+    crlf_before_result = false,
+    send = function(text) radio.tx(text) end
+  })
   radio.enable()
   radio.listen(name)
   greet()
