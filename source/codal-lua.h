@@ -18,6 +18,9 @@ void register_lua_event_listener(lua_State *L);
 // first ("Runtime error: "), with nothing taken from the heap
 void port_mistake(const char *what, const char *message);
 
+// Whether the serial port is the USB one, the Compy's console
+extern bool port_is_console;
+
 extern "C" void lua_strip_debug(lua_State *L);
 
 #endif

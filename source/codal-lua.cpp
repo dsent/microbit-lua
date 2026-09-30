@@ -717,6 +717,9 @@ ManagedString luaL_checkManagedString(lua_State *L, int narg) {
     F(redirect,   { Pin *tx = luaL_checkPin(L, 1);			\
                     Pin *rx = luaL_checkPin(L, 2);			\
                     int r = uBit.serial.redirect(*tx, *rx);		\
+                    if (r == DEVICE_OK)					\
+                      port_is_console = tx == &uBit.io.usbTx		\
+                                        && rx == &uBit.io.usbRx;	\
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
@@ -1732,6 +1735,10 @@ extern "C" void lua_events_show_error(const char *message, bool wait) {
     uBit.display.scrollAsync(message);
 }
 
+// Whether the serial port is the USB one, the Compy's console: a program
+// may redirect it to pins of its own, to drive another device
+bool port_is_console = true;
+
 void port_mistake(const char *what, const char *message) {
   static const char NEWLINE[] = "\r\n";
   uBit.serial.send((uint8_t *)NEWLINE, sizeof NEWLINE - 1, SYNC_SLEEP);
@@ -1740,8 +1747,11 @@ void port_mistake(const char *what, const char *message) {
   uBit.serial.send((uint8_t *)NEWLINE, sizeof NEWLINE - 1, SYNC_SLEEP);
 }
 
+// A handler's mistake goes to the console, and never into the stream of a
+// device a program has put on the port
 extern "C" void lua_events_port_error(const char *message) {
-  port_mistake("Runtime error: ", message);
+  if (port_is_console)
+    port_mistake("Runtime error: ", message);
 }
 
 extern "C" void lua_events_arm_port(void) {
