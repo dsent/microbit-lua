@@ -150,6 +150,33 @@ function(stopped WORDS WHAT)
     check("${WHAT}" NOT _rc EQUAL 0 AND NOT _named EQUAL -1)
 endfunction()
 
+# Codex's decoy: resume's case 2 gone from ldo.c, and a whole copy of what
+# ldo-resume-cstack.patch leaves, under #if 0 at the end, for the reverse
+# to find at an offset
+patched_copy(decoy)
+set(_ldo "${WORK}/decoy/lua-5.1.5/src/ldo.c")
+file(READ "${_ldo}" _text)
+string(FIND "${_text}" "    case 2: luaD_throw(L, LUA_ERRERR);\n" _first)
+string(SUBSTRING "${_text}" 0 ${_first} _head)
+math(EXPR _next "${_first} + 1")
+string(SUBSTRING "${_text}" ${_next} -1 _tail)
+string(FIND "${_tail}" "    case 2: luaD_throw(L, LUA_ERRERR);\n" _second)
+math(EXPR _cut "${_next} + ${_second}")
+string(SUBSTRING "${_text}" 0 ${_cut} _head)
+string(LENGTH "    case 2: luaD_throw(L, LUA_ERRERR);\n" _len)
+math(EXPR _after "${_cut} + ${_len}")
+string(SUBSTRING "${_text}" ${_after} -1 _tail)
+file(READ "${ROOT}/source/ldo-resume-cstack.patch" _diff)
+string(REGEX REPLACE "\n(---|\\+\\+\\+|@@)[^\n]*" "" _post "\n${_diff}")
+string(REGEX REPLACE "\n-[^\n]*" "" _post "${_post}")
+string(REGEX REPLACE "\n[ +]" "\n" _post "${_post}")
+file(WRITE "${_ldo}" "${_head}${_tail}#if 0${_post}\n#endif\n")
+file(READ "${_ldo}" _text)
+string(FIND "${_text}" "#if 0\nstatic void resume" _decoyed)
+apply(decoy)
+stopped("Delete" "an ldo.c whose resume lost its case 2, a copy of the patch kept under #if 0, stops the build")
+check("... the decoy being there to find" NOT _decoyed EQUAL -1)
+
 # a patch left off the list, still in the file
 patched_copy(unlisted)
 apply(unlisted -DSKIP=ldo-text-only.patch)

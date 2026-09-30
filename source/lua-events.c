@@ -373,8 +373,10 @@ void lua_events_boot(lua_State *L) {
 // line info is stripped (ldebug-no-line.patch, lauxlib-no-line.patch),
 // which is done as soon as it has loaded; a mistake the parser finds still
 // names its line. One that does not compile is said as a compile error, and
-// shown, and nothing runs; one too big for the heap is said so, not as a
-// mistake in it.
+// shown, and nothing runs. One too big for Lua's heap is said so, not as a
+// mistake in it, where Lua's allocator can refuse: on this board CODAL
+// stops with panic 020 first (DEVICE_PANIC_HEAP_FULL), and only the host
+// tests, whose allocator refuses, see it.
 bool lua_events_boot_program(lua_State *L, const char *text, size_t size,
                              void (*stage)(lua_State *L, const char *name)) {
   int status = luaL_loadbuffer(L, text, size, "=program");
