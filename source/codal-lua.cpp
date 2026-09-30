@@ -1724,6 +1724,13 @@ extern "C" void lua_events_show_error(const char *message, bool wait) {
     uBit.display.scrollAsync(message);
 }
 
+extern "C" void lua_events_port_error(const char *message) {
+  static const char BEFORE[] = "\r\nRuntime error: ", AFTER[] = "\r\n";
+  uBit.serial.send((uint8_t *)BEFORE, sizeof BEFORE - 1, SYNC_SLEEP);
+  uBit.serial.send((uint8_t *)message, strlen(message), SYNC_SLEEP);
+  uBit.serial.send((uint8_t *)AFTER, sizeof AFTER - 1, SYNC_SLEEP);
+}
+
 extern "C" void lua_events_arm_port(void) {
   uBit.serial.eventAfter(1, ASYNC);
 }

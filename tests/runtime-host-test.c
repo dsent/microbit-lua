@@ -140,6 +140,12 @@ void lua_events_show_error(const char *message, bool wait) {
     then();
 }
 
+void lua_events_port_error(const char *message) {
+  note("\r\nRuntime error: ");
+  note(message);
+  note("\r\n");
+}
+
 void lua_events_arm_port(void) {
   armed = 1;
 }
@@ -1033,7 +1039,8 @@ static void round_two(void) {
     "microbit.display.scroll(shown == 0 and 'quiet' or 'noise')\n");
   expect(strstr(out, "<scroll quiet>") != NULL,
          "a scroll's end, and the port's own noise, reach no handler");
-  // A handler's mistake is shown without holding up the program
+  // A handler's mistake is shown without holding up the program, and goes
+  // to the port, for when the display is busy
   fresh();
   boot_program(
     "function on_event(s, v) error('oops') end\n"
@@ -1044,6 +1051,13 @@ static void round_two(void) {
   expect(strstr(out, "<error, going on ") != NULL
          && strstr(out, "<scroll went on>") != NULL,
          "a handler's mistake is shown without waiting for it");
+  expect(strstr(out, "\r\nRuntime error: oops\r\n")
+         != NULL, "... and goes to the port");
+  fresh();
+  boot_program("error('at boot')\n");
+  expect(strstr(out, "\r\nRuntime error: at boot"
+                "\r\n<error Lua error!>") != NULL,
+         "a mistake at boot goes to the port before it scrolls by");
   // sleep(0) lets other fibers run
   fresh();
   boot_program("microbit.sleep(0)");

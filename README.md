@@ -224,10 +224,12 @@ runs included, and the REPL reads them when it starts.
 `robot_move`'s own wait handles nothing: a button pressed while the robot
 drives is handled when the move is over.
 
-A mistake in a handler scrolls by on the display while the program goes on.
-A script that stops on a mistake at boot shows `Lua error!` and the message
-on the display, once, before anything else happens. The board then handles
-events with the `on_event` the script set before it stopped, if any.
+A mistake in a handler goes to the serial port as `Runtime error: ` and the
+message, and scrolls by on the display, if the display is free, while the
+program goes on. A script that stops on a mistake at boot sends it to the
+port the same way, then shows `Lua error!` and the message on the display,
+once, before anything else happens. The board then handles events with the
+`on_event` the script set before it stopped, if any.
 
 Lua's own `print` writes to stdout, which goes nowhere on this board; the
 firmware's script puts its own in its place, writing to the serial port.

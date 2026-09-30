@@ -235,9 +235,10 @@ static const char *mistake(lua_State *L, char text[LUAI_MAXNUMBER2STR]) {
   }
 }
 
-// A mistake in a handler is shown without waiting for it to scroll by:
-// the call that is running goes on. One in the handling of the port's
-// event may have left the port unarmed, and so the REPL deaf: it is armed.
+// A mistake in a handler goes to the port, and is shown without waiting
+// for it to scroll by: the call that is running goes on, and a display
+// that is busy shows nothing. One in the handling of the port's event may
+// have left the port unarmed, and so the REPL deaf: it is armed.
 static void handle(LuaEvent e, bool port) {
   bool outer = sleep_handles, outer_port = port_call;
   char text[LUAI_MAXNUMBER2STR];
@@ -247,8 +248,10 @@ static void handle(LuaEvent e, bool port) {
   port_call = port;
   if (lua_cpcall(state, call_handler, &c) != 0) {
     const char *err = mistake(state, text);
-    if (err)
+    if (err) {
+      lua_events_port_error(err);
       lua_events_show_error(err, false);
+    }
     lua_pop(state, 1);
     if (port)
       lua_events_arm_port();
@@ -353,6 +356,8 @@ void lua_events_boot(lua_State *L) {
   lua_call_begin();
   if (lua_pcall(L, 0, 0, 0) != 0) {
     const char *err = mistake(L, text);
+    if (err)
+      lua_events_port_error(err);
     lua_events_show_error("Lua error!", true);
     if (err)
       lua_events_show_error(err, true);

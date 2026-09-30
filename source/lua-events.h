@@ -56,8 +56,8 @@ void lua_call_begin(void);
 void lua_call_end(void);
 
 // The script at boot, loaded and on top of the stack, run as such a call;
-// a mistake is shown ("Lua error!", then the message) and the board goes
-// on handling events.
+// a mistake goes to the port and is shown ("Lua error!", then the
+// message), and the board goes on handling events.
 void lua_events_boot(lua_State *L);
 
 // microbit.sleep(ms): a safe point, where the running call handles the
@@ -81,6 +81,10 @@ int lua_events_line(lua_State *L);
 // shown, waiting for it to be seen or not; the time in ms; and a sleep that
 // lets other fibers run.
 void lua_events_show_error(const char *message, bool wait);
+
+// A mistake, written to the serial port on a line of its own, "Runtime
+// error: " first, with nothing taken from the heap
+void lua_events_port_error(const char *message);
 
 // The port armed for its next event, as microbit.serial.eventAfterAsync(1)
 // arms it
