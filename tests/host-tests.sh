@@ -10,8 +10,8 @@
 # - cstack-host-test: source/lua-cstack.c, whose limits follow the stack
 #   region's size;
 # - wait-audit.sh: every binding that waits looks for on_event first;
-# - lua-patch-test.cmake: the build's lua_patch, which applies each patch
-#   once and takes a file as patched only by the block it adds.
+# - lua-patch-test.cmake: the build's Lua patches, on Lua sources in each
+#   state libraries/ can hold.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

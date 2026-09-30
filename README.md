@@ -283,9 +283,10 @@ Classic at once.
   and the globals the REPL uses taken away;
 - `source/lua-cstack.c`'s limits at three stack sizes: they follow the size;
 - `tests/wait-audit.sh`: every binding that waits looks for `on_event` first;
-- `tests/lua-patch-test.cmake`: the build's `lua_patch` applies each Lua patch
-  once, and takes a file as patched only when it holds the block the patch
-  adds.
+- `tests/lua-patch-test.cmake`: the build's Lua patches go into a fresh Lua
+  as plain `patch` puts them, change nothing a second time, finish a file
+  patched in part, and stop the build, naming the way back, at a file whose
+  patched block has lost a line.
 
 It needs `cc`, `patch`, `cmake`, and the Lua tarball a firmware build leaves
 in `libraries/`, which it patches as the build does.

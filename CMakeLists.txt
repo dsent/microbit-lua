@@ -368,8 +368,9 @@ if(NOT EXISTS ${LUA_DIR})
     )
 endif()
 
-# Patches to the Lua sources, each applied once (source/lua-patch.cmake). To be
-# replaced by commits in the Lua fork.
+# Patches to the Lua sources, listed in the order they go in, then applied
+# once each by lua_patch_apply (source/lua-patch.cmake). To be replaced by
+# commits in the Lua fork.
 set(LUA_PATCH_DIR "${CMAKE_SOURCE_DIR}/source")
 include("${CMAKE_SOURCE_DIR}/source/lua-patch.cmake")
 
@@ -401,6 +402,7 @@ lua_patch(ldebug.c ldebug-no-line.patch)
 lua_patch(lauxlib.c lauxlib-no-line.patch)
 # A smaller string buffer on the C stack, so the check leaves more of it.
 lua_patch(luaconf.h luaconf-buffer.patch)
+lua_patch_apply()
 # Application sources build at -O2; this file is 1.3 KB smaller at -Os.
 set_source_files_properties("${CMAKE_SOURCE_DIR}/source/lua-number.c"
     PROPERTIES COMPILE_OPTIONS "-Os")
