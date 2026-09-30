@@ -149,14 +149,32 @@ void lua_events_pause(uint32_t ms) {
     pauses[pauses_done++]();
 }
 
-// A robot that takes every command; robot_move's sleep is the firmware's,
-// which lets other fibers run and handles no events.
-static int bus_writes;
+// Lua's heap, below: how much it holds, and how much it may
+static size_t heap_used, heap_limit;
+
+// A robot that takes every command, unless a test says which write fails,
+// and whether the heap runs out with it; what went to the bus, frame by
+// frame. robot_move's sleep is the firmware's, which lets other fibers run
+// and handles no events.
+static int bus_writes, bus_fails_at, bus_starves;
+static char bus_log[1024];
 
 int tpbot_i2c_write(int address, const char *data, size_t length) {
-  (void)address; (void)data; (void)length;
+  size_t i, n;
+  (void)address;
   bus_writes++;
-  return 0;
+  for (i = 0; i < length; i++) {
+    n = strlen(bus_log);
+    snprintf(bus_log + n, sizeof bus_log - n, i ? " %02X" : "%02X",
+             (unsigned char)data[i]);
+  }
+  n = strlen(bus_log);
+  snprintf(bus_log + n, sizeof bus_log - n, "|");
+  if (bus_writes != bus_fails_at)
+    return 0;
+  if (bus_starves)
+    heap_limit = heap_used;
+  return -1;
 }
 // robot_move's sleep, as the firmware binds it
 void tpbot_sleep(uint32_t ms) {
@@ -341,7 +359,8 @@ static void fresh(void) {
   send_trigger = NULL;
   send_fails = 0;
   posts_left = 1000;
-  bus_writes = 0;
+  bus_writes = bus_fails_at = bus_starves = 0;
+  bus_log[0] = 0;
   lost = 0;
   linked = 0;
   far_end[0] = 0;
@@ -353,9 +372,8 @@ static void fresh(void) {
   on_error = NULL;
 }
 
-// The heap: how much Lua holds, and how much it may, for the tests that
-// run it out
-static size_t heap_used, heap_limit = (size_t)-1;
+// The heap, for the tests that run it out
+static size_t heap_limit = (size_t)-1;
 
 static void *alloc(void *ud, void *ptr, size_t old, size_t size) {
   (void)ud;
@@ -1256,6 +1274,33 @@ static void text_only(void) {
          "... and string.dump of a function that fits still dumps it");
 }
 
+// A robot_move whose Classic frame fails, the heap running out with it,
+// after the Edu's has started the motors: both stops go out before the
+// message is made
+static void a_move_that_fails(void) {
+  static const char FRAMES[] =
+    "FF F9 10 03 32 32 00|01 32 32 00|FF F9 10 03 00 00 00|01 00 00 03|";
+  const char *said;
+  int status;
+  fresh();
+  boot("");
+  bus_fails_at = 2;
+  bus_starves = 1;
+  lua_pushcfunction(board_L, tpbot_robot_move);
+  lua_pushinteger(board_L, 50);
+  lua_pushinteger(board_L, 50);
+  lua_pushinteger(board_L, 1);
+  status = lua_pcall(board_L, 3, 0, 0);
+  heap_limit = (size_t)-1;
+  lua_pop(board_L, 1);
+  expect(status != 0 && strcmp(bus_log, FRAMES) == 0,
+         "a move whose second frame fails as the heap runs out still stops "
+         "both robots");
+  bus_fails_at = 0;
+  said = line("6*7");
+  expect(strstr(said, "=> 42\r\n> ") != NULL, "... and the REPL answers");
+}
+
 // A sleep deep in the stack runs no handlers: their events wait for the
 // call to return
 static void deep_sleeps(void) {
@@ -1331,6 +1376,7 @@ int main(int argc, char **argv) {
   deep_coroutines();
   deep_patterns();
   text_only();
+  a_move_that_fails();
   deep_sleeps();
   codex_round_nine();
   programs_alone();

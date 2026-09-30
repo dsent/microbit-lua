@@ -123,6 +123,12 @@ int tpbot_set_car_light(lua_State *L) {
 // still, so a stopped wheel gets the bit. Both frames are built before
 // either goes out. unanswered says the Edu's frame went to the bus and no
 // robot took it, so no robot moved and none would hear a stop either.
+//
+// 1 is a mistake in the speeds, found before anything goes out, with its
+// message pushed; NO_ANSWER, a frame no robot took, with nothing pushed:
+// a motor may be running, and making the message could run out of memory
+// before the stop goes out.
+#define NO_ANSWER 2
 static int unanswered = 0;
 
 static int set_motors_speed(lua_State *L, int left, int right) {
@@ -143,16 +149,20 @@ static int set_motors_speed(lua_State *L, int left, int right) {
   classic[3] = (char)(d + e);
   unanswered = 1;
   if (send(16, edu, 3))
-    return stop_with(L, tpbot_no_answer);
+    return NO_ANSWER;
   unanswered = 0;
   if (to_robot(classic, 4))
-    return stop_with(L, tpbot_no_answer);
+    return NO_ANSWER;
   return 0;
 }
 
 int tpbot_set_motors_speed(lua_State *L) {
+  int failed;
   lua_settop(L, 2);
-  if (set_motors_speed(L, 1, 2))
+  failed = set_motors_speed(L, 1, 2);
+  if (failed == NO_ANSWER)
+    return say(L, tpbot_no_answer);
+  if (failed)
     return lua_error(L);
   return 0;
 }
@@ -189,7 +199,9 @@ int tpbot_robot_info(lua_State *L) {
 
 // The motors never start without a time to stop after, and the stop is
 // tried whenever a motor may be running, even when something failed on
-// the way: always, unless no robot answered.
+// the way: always, unless no robot answered. Between the start and the
+// stop nothing can raise an error: the sleep's look for on_event is
+// protected, and a message is made only once both stops have gone out.
 #define MAX_SECONDS 3600
 #define STRING(x) #x
 #define TEXT(x) STRING(x)
@@ -212,6 +224,8 @@ int tpbot_robot_move(lua_State *L) {
   }
   if (!failed || !unanswered)
     stop_failed = stop_motors();
+  if (failed == NO_ANSWER)
+    return say(L, tpbot_no_answer);
   if (failed)
     return lua_error(L);
   if (stop_failed)
