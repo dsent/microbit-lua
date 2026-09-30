@@ -178,7 +178,9 @@ Image luaL_checkimage(lua_State *L, int narg) {
     F(clear,      { uBit.display.clear();				\
                     return 0;						\
                   })							\
-    F(readLightLevel, { int r = uBit.display.readLightLevel();		\
+    F(readLightLevel, { lua_events_before_wait();			\
+                    /* the first reading sleeps while the LEDs measure */ \
+                    int r = uBit.display.readLightLevel();		\
                     lua_pushinteger(L, r);				\
                     return 1;						\
                   })							\

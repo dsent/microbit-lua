@@ -3,12 +3,13 @@
 # run, calls lua_events_before_wait() first: an on_event a program has just
 # set then gets the events that come while it waits. A binding is an
 # F(name, { ... }) in one of the function lists; it waits when it names
-# SYNC_SLEEP, a sleep, a display's print, scroll or animate, or getPulseUs.
+# SYNC_SLEEP, a sleep, a display's print, scroll or animate, getPulseUs, or
+# readLightLevel, whose first reading sleeps.
 # Waits inside the functions a binding calls are for their own reading.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-awk -v WAITS='SYNC_SLEEP|[.]sleep[(]|display[.](print|scroll|animate)[(]|getPulseUs[(]' '
+awk -v WAITS='SYNC_SLEEP|[.]sleep[(]|display[.](print|scroll|animate)[(]|getPulseUs[(]|readLightLevel[(]' '
 function check() {
   if (body ~ WAITS && body !~ /lua_events_before_wait/) {
     printf "%s:%d: %s waits without lua_events_before_wait()\n", FILENAME, start, name
