@@ -193,7 +193,9 @@ end
 print = say
 
 collectgarbage("setpause", 100)
-say("micro:bit\nLua 5.1 REPL\nfirmware " .. uBit.version())
+-- "unknown" where the firmware gives no version
+local version = uBit.version and uBit.version() or "unknown"
+say("micro:bit\nLua 5.1 REPL\nfirmware " .. version)
 
 local function execute(chunk)
   local results = { pcall(chunk) }
