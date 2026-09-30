@@ -176,6 +176,11 @@ modules are `microbit.accelerometer`, `microbit.compass`, `microbit.audio`,
 robot. The firmware's own script requires `microbit` and all its
 namespaces above, and `tpbot`, so the prompt has them all.
 
+A build with `DEVICE_BLE` on has `microbit.ble.uart` as well. Its `read(n)`,
+like `microbit.serial.read(n)`, returns every byte read, a zero byte
+included; CODAL's own `read(n)` for the BLE UART stops at the first zero.
+Both take from 0 to 4096 bytes at a time.
+
 
 ## Events
 
@@ -236,13 +241,13 @@ drives is handled when the move is over.
 A mistake in a handler goes to the serial port as `Runtime error: ` and the
 message, unless a program has redirected the port to other pins
 (`microbit.serial.redirect(microbit.io.getPin(30), microbit.io.getPin(31))`
-puts it back on USB), and scrolls
-by on the display, if the display is free, while the program goes on. A
-script that stops on a mistake at boot sends it to the port the same way,
-then shows `Lua error!` and the message on the display, once, before
-anything else happens; the board then handles events with the `on_event` the
-script set before it stopped, if any. A script that does not compile sends
-`Compile error: ` and the message to the port, and scrolls them by.
+puts it back on USB), and scrolls by on the display, if the display is free,
+while the program goes on. A script that stops on a mistake at boot sends it
+to the port the same way, then shows `Lua error!` and the message on the
+display, once, before anything else happens; the board then handles events
+with the `on_event` the script set before it stopped, if any. A script that
+does not compile sends `Compile error: ` and the message to the port, and
+scrolls them by.
 
 Lua's own `print` writes to stdout, which goes nowhere on this board; the
 firmware's script puts its own in its place, writing to the serial port.
