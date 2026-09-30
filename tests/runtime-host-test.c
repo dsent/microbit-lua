@@ -174,10 +174,15 @@ static int pauses_all;
 
 static void others_run(void);
 
+// What happens at every pause, after what was planned for it
+static Action every_pause;
+
 void lua_events_pause(uint32_t ms) {
   pauses_all++;
   clock_ms += ms;
   others_run();
+  if (every_pause)
+    every_pause();
   if (pauses_done < pauses_planned)
     pauses[pauses_done++]();
 }
@@ -254,7 +259,11 @@ static int far_gone, far_listens, far_busy, far_sending, neighbours;
 static char far_heard[1024];
 static int board_acks;
 
-enum { KIND_HELLO = 0xA1, KIND_DATA = 0xA3, KIND_ACK = 0xA4, LINK = 7 };
+// The frames' kinds and the protocol's version, as the link has them
+enum {
+  KIND_HELLO = 0xA1, KIND_DATA = 0xA3, KIND_ACK = 0xA4, KIND_FIRST = 0xA5,
+  VERSION = 2, LINK = 7
+};
 
 static void air_put(Air *a, const uint8_t *frame, int len) {
   int at;
@@ -317,6 +326,7 @@ static void board_fibers(void) {
 static void far_runs(void) {
   uint8_t body[RADIO_BODY];
   int len;
+  bool starts;
   if (far_gone)
     return;
   if (far_listens && far_link.link == 0)
@@ -329,7 +339,8 @@ static void far_runs(void) {
     static const uint8_t theirs[] = { KIND_DATA, LINK + 1, 1, 'h', 'i' };
     air_put(&board_air, theirs, sizeof theirs);
   }
-  while (!far_busy && !far_sending && radio_link_rx(&far_link, body, &len)) {
+  while (!far_busy && !far_sending && radio_link_rx(&far_link, body, &len,
+                                                          &starts)) {
     size_t n = strlen(far_heard);
     snprintf(far_heard + n, sizeof far_heard - n, "%.*s", len, (char *)body);
   }
@@ -357,8 +368,9 @@ static int far_says(const char *text) {
 
 // The other board calls this one, and opens its end as the answer will
 static void far_calls(void) {
-  uint8_t hello[RADIO_HEAD + RADIO_NAME * 2] = { KIND_HELLO, LINK, 0 };
+  uint8_t hello[RADIO_HEAD + RADIO_NAME * 2 + 1] = { KIND_HELLO, LINK, 0 };
   memcpy(hello + RADIO_HEAD, "zezopgigat", RADIO_NAME * 2);
+  hello[RADIO_HEAD + RADIO_NAME * 2] = VERSION;
   air_put(&board_air, hello, sizeof hello);
   radio_link_open(&far_link, LINK, "zezop");
 }
@@ -402,14 +414,20 @@ static int link_tx(lua_State *L) {
   return 1;
 }
 
+static int board_took;
+
 static int link_rx(lua_State *L) {
   uint8_t body[RADIO_BODY];
   int len;
-  if (radio_link_rx(&board_link, body, &len))
-    lua_pushlstring(L, (const char *)body, len);
-  else
+  bool starts;
+  if (!radio_link_rx(&board_link, body, &len, &starts)) {
     lua_pushnil(L);
-  return 1;
+    return 1;
+  }
+  board_took++;
+  lua_pushlstring(L, (const char *)body, len);
+  lua_pushboolean(L, starts);
+  return 2;
 }
 
 // Both ends as a new test finds them: no link, nothing on the air
@@ -654,6 +672,7 @@ static void fresh(void) {
   far_end[0] = 0;
   no_link();
   on_move = NULL;
+  every_pause = NULL;
   caller_types = NULL;
   caller_hears[0] = 0;
   listening = looks = 0;
@@ -1625,7 +1644,7 @@ static void far_types_lines(void) {
 // The piece the other board sent last, sent again, as when this board's
 // answer to it was lost
 static void far_sends_again(void) {
-  uint8_t frame[RADIO_FRAME] = { KIND_DATA, LINK, 0 };
+  uint8_t frame[RADIO_FRAME] = { KIND_FIRST, LINK, 0 };
   frame[2] = far_link.out;
   memcpy(frame + RADIO_HEAD, "10+1\n", 5);
   air_put(&board_air, frame, RADIO_HEAD + 5);
@@ -1677,12 +1696,71 @@ static void lines_during_a_move(void) {
          "a piece that comes again is answered again, and runs once");
 }
 
+// While the robot drives, six lines take six of its inbox's eight pieces,
+// and a line of 60 bytes the last two, finding no room for its third; once
+// the robot has taken all the inbox held, the next line
+static const char CUT_LINE[] =
+  "hit = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n";
+static int cut_lost, cut_done, next_sent;
+
+static void far_fills_the_inbox(void) {
+  static const char *const six[] = {
+    "1\n", "2\n", "3\n", "4\n", "5\n", "6\n", NULL };
+  int i;
+  for (i = 0; six[i]; i++)
+    far_says(six[i]);
+  cut_lost = !far_says(CUT_LINE);
+  cut_done = 1;
+  board_took = 0;
+}
+
+static void far_says_the_next_line(void) {
+  // the six lines and the two pieces
+  if (cut_done && !next_sent && board_took == 8) {
+    next_sent = 1;
+    far_says("20+2\n");
+  }
+}
+
+// A line that crosses a full inbox is lost whole: of it, nothing runs, and
+// the line after it runs as it was sent
+static void a_line_cut_short(void) {
+  fresh();
+  real_link = 1;
+  boot("");
+  far_calls();
+  looks_left = 40;
+  cut_lost = cut_done = next_sent = 0;
+  plan(far_sends_a_move);
+  on_move = far_fills_the_inbox;
+  every_pause = far_says_the_next_line;
+  expect(strlen(CUT_LINE) == 60, "the line is 60 bytes, three pieces");
+  line("listen('gigat')");
+  expect(cut_lost && next_sent,
+         "a line that finds the inbox full after two of its pieces is lost");
+  expect(strcmp(far_heard, "> > => 1\n> => 2\n> => 3\n> => 4\n> => 5\n"
+                "> => 6\n> => 22\n> ") == 0,
+         "... nothing of it runs, and the next line runs clean");
+}
+
+// A call from a board whose link is an older version is not answered
+static void an_older_link(void) {
+  uint8_t hello[RADIO_HEAD + RADIO_NAME * 2] = { KIND_HELLO, LINK, 0 };
+  fresh();
+  memcpy(hello + RADIO_HEAD, "zezopgigat", RADIO_NAME * 2);
+  air_put(&board_air, hello, sizeof hello);
+  expect(!radio_link_called(&board_link, "zezop", NULL)
+         && board_link.link == 0 && far_air.count == 0,
+         "a call from a board with an older link is not answered");
+}
+
 // The other board's inbox: what it holds, in order, taken out of it
 static void far_inbox(char *text, size_t size) {
   uint8_t body[RADIO_BODY];
   int len;
+  bool starts;
   text[0] = 0;
-  while (radio_link_rx(&far_link, body, &len)) {
+  while (radio_link_rx(&far_link, body, &len, &starts)) {
     size_t n = strlen(text);
     snprintf(text + n, size - n, "%.*s", len, (char *)body);
   }
@@ -1756,12 +1834,13 @@ static void a_line_not_taken(void) {
 // The radio's inbox: made when the first link opens, not before; with
 // none, a piece waits on the air for rx
 static void the_radio_inbox(void) {
-  uint8_t frame[RADIO_HEAD + 2] = { KIND_DATA, LINK, 1, 'h', 'i' };
+  uint8_t frame[RADIO_HEAD + 2] = { KIND_FIRST, LINK, 1, 'h', 'i' };
   uint8_t body[RADIO_BODY];
   int len = 0, before;
+  bool starts = false;
   fresh();
   before = board_allocs;
-  expect(board_link.inbox == NULL && !radio_link_rx(&board_link, body, &len)
+  expect(board_link.inbox == NULL && !radio_link_rx(&board_link, body, &len, &starts)
          && board_allocs == before,
          "before any link, the radio keeps nothing and made nothing");
   radio_link_open(&board_link, LINK, "gigat");
@@ -1774,8 +1853,8 @@ static void the_radio_inbox(void) {
   radio_link_open(&board_link, LINK, "gigat");
   air_put(&board_air, frame, sizeof frame);
   radio_link_heard(&board_link);
-  expect(board_acks == 0 && radio_link_rx(&board_link, body, &len)
-         && len == 2 && body[0] == 'h' && board_acks == 1,
+  expect(board_acks == 0 && radio_link_rx(&board_link, body, &len, &starts)
+         && len == 2 && body[0] == 'h' && starts && board_acks == 1,
          "with no inbox, rx takes a piece off the air, and answers it");
 }
 
@@ -2210,6 +2289,8 @@ int main(int argc, char **argv) {
   every_drop_counted();
   serving_a_link();
   lines_during_a_move();
+  a_line_cut_short();
+  an_older_link();
   a_full_inbox();
   a_line_not_taken();
   the_radio_inbox();

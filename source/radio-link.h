@@ -75,8 +75,11 @@ bool radio_link_called(RadioLink *r, const char *us, const char *from);
 // false when one is not, or no link is open
 bool radio_link_tx(RadioLink *r, const char *msg, size_t len);
 
-// The next piece the far end sent, if any, answered
-bool radio_link_rx(RadioLink *r, uint8_t body[RADIO_BODY], int *len);
+// The next piece the far end sent, if any, answered, and whether it
+// starts a message: what came before it of a message whose end was lost
+// never comes
+bool radio_link_rx(RadioLink *r, uint8_t body[RADIO_BODY], int *len,
+                   bool *starts);
 
 // A datagram has come: while a link is open, a piece of it is answered
 // and kept for rx, if there is room. Runs no Lua.

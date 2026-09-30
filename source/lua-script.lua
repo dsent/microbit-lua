@@ -437,8 +437,11 @@ function listen(name)
   greet()
   while true do
     if radio.answered(name) then greet() end
-    local piece = radio.rx()
+    local piece, starts = radio.rx()
     if piece then
+      -- each message is whole lines: one that starts finds only a line
+      -- whose end was lost on the way, which the other board said
+      if starts then radio_session.buffer = "" end
       radio_session.run(typed, piece)
     end
     uBit.sleep(5)

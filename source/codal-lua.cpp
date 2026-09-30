@@ -1305,15 +1305,20 @@ static const char *radio_opt_name(lua_State *L, int arg)
                     lua_pushboolean(L, radio_link_tx(&radio_link, msg, len));	\
                     return 1;						\
                   })							\
-/* rx() -> string or nil
- * One piece, the oldest the other board sent. */			\
+/* rx() -> string and whether it starts a message, or nil
+ * One piece, the oldest the other board sent. Of a message
+ * whose end was lost on the way, nothing more comes: the
+ * next piece starts another. */					\
     F(rx,         { uint8_t body[RADIO_BODY];				\
                     int len;						\
-                    if (radio_link_rx(&radio_link, body, &len))		\
-                      lua_pushlstring(L, (const char *)body, len);	\
-                    else						\
+                    bool starts;					\
+                    if (!radio_link_rx(&radio_link, body, &len, &starts)) {	\
                       lua_pushnil(L);					\
-                    return 1;						\
+                      return 1;						\
+                    }							\
+                    lua_pushlstring(L, (const char *)body, len);	\
+                    lua_pushboolean(L, starts);				\
+                    return 2;						\
                   })							\
 /* answered([name]) -> friendlyName if somebody, or with a
  * name that board, has just called again, or nil */		\

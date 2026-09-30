@@ -282,12 +282,27 @@ have run yet. A board takes a piece whatever its Lua is doing, in the fiber
 that carries the radio's event, which runs no Lua: a line sent while the
 robot drives is taken at once, waits in the board's inbox, and runs when the
 move is over, after the lines before it; the prompt comes back once it has
-run. The inbox holds 8 pieces, 218 B of the board's heap made when the first
+run. The inbox holds 8 pieces, 226 B of the board's heap made when the first
 link opens. A piece that finds it full is not taken, and neither is one sent
 to a board that is gone: the sending board says `The other micro:bit did not
 answer, so it did not get:` and the line, and drops what was typed after it.
 A piece that comes again, because the answer to it was lost, is answered
 again and dropped. Another pair's link on the same group is ignored.
+
+The first piece of each message is marked, and `rx()` returns with a piece
+whether it starts a message. The link's REPL is sent whole lines, one to a
+message, so a piece that starts a message drops what is left of a line whose
+end never came: a line said to be lost never runs in part, and the next one
+runs as it was sent. A call carries the link's version: a board whose
+firmware has an older link is not answered, and does not answer, so
+`connect` says `Connection timed out.`
+
+Two cases the link does not cover. A command that runs Lua without ever
+waiting lets no fiber run, so the pieces sent meanwhile wait in the radio's
+own queue of 4; a copy of one taken after the command may finish a line the
+sending board has already said was lost. And once a board has opened a link,
+its fiber takes every datagram that comes, so a program there that reads the
+radio itself with `recv` gets none.
 
 
 ## TPBot
