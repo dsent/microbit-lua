@@ -25,6 +25,7 @@
 #include "lua-modules.h"
 #include "board-alloc.h"
 #include "radio-inbox.h"
+#include "host-cstack.h"
 #include "tpbot.h"
 
 void lua_strip_debug(lua_State *L);
@@ -1109,7 +1110,45 @@ static void the_radio_inbox(void) {
   expect(board_allocs == before + 1, "a link opened again makes no other");
 }
 
+// A C stack too full to go deeper is an error a pcall catches, and the
+// prompt comes back; the host's limit stands in for the board's 7 KB
+static void a_full_c_stack(void) {
+  const char *said;
+  fresh();
+  boot("");
+  host_cstack_limit = host_cstack_used() + 40000;
+  line("function deeper(n) local ok, err = pcall(deeper, n + 1) "
+       "if not ok and not stopped then stopped = n caught = err end end");
+  line("deeper(1)");
+  said = line("caught, stopped < 80");
+  expect(strstr(said, "C stack overflow") != NULL
+         && strstr(said, "true") != NULL,
+         "pcalls nested too deep stop with \"C stack overflow\", "
+         "before Lua's own limit of 200 C calls");
+  said = line("6*7");
+  expect(strstr(said, "=> 42\r\n> ") != NULL, "... and the REPL answers");
+  said = line("local function f() return 1 + select(2, pcall(f)) end f()");
+  expect(strstr(said, "> ") != NULL && armed,
+         "recursion through pcall with no end stops the line, not the board");
+  {
+    // An expression nested too deep for the stack is a compile error
+    char text[2048] = "x = ";
+    int i;
+    for (i = 0; i < 150; i++) strcat(text, "(");
+    strcat(text, "1");
+    for (i = 0; i < 150; i++) strcat(text, ")");
+    host_cstack_limit = host_cstack_used() + 20000;
+    said = line(text);
+    expect(strstr(said, "C stack overflow") != NULL,
+           "an expression nested too deep for the stack does not compile");
+  }
+  host_cstack_limit = (size_t)-1;
+  said = line("6*7");
+  expect(strstr(said, "=> 42\r\n> ") != NULL, "... and the REPL answers");
+}
+
 int main(int argc, char **argv) {
+  host_cstack_start();
   signal(SIGALRM, too_long);
   alarm(60);
   if (argc != 2) {
@@ -1127,6 +1166,7 @@ int main(int argc, char **argv) {
   round_two();
   what_waiting_costs();
   the_radio_inbox();
+  a_full_c_stack();
   programs_alone();
   printf("%d checks, %d failed\n", checks, failures);
   return failures != 0;

@@ -25,10 +25,11 @@ FLAGS=(-std=gnu99 -O2 -DLUA_NUMBER_IS_FLOAT=1 -I"$LUA" -I"$ROOT/source")
 (cd "$DIR" && cc "${FLAGS[@]}" -w -c $(printf "$LUA/%s.c " "${CORE[@]}") \
   "$ROOT/source/lua-number.c" "$ROOT/source/lua-strip-debug.c")
 # and ours, with every warning
-STRICT=("${FLAGS[@]}" -Wall -Wextra -Werror)
+STRICT=("${FLAGS[@]}" -I"$ROOT/tests" -Wall -Wextra -Werror)
 cc "${STRICT[@]}" -o "$DIR/tpbot" "$ROOT/tests/tpbot-host-test.c" \
-  "$ROOT/source/tpbot.c" "$DIR"/*.o -lm
+  "$ROOT/tests/host-cstack.c" "$ROOT/source/tpbot.c" "$DIR"/*.o -lm
 cc "${STRICT[@]}" -o "$DIR/runtime" "$ROOT/tests/runtime-host-test.c" \
+  "$ROOT/tests/host-cstack.c" \
   "$ROOT/source/tpbot.c" "$ROOT/source/lua-events.c" \
   "$ROOT/source/lua-modules.c" "$ROOT/source/radio-inbox.c" "$DIR"/*.o -lm
 "$DIR/tpbot" "$ROOT/tests/tpbot-reference.lua"

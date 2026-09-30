@@ -1,0 +1,11 @@
+--- lparser.c
++++ lparser.c
+@@ -276,6 +276,8 @@
+ static void enterlevel (LexState *ls) {
+   if (++ls->L->nCcalls > LUAI_MAXCCALLS)
+ 	luaX_lexerror(ls, "chunk has too many syntax levels", 0);
++  if (luai_cstack())
++	luaX_lexerror(ls, "C stack overflow", 0);
+ }
+ 
+ 

@@ -21,6 +21,7 @@
 #include "lauxlib.h"
 #include "lualib.h"
 #include "tpbot.h"
+#include "host-cstack.h"
 
 void lua_strip_debug(lua_State *L);
 
