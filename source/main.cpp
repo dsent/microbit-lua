@@ -122,6 +122,11 @@ int main() {
     if (uBit.serial.setRxBufferSize(254) != DEVICE_OK)
         DMESG("serial RX ring left at its default size");
 
+    // The first byte out of the port after a reset can be lost or garbled
+    // on its way to the computer. A line break of its own takes that byte,
+    // so the greeting arrives whole.
+    uBit.serial.send("\r\n");
+
 #if CONFIG_ENABLED(DEVICE_BLE)
     setup_ble_uart_service();
 #endif

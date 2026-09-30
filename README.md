@@ -55,7 +55,8 @@ is not a fast-forward.
 ### Firmware version
 
 The firmware knows which build it is. `microbit.version()` returns it,
-and the REPL's greeting prints it:
+and the REPL's greeting prints it, after the empty line the board starts
+every reset with:
 
 ```
 micro:bit
