@@ -1773,10 +1773,10 @@ static void lua_event_handler_fiber(void *arg) {
 static void hand_on(codal::Event e) {
   codal::Event *copy = new codal::Event(e);
   if (create_fiber(lua_event_handler_fiber, copy) == NULL) {
+    LuaEvent missed = { e.source, e.value, (uint32_t)e.timestamp };
     delete copy;
     // the port is armed for one event at a time: this one is not lost
-    if (e.source == DEVICE_ID_SERIAL && e.value == CODAL_SERIAL_EVT_HEAD_MATCH)
-      lua_events_port_missed();
+    lua_events_missed(missed);
   }
 }
 

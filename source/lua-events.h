@@ -38,9 +38,9 @@ void lua_events_open(lua_State *L, const LuaEventsConfig *config);
 // Whether an event is one of the noise, not worth a fiber
 bool lua_event_is_noise(uint16_t source, uint16_t value);
 
-// The port's event came, but could not be handed on: it is taken as
-// waiting. Safe to call from an interrupt.
-void lua_events_port_missed(void);
+// An event came, but could not be handed on: the port's is taken as
+// waiting, any other counted as dropped. Safe to call from an interrupt.
+void lua_events_missed(LuaEvent e);
 
 // Whether the port's event waits while Lua is free, with no call to take
 // it; true takes it, to be handed on again. Safe to call from an interrupt.

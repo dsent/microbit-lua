@@ -209,7 +209,9 @@ that would match deeper stops with "pattern too complex"
 (`microbit.stackCurrent()` says how much is in use now,
 `microbit.stackUsage()` the most since boot). What still waits when the call
 is over is handled then. When the line is full the oldest event in it is
-dropped; `microbit.eventsDropped()` says how many have been since boot.
+dropped, as is an event for which there is no memory, for the line or for a
+fiber to carry it; `microbit.eventsDropped()` says how many have been since
+boot.
 
 The serial port's event the REPL waits for is kept apart and never lost,
 even when the firmware finds no memory for the fiber that would carry it:

@@ -50,7 +50,11 @@ static const LuaEventsConfig events_config = {
 static int board_allocs;
 static size_t board_bytes;
 
+static int board_refuses;
+
 void *board_alloc(size_t size) {
+  if (board_refuses)
+    return NULL;
   board_allocs++;
   board_bytes += size;
   return malloc(size);
@@ -85,6 +89,12 @@ static void note(const char *text) {
 static void post(int source, int value) {
   LuaEvent e = { (uint16_t)source, (uint16_t)value, 0 };
   lua_event_arrived(e);
+}
+
+// An event that found no fiber to carry it
+static void miss(int source, int value) {
+  LuaEvent e = { (uint16_t)source, (uint16_t)value, 0 };
+  lua_events_missed(e);
 }
 
 // The port holds 254 characters, as the firmware sets it; what comes when
@@ -360,6 +370,7 @@ static void fresh(void) {
   stack_used_now = 0;
   board_allocs = 0;
   board_bytes = 0;
+  board_refuses = 0;
   pauses_all = 0;
   send_trigger = NULL;
   send_fails = 0;
@@ -526,7 +537,7 @@ static void type_and_miss_the_port(void) {
   memcpy(typed + typed_len, "6*7\r", 4);
   typed_len += 4;
   armed = 0;
-  lua_events_port_missed();
+  miss(ID_SERIAL, HEAD_MATCH);
 }
 
 static void press_a_and_type(void) {
@@ -1162,6 +1173,39 @@ static void what_waiting_costs(void) {
          "eventLine(1) keeps one event that waits at a time");
 }
 
+// Events dropped for want of memory, for the line or for a fiber, are
+// counted with those the full line drops, and the count outlives the line
+static void press_a_with_no_memory(void) {
+  board_refuses = 1;
+  press_a();
+  board_refuses = 0;
+}
+
+static void press_a_with_no_fiber(void) {
+  miss(ID_BUTTON_A, CLICK);
+}
+
+static void every_drop_counted(void) {
+  fresh();
+  plan(press_a_with_no_memory);
+  plan(press_a_with_no_fiber);
+  plan(press_b);
+  boot_program(
+    "local got = 0\n"
+    "function on_event(s, v) got = got + 1 end\n"
+    "microbit.sleep(10) microbit.sleep(10) microbit.sleep(10)\n"
+    "microbit.display.scroll(got .. ' ' .. microbit.eventsDropped())\n");
+  expect(strstr(out, "<scroll 1 2>") != NULL,
+         "a press with no memory for the line, and one with no fiber, are "
+         "counted as dropped; one that waits is handled");
+  fresh();
+  plan(press_a_with_no_fiber);
+  boot_program("microbit.sleep(10)\n"
+               "microbit.display.scroll(microbit.eventsDropped())\n");
+  expect(strstr(out, "<scroll 0>") != NULL,
+         "... and a program with no on_event counts none");
+}
+
 // The radio's inbox: made when the first link opens, not before
 static void the_radio_inbox(void) {
   uint8_t body[RADIO_INBOX_BODY];
@@ -1502,6 +1546,7 @@ int main(int argc, char **argv) {
   robot_file();
   round_two();
   what_waiting_costs();
+  every_drop_counted();
   the_radio_inbox();
   a_full_c_stack();
   deep_coroutines();

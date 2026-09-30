@@ -23,7 +23,9 @@
 // program that has somewhere to send it: an on_event, or a fallback. Its
 // size is 16 unless microbit.eventLine() says otherwise; 0 drops every
 // event that would have to wait. When it is full the oldest event in it is
-// dropped, and counted (microbit.eventsDropped()). The port's event that
+// dropped. An event dropped so, or for want of memory for the line or for
+// a fiber to carry it, is counted (microbit.eventsDropped()), if the
+// program had somewhere to send it. The port's event that
 // the REPL waits for never is: the port is armed for one at a time, so one
 // lost would leave the REPL deaf. A flag of its own keeps it, and it goes
 // first when the running call is over; a sleep leaves it waiting, so the
@@ -54,7 +56,6 @@
 // last gave (16 unless it said otherwise).
 typedef struct {
   int size, first, count;
-  uint32_t dropped;
   LuaEvent waiting[];
 } Line;
 
@@ -67,6 +68,7 @@ static bool sleep_handles = false;   // the running call's sleeps handle events
 static bool port_call = false;       // the port's event is being handled
 static bool wants = false;           // there is on_event, or a fallback
 static volatile bool port_waiting = false;
+static volatile uint32_t dropped = 0;  // since boot, the line or none
 
 // The registry's key for the handler used when on_event is not a function
 static char fallback_key;
@@ -75,6 +77,7 @@ void lua_events_open(lua_State *L, const LuaEventsConfig *c) {
   state = L;
   config = c;
   running = sleep_handles = wants = port_waiting = false;
+  dropped = 0;
   board_free(line);
   line = NULL;
   line_size = 16;
@@ -88,10 +91,22 @@ bool lua_event_is_noise(uint16_t source, uint16_t value) {
   return false;
 }
 
+static bool is_port(LuaEvent e) {
+  return e.source == config->port.source && e.value == config->port.value;
+}
+
+// Counted from an interrupt as safely as from a fiber
+static void count_dropped(void) {
+  __atomic_fetch_add(&dropped, 1, __ATOMIC_RELAXED);
+}
+
 // The port's event carries nothing but that it came, so one flag holds it,
-// set from an interrupt as safely as from a fiber.
-void lua_events_port_missed(void) {
-  port_waiting = true;
+// set from an interrupt as safely as from a fiber. Any other is counted.
+void lua_events_missed(LuaEvent e) {
+  if (is_port(e))
+    port_waiting = true;
+  else if (wants)
+    count_dropped();
 }
 
 // A port's event that waits with no call to take it: it came while Lua
@@ -105,16 +120,11 @@ bool lua_events_take_stranded_port(void) {
   return true;
 }
 
-static bool is_port(LuaEvent e) {
-  return e.source == config->port.source && e.value == config->port.value;
-}
-
 static Line *make_line(int size) {
   Line *l = (Line *)board_alloc(sizeof(Line) + size * sizeof(LuaEvent));
   if (l != NULL) {
     l->size = size;
     l->first = l->count = 0;
-    l->dropped = 0;
   }
   return l;
 }
@@ -122,7 +132,7 @@ static Line *make_line(int size) {
 // An event onto the line; when it is full, the oldest is dropped
 static void append(Line *l, LuaEvent e) {
   if (l->count == l->size) {
-    l->dropped++;
+    count_dropped();
     if (l->size == 0)
       return;
     l->first = (l->first + 1) % l->size;
@@ -139,8 +149,10 @@ static void queue_event(LuaEvent e) {
   }
   if (!wants)
     return;
-  if (line == NULL && (line = make_line(line_size)) == NULL)
+  if (line == NULL && (line = make_line(line_size)) == NULL) {
+    count_dropped();
     return;
+  }
   append(line, e);
 }
 
@@ -363,7 +375,7 @@ int lua_events_repl(lua_State *L) {
 }
 
 int lua_events_dropped(lua_State *L) {
-  lua_pushinteger(L, (lua_Integer)(line != NULL ? line->dropped : 0));
+  lua_pushinteger(L, (lua_Integer)dropped);
   return 1;
 }
 
@@ -379,7 +391,6 @@ int lua_events_line(lua_State *L) {
     LuaEvent e;
     if (made == NULL)
       return luaL_error(L, "not enough memory");
-    made->dropped = old->dropped;
     while (old->count > 0) {
       e = old->waiting[old->first];
       old->first = (old->first + 1) % old->size;
