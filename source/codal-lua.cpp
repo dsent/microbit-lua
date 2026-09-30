@@ -39,7 +39,7 @@ const char firmware_version_mark[] = FIRMWARE_VERSION_MARK FIRMWARE_VERSION;
                     return 0;						\
                   })							\
     F(sleep,      { uint32_t ms = (uint32_t)luaL_checkinteger(L, 1);	\
-                    uBit.sleep(ms);					\
+                    lua_events_sleep(ms);				\
                     return 0;						\
                   })							\
     F(seedRandom, { uint32_t seed = (uint32_t)luaL_optinteger(L, 1, 0);	\
@@ -1876,9 +1876,17 @@ void register_lua_modules(lua_State *L) {
   tpbot_register_globals(L);
 }
 
-// A handler's mistake, on the display (source/lua-events.c)
+// What source/lua-events.c needs of the board
 extern "C" void lua_events_show_error(const char *message) {
   uBit.display.scroll(message);
+}
+
+extern "C" uint32_t lua_events_now(void) {
+  return (uint32_t)uBit.systemTime();
+}
+
+extern "C" void lua_events_pause(uint32_t ms) {
+  uBit.sleep(ms);
 }
 
 // Runs in a dedicated fiber (spawned by on_codal_event).  Has a full

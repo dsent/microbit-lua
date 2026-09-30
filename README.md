@@ -155,14 +155,22 @@ event: a button, the serial port, the radio. When `on_event` is not a
 function, the event goes to the handler the script gave
 `microbit.eventFallback()`, its own, so the REPL keeps answering.
 
-One Lua call runs at a time. An event that comes while the script, a handler
-or a command is still running, sleeping included, waits in a line of 16, and
-is handled once the call is over, in the order the events came: a program
-that loops forever gets no events. The serial port's event the REPL waits for
-is kept apart and never lost, and the port holds up to 64 characters typed
-while the script at boot runs, for the REPL to read when it starts. When the
-line is full an event is dropped; `microbit.eventsDropped()` says how many
-have been since boot.
+One Lua call runs at a time. An event that comes while one runs waits in a
+line of 16, in the order the events came. The running call handles the
+events that wait whenever it is in `microbit.sleep`: a program that sets
+`on_event` and then loops with `microbit.sleep` gets each event while it
+sleeps. The running call is the script at boot, or a command at the REPL; a
+handler's own `microbit.sleep` handles nothing, so one handler always ends
+before the next starts. What still waits when the call is over is handled
+then. When the line is full the oldest event in it is dropped;
+`microbit.eventsDropped()` says how many have been since boot. The serial
+port's event the REPL waits for is kept apart and never lost, and the port
+holds up to 64 characters typed while the script at boot runs, for the REPL
+to read when it starts.
+
+A script that stops on a mistake at boot shows `Lua error!` and the message
+on the display, once. The board then handles events with the `on_event` the
+script set before it stopped, if any.
 
 The REPL takes what it uses (`pcall`, `print`, `tostring`, the string and
 table functions, the serial and display calls) when the script loads, so a
