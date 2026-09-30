@@ -249,7 +249,8 @@ Classic at once.
   `source/lua-events.c`: typing at the REPL, buttons pressed while Lua sleeps,
   and the globals the REPL uses taken away.
 
-It needs `cc` and the patched Lua a firmware build leaves in `libraries/`.
+It needs `cc`, `patch`, and the Lua tarball a firmware build leaves in
+`libraries/`, which it patches as the build does.
 
 
 ## Numbers as text
