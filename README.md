@@ -201,7 +201,8 @@ events at its sleeps. Nor does a sleep that is already more than 4,352 bytes
 deep in the C stack, so the handlers it would run keep 1.5 KB before the
 limit; their events wait for the call to return. A call from C into Lua, a
 coroutine's resume, or a level of the parser, that finds more than 5,888
-bytes of the 8 KB stack in use stops with "C stack overflow"
+bytes of the 8 KB stack in use stops with "C stack overflow", and a pattern
+that would match deeper stops with "pattern too complex"
 (`microbit.stackCurrent()` says how much is in use now,
 `microbit.stackUsage()` the most since boot). What still waits when the call
 is over is handled then. When the line is full the oldest event in it is

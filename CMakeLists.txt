@@ -395,6 +395,7 @@ lua_patch(luaconf.h luaconf-cstack.patch "luai_cstack")
 lua_patch(ldo.c ldo-cstack.patch "luai_cstack")
 lua_patch(lparser.c lparser-cstack.patch "luai_cstack")
 lua_patch(ldo.c ldo-resume-cstack.patch "the call that resumes it")
+lua_patch(lstrlib.c lstrlib-cstack.patch "pattern too complex")
 # A smaller string buffer on the C stack, so the check leaves more of it.
 lua_patch(luaconf.h luaconf-buffer.patch "leaves that check more")
 # Application sources build at -O2; this file is 1.3 KB smaller at -Os.

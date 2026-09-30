@@ -1187,6 +1187,32 @@ static void deep_coroutines(void) {
   expect(strstr(said, "=> 42\r\n> ") != NULL, "... and the REPL answers");
 }
 
+// A pattern whose match goes a C call deeper for each character it takes,
+// as a? does, stops before it fills the C stack: in each function that
+// matches
+static void deep_patterns(void) {
+  static const char *const MATCH[] = {
+    "string.match(s, p)", "string.find(s, p)", "string.gsub(s, p, '')",
+    "string.gmatch(s, p)()", NULL };
+  const char *said;
+  char what[256];
+  int i;
+  fresh();
+  boot("");
+  line("s = string.rep('a', 20000) p = string.rep('a?', 20000)");
+  for (i = 0; MATCH[i]; i++) {
+    host_cstack_limit = host_cstack_used() + 40000;
+    said = line(MATCH[i]);
+    host_cstack_limit = (size_t)-1;
+    snprintf(what, sizeof what, "%s, 20,000 levels deep, stops with "
+             "\"pattern too complex\"", MATCH[i]);
+    expect(strstr(said, "pattern too complex") != NULL, what);
+  }
+  said = line("string.match('aab', 'a?a?b')");
+  expect(strstr(said, "=> \"aab\"\r\n> ") != NULL,
+         "... and a pattern that fits still matches");
+}
+
 // A sleep deep in the stack runs no handlers: their events wait for the
 // call to return
 static void deep_sleeps(void) {
@@ -1260,6 +1286,7 @@ int main(int argc, char **argv) {
   the_radio_inbox();
   a_full_c_stack();
   deep_coroutines();
+  deep_patterns();
   deep_sleeps();
   codex_round_nine();
   programs_alone();
