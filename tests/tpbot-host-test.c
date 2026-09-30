@@ -150,10 +150,10 @@ static const char *SHOW =
   "return function(code)\n"
   "  local f, err = loadstring(code, 'REPL')\n"
   "  if not f then return 'compile ' .. err end\n"
-  "  local r = { pcall(f) }\n"
+  "  local r = (function(...) return { n = select('#', ...), ... } end)(pcall(f))\n"
   "  if not r[1] then return 'error ' .. tostring(r[2]) end\n"
   "  local out = {}\n"
-  "  for i = 2, table.maxn(r) do out[#out + 1] = show(r[i]) end\n"
+  "  for i = 2, r.n do out[#out + 1] = show(r[i]) end\n"
   "  return 'returned ' .. table.concat(out, ', ')\n"
   "end\n";
 
@@ -357,6 +357,14 @@ int main(int argc, char **argv) {
   }
   reference_text = slurp(argv[1], &reference_length);
   bus.echo = -1;
+  // Putting the commands in place writes nothing to the bus
+  bus.log[0] = 0;
+  lua_close(state(0));
+  lua_close(state(1));
+  if (bus.log[0]) {
+    printf("the bus was written to at start:\n%s", bus.log);
+    failures++;
+  }
   for (p = 0; p < sizeof PLANS / sizeof PLANS[0]; p++) {
     bus.plan = PLANS[p].plan;
     bus.at = PLANS[p].at;

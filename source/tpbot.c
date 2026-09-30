@@ -8,7 +8,7 @@
 //
 // These were Lua in source/lua-script.lua; tests/tpbot-reference.lua keeps
 // that Lua. Every byte on the bus, every value returned and every message
-// is the Lua's, and tests/tpbot-host-test.sh runs the two side by side to
+// is the Lua's, and tests/host-tests.sh runs the two side by side to
 // show it. The arithmetic is written as Lua's VM does it on lua_Number, and
 // a mistake in a call reads as the Lua's did, save for the position the
 // Lua put in front of a few.

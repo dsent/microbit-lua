@@ -14,6 +14,6 @@
   a new one on the next build.
 - `bash tests/lua-number-tests.sh` tests `source/lua-number.c` on the host; it
   needs only `cc`.
-- `bash tests/tpbot-host-tests.sh` compares `source/tpbot.c` with the Lua it
-  replaced, `tests/tpbot-reference.lua`; it needs `cc` and a firmware build's
-  `libraries/lua-5.1.5`.
+- `bash tests/host-tests.sh` compares `source/tpbot.c` with the Lua it
+  replaced, `tests/tpbot-reference.lua`, and runs `source/lua-script.lua` over
+  a stand-in board; it needs `cc` and a firmware build's `libraries/lua-5.1.5`.

@@ -151,23 +151,44 @@ deepest user is the Lua parser (~4 KB) parsing the embedded chunk; see
 ## Events
 
 The firmware calls the global `on_event(source, value, timestamp)` for each
-event: a button, the serial port, the radio. One Lua call runs at a time: an
-event that comes while the script, a handler or a command is still running
-waits in a line of 16, and is handled once the call is over, in the order the
-events came. The serial port's event the REPL waits for is kept apart and
-never lost. When the line is full an event is dropped;
-`microbit.eventsDropped()` says how many have been since boot.
+event: a button, the serial port, the radio. When `on_event` is not a
+function, the event goes to the handler the script gave
+`microbit.eventFallback()`, its own, so the REPL keeps answering.
+
+One Lua call runs at a time. An event that comes while the script, a handler
+or a command is still running, sleeping included, waits in a line of 16, and
+is handled once the call is over, in the order the events came: a program
+that loops forever gets no events. The serial port's event the REPL waits for
+is kept apart and never lost, and the port holds up to 64 characters typed
+while the script at boot runs, for the REPL to read when it starts. When the
+line is full an event is dropped; `microbit.eventsDropped()` says how many
+have been since boot.
+
+The REPL takes what it uses (`pcall`, `print`, `tostring`, the string and
+table functions, the serial and display calls) when the script loads, so a
+program that changes or removes those globals leaves the prompt answering.
+`print` stays a global a program may replace for its own use.
 
 
 ## TPBot
 
 `tpbot` and the robot globals `robot_info`, `robot_move`, `turn` and
 `straight` are in C, in `source/tpbot.c`, for the TPBot Edu and the TPBot
-Classic at once. `bash tests/tpbot-host-tests.sh` builds this firmware's Lua for
-the host and runs every command beside the Lua it replaced
-(`tests/tpbot-reference.lua`), comparing the bytes each writes to the bus, what
-it returns and the words of each error. It needs `cc` and the patched Lua a
-firmware build leaves in `libraries/`.
+Classic at once.
+
+
+## Host tests
+
+`bash tests/host-tests.sh` builds this firmware's Lua for the host and runs:
+
+- every TPBot command beside the Lua it replaced (`tests/tpbot-reference.lua`),
+  comparing the bytes each writes to the bus, what it returns and the words of
+  each error;
+- `source/lua-script.lua` over a stand-in board, with events through
+  `source/lua-events.c`: typing at the REPL, buttons pressed while Lua sleeps,
+  and the globals the REPL uses taken away.
+
+It needs `cc` and the patched Lua a firmware build leaves in `libraries/`.
 
 
 ## Numbers as text

@@ -1,6 +1,6 @@
 -- The TPBot commands as source/lua-script.lua held them in Lua at
 -- daa2f77 (its lines 282-435, unchanged), before they moved to C in
--- source/tpbot.c. tests/tpbot-host-test.sh runs them beside the C and
+-- source/tpbot.c. tests/host-tests.sh runs them beside the C and
 -- compares what each writes to the bus and says back.
 
 -- TPBot library, for the TPBot Edu and the TPBot Classic

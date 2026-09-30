@@ -1,5 +1,29 @@
 local uBit = microbit
 
+-- What the REPL and the event handlers use, taken as they are now:
+-- a program that puts something else in a global, or takes one away,
+-- changes its own world, and the prompt still answers.
+local pcall, tostring, type, select = pcall, tostring, type, select
+local pairs, setmetatable = pairs, setmetatable
+local loadstring, setfenv, collectgarbage =
+  loadstring, setfenv, collectgarbage
+local format, find, gmatch, match, sub =
+  string.format, string.find, string.gmatch, string.match, string.sub
+local insert, concat = table.insert, table.concat
+local scroll = uBit.display.scroll
+local radio = {
+  enable = uBit.radio.enable,
+  listen = uBit.radio.listen,
+  connect = uBit.radio.connect,
+  answered = uBit.radio.answered,
+  tx = uBit.radio.tx,
+  rx = uBit.radio.rx,
+}
+local sleep = uBit.sleep
+local HEAD_MATCH = uBit.CODAL_SERIAL_EVT_HEAD_MATCH
+local CLICK = uBit.DEVICE_BUTTON_EVT_CLICK
+local LONG_CLICK = uBit.DEVICE_BUTTON_EVT_LONG_CLICK
+
 local heart = {
   width = 10,
   height = 5,
@@ -23,6 +47,9 @@ local serial = {
   eventAfterAsync = uBit.serial.eventAfterAsync,
 }
 
+-- The session being served, if any
+local active_session
+
 -- Output goes wherever the session being served takes it.
 -- The serial session names no other way out, so it falls to
 -- the port.
@@ -30,7 +57,7 @@ local function write(s)
   local session = active_session
   local out = session and session.transport.send
   if out then return out(s) end
-  for c in string.gmatch(s, ".") do
+  for c in gmatch(s, ".") do
     if c == "\n" then
       serial.send("\r")
     end
@@ -42,11 +69,9 @@ io = {
   write = write
 }
 
-local unpack = unpack or table.unpack
-
 local function is_identifier(str)
   return type(str) == "string"
-    and str:match("^[%a_][%w_]*$")
+    and match(str, "^[%a_][%w_]*$")
 end
 
 local prettyprint = { }
@@ -61,7 +86,7 @@ local function serialize(value, visited)
 end
 
 function prettyprint.string(value)
-  return string.format("%q", value)
+  return format("%q", value)
 end
 
 local function key(k, visited)
@@ -77,12 +102,12 @@ local function table_tokens(value, visited)
   local first = true
   for k, v in pairs(value) do
     if not first then
-       table.insert(out, ", ")
+       insert(out, ", ")
     end
     first = false
-    table.insert(out, key(k, visited) .. " = " .. serialize(v, visited))
+    insert(out, key(k, visited) .. " = " .. serialize(v, visited))
   end
-  table.insert(out, "}")
+  insert(out, "}")
   return out
 end
 
@@ -93,7 +118,7 @@ function prettyprint.table(value, visited)
   visited[value] = true
   local out = table_tokens(value, visited)
   visited[value] = nil
-  return table.concat(out)
+  return concat(out)
 end
 
 local function print_values(serialize, ...)
@@ -103,9 +128,9 @@ local function print_values(serialize, ...)
   end
   local out = { }
   for i = 1, n do
-    table.insert(out, serialize(select(i, ...)))
+    insert(out, serialize(select(i, ...)))
   end
-  write(table.concat(out, "\t") .. "\n")
+  write(concat(out, "\t") .. "\n")
 end
 
 local env = { }
@@ -122,7 +147,7 @@ local function load_with_env(code, chunkname)
 end
 
 local function is_incomplete(err)
-  return err and err:find("near '<eof>'", 1, true) ~= nil
+  return err and find(err, "near '<eof>'", 1, true) ~= nil
 end
 
 local function compile_try(code)
@@ -159,15 +184,16 @@ local function compile(code)
   return nil, err or e_err, false
 end
 
-function print(...)
-  print_values(tostring, ...)  
+-- The REPL's own output. print is the same, for programs, and a
+-- program may put its own in its place.
+local function say(...)
+  print_values(tostring, ...)
 end
 
+print = say
+
 collectgarbage("setpause", 100)
--- microbit.version is missing from a firmware older than this script,
--- which the Compy's tools can put into one
-local version = microbit.version and microbit.version() or "unknown"
-print("micro:bit\nLua 5.1 REPL\nfirmware " .. version)
+say("micro:bit\nLua 5.1 REPL\nfirmware " .. uBit.version())
 
 local function execute(chunk)
   local results = { pcall(chunk) }
@@ -175,12 +201,12 @@ local function execute(chunk)
     if #results > 1 then
       local out = { }
       for i = 2, #results do
-        table.insert(out, serialize(results[i]))
+        insert(out, serialize(results[i]))
       end
-      print("=> " .. table.concat(out, "\t"))
+      say("=> " .. concat(out, "\t"))
     end
   else
-    print("Runtime error: " .. tostring(results[2]))
+    say("Runtime error: " .. tostring(results[2]))
   end
 end
 
@@ -204,7 +230,7 @@ local function make_session(transport)
       if chunk then
         execute(chunk)
       else
-        print("Compile error: " .. tostring(err))
+        say("Compile error: " .. tostring(err))
       end
       s.buffer = ""
     end
@@ -236,7 +262,7 @@ end
 
 local function backspace()
   if #serial_session.buffer > 0 then
-    serial_session.buffer = serial_session.buffer:sub(1, -2)
+    serial_session.buffer = sub(serial_session.buffer, 1, -2)
     write("\b \b")
   end
 end
@@ -251,7 +277,7 @@ local keypress = {
 local typed_here = ""
 
 local function port_to_console(value)
-  if value == microbit.CODAL_SERIAL_EVT_HEAD_MATCH then
+  if value == HEAD_MATCH then
     serial_session.run(function()
       local c = serial_session.transport.getChar()
       local echo = ""
@@ -280,10 +306,10 @@ end
 handler[microbit.DEVICE_ID_SERIAL] = port_to_console
 
 local function button(value, btn)
-  if value == microbit.DEVICE_BUTTON_EVT_CLICK then
-      uBit.display.scroll(btn)
-   elseif value == microbit.DEVICE_BUTTON_EVT_LONG_CLICK then
-      uBit.display.scroll(btn .. "!")
+  if value == CLICK then
+      scroll(btn)
+   elseif value == LONG_CLICK then
+      scroll(btn .. "!")
   end
 end
 
@@ -299,12 +325,17 @@ handler[microbit.DEVICE_ID_BUTTON_AB] = function(value)
   button(value, "AB")
 end
 
-function on_event(source, value, timestamp)
+local function dispatch(source, value, timestamp)
   local handle = handler[source]
   if handle then
     handle(value, timestamp)
   end
 end
+
+-- A program may put its own on_event in place of this one. When
+-- on_event is not a function, events come here all the same.
+on_event = dispatch
+uBit.eventFallback(dispatch)
 
 
 -- A REPL over a radio link, and the other end of it.
@@ -323,7 +354,7 @@ end
 
 local radio_session = make_session({
   crlf_before_result = false,
-  send = function(text) microbit.radio.tx(text) end
+  send = function(text) radio.tx(text) end
 })
 
 
@@ -331,13 +362,13 @@ local radio_session = make_session({
 -- stands before a line ending is entered, what follows it
 -- waits for the rest to come.
 local function typed(piece)
-  local at = string.find(piece, "[\r\n]")
+  local at = find(piece, "[\r\n]")
   while at do
     radio_session.buffer =
-      radio_session.buffer .. piece:sub(1, at - 1)
+      radio_session.buffer .. sub(piece, 1, at - 1)
     radio_session.submit("")
-    piece = piece:sub(at + 1)
-    at = string.find(piece, "[\r\n]")
+    piece = sub(piece, at + 1)
+    at = find(piece, "[\r\n]")
   end
   radio_session.buffer = radio_session.buffer .. piece
 end
@@ -349,17 +380,16 @@ local function greet()
 end
 
 function listen(name)
-  require("microbit.radio")
-  microbit.radio.enable()
-  microbit.radio.listen(name)
+  radio.enable()
+  radio.listen(name)
   greet()
   while true do
-    if microbit.radio.answered(name) then greet() end
-    local piece = microbit.radio.rx()
+    if radio.answered(name) then greet() end
+    local piece = radio.rx()
     if piece then
       radio_session.run(function() typed(piece) end)
     end
-    microbit.sleep(5)
+    sleep(5)
   end
 end
 
@@ -371,7 +401,7 @@ local function typing()
     chars[#chars + 1] = c
     c = serial.getCharAsync()
   end
-  return table.concat(chars)
+  return concat(chars)
 end
 
 -- Whoever has the port serves it: the console's own session
@@ -382,46 +412,50 @@ end
 -- the next ones pile up in the port. So the typing is echoed
 -- as it comes and held until its line is whole.
 local function port_to_link(value)
-  if value == microbit.CODAL_SERIAL_EVT_HEAD_MATCH then
+  if value == HEAD_MATCH then
     local text = typing()
     serial.eventAfterAsync(1)
     write(text)
     typed_here = typed_here .. text
-    local at = string.find(typed_here, "[\r\n]")
+    local at = find(typed_here, "[\r\n]")
     while at do
-      microbit.radio.tx(typed_here:sub(1, at))
-      typed_here = typed_here:sub(at + 1)
-      at = string.find(typed_here, "[\r\n]")
+      radio.tx(sub(typed_here, 1, at))
+      typed_here = sub(typed_here, at + 1)
+      at = find(typed_here, "[\r\n]")
     end
   end
 end
 
---- What the link says goes to the port
+--- What the link says goes to the port, all that has come
 local function link_to_port()
-  local piece = microbit.radio.rx()
-  if piece then write(piece) end
+  local piece = radio.rx()
+  while piece do
+    write(piece)
+    piece = radio.rx()
+  end
 end
 
+local DEVICE_ID_SERIAL = uBit.DEVICE_ID_SERIAL
+local DEVICE_ID_RADIO = uBit.DEVICE_ID_RADIO
+
 function connect(name, timeout)
-  require("microbit.radio")
-  microbit.radio.enable()
-  if not microbit.radio.connect(name, timeout) then
-    print("Connection timed out.")
+  radio.enable()
+  if not radio.connect(name, timeout) then
+    say("Connection timed out.")
     return
   end
-  print(name .. " connected.")
+  say(name .. " connected.")
   typed_here = ""
-  handler[microbit.DEVICE_ID_SERIAL] = port_to_link
-  handler[microbit.DEVICE_ID_RADIO] = link_to_port
+  handler[DEVICE_ID_SERIAL] = port_to_link
+  handler[DEVICE_ID_RADIO] = link_to_port
 end
 
 -- Script-level setup (runs once before the main fiber
 -- is released):
--- show prompt, initialise the serial RX buffer, and arm
--- the first per-char head-match event on both transports.
--- After this returns, release_fiber() in main() hands
--- control to the scheduler; on_event() handles all events 
--- from the bus.
+-- show the prompt, then take what was typed while the
+-- script ran, which also arms the port's per-char
+-- head-match event. After this returns, release_fiber() in
+-- main() hands control to the scheduler; on_event() handles
+-- all events from the bus.
 serial_session.prompt()
-serial.getCharAsync()
-serial.eventAfterAsync(1)
+port_to_console(HEAD_MATCH)
