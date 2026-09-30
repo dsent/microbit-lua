@@ -88,52 +88,71 @@ const char firmware_version_mark[] = FIRMWARE_VERSION_MARK FIRMWARE_VERSION;
                     return 0;						\
                   })
 
-// create a Lua image table from C ImageData and place it on the stack
-void lua_createimage(lua_State *L, ImageData *ptr) {
-  int size = ptr->width * ptr->height;
+// create a Lua image table from pixels and place it on the stack
+static void lua_createimage(lua_State *L, int width, int height,
+                            const uint8_t *data) {
+  int size = width * height;
   lua_createtable(L, 0, 3);
   lua_pushliteral(L, "width");
-  lua_pushinteger(L, ptr->width);
+  lua_pushinteger(L, width);
   lua_settable(L, -3);
   lua_pushliteral(L, "height");
-  lua_pushinteger(L, ptr->height);
+  lua_pushinteger(L, height);
   lua_settable(L, -3);
   lua_pushliteral(L, "data");
   lua_createtable(L, size, 0);
   for(int i = 0; i < size; i++) {
-    lua_pushinteger(L, ptr->data[i]);
+    lua_pushinteger(L, data[i]);
     lua_rawseti(L, -2, i + 1);
   }
   lua_settable(L, -3);
 }
 
-// check and return a Lua function argument as a C++ Image object
-Image luaL_checkimage(lua_State *L, int narg) {
-  Image r;
-  int width;
-  int height;
-  uint8_t value;
+// The display's image as a Lua table. The screenshot is copied out and
+// let go first: making the table can raise an error, which would jump
+// past a C++ owner's destructor.
+static int push_screenshot(lua_State *L) {
+  uint8_t pixels[5 * 5];
+  int width = 0, height = 0;
+  {
+    Image shot = uBit.display.screenShot();
+    if (shot.getWidth() * shot.getHeight() <= (int)sizeof pixels) {
+      width = shot.getWidth();
+      height = shot.getHeight();
+      memcpy(pixels, shot.getBitmap(), width * height);
+    }
+  }
+  lua_createimage(L, width, height, pixels);
+  return 1;
+}
+
+// An image table's pixels, read into a buffer on Lua's heap left on the
+// stack, and its width and height: all the Lua is done here, before any
+// C++ Image is made of them (see push_codal_text).
+static const uint8_t *luaL_checkimage(lua_State *L, int narg,
+                                      int *width, int *height) {
+  uint8_t *pixels;
   luaL_checktype(L, narg, LUA_TTABLE);
   lua_getfield(L, narg, "width");
-  width = (int)lua_tointeger(L, -1);
+  *width = (int)lua_tointeger(L, -1);
   lua_getfield(L, narg, "height");
-  height = (int)lua_tointeger(L, -1);
+  *height = (int)lua_tointeger(L, -1);
   lua_pop(L, 2);
-  r = Image(width, height);
+  luaL_argcheck(L, 0 <= *width && *width <= INT16_MAX
+                && 0 <= *height && *height <= INT16_MAX, narg,
+                "width and height from 0 up");
+  pixels = (uint8_t *)lua_newuserdata(L, (size_t)*width * *height);
   lua_getfield(L, narg, "data");
-  for(int y = 0; y < height; y++) {
-    for(int x = 0; x < width; x++) {
-      lua_pushinteger(L, 1 + x + width * y);
+  for (int y = 0; y < *height; y++) {
+    for (int x = 0; x < *width; x++) {
+      lua_pushinteger(L, 1 + x + *width * y);
       lua_gettable(L, -2);
-      value = (uint8_t)lua_tointeger(L, -1);
+      pixels[x + *width * y] = (uint8_t)lua_tointeger(L, -1);
       lua_pop(L, 1);
-      if(r.setPixelValue(x, y, value) != DEVICE_OK) {
-        luaL_error(L, "image error");
-      }
     }
   }
   lua_pop(L, 1);
-  return r;
+  return pixels;
 }
 
 // read(n) of a port: up to n bytes, read into a buffer on Lua's heap and
@@ -172,12 +191,7 @@ static int read_into_lua(lua_State *L, Read read) {
     F(disable,     { uBit.display.disable();				\
                     return 0;						\
                   })							\
-    F(screenShot, { ImageData *ptr =					\
-                      uBit.display.screenShot().leakData();		\
-                    lua_createimage(L, ptr);				\
-                    ptr->decr();					\
-                    return 1;						\
-                  })							\
+    F(screenShot, { return push_screenshot(L); })			\
     F(setDisplayMode, { DisplayMode mode = 				\
                       static_cast<DisplayMode>(luaL_checkinteger(L, 1));\
                     uBit.display.setDisplayMode(mode);			\
@@ -197,9 +211,9 @@ static int read_into_lua(lua_State *L, Read read) {
                     lua_pushinteger(L, r);				\
                     return 1;						\
                   })							\
-    F(setSleep,   { NRF52LEDMatrix display = uBit.display;		\
-                    luaL_checkany(L, 1);				\
-                    display.setSleep(lua_toboolean(L, 1) != 0);		\
+    F(setSleep,   { luaL_checkany(L, 1);				\
+                    uBit.display.NRF52LEDMatrix::setSleep(		\
+                      lua_toboolean(L, 1) != 0);			\
                     return 0;						\
                   })							\
     F(stopAnimation, { uBit.display.stopAnimation();			\
@@ -233,14 +247,18 @@ static int read_into_lua(lua_State *L, Read read) {
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(animateAsync, { Image image = luaL_checkimage(L, 1);		\
+    F(animateAsync, { int width;					\
+                    int height;						\
                     int delay = luaL_checkint(L, 2);			\
                     int stride = luaL_checkint(L, 3);			\
                     int startingPosition =				\
                       luaL_optint(L, 4, DISPLAY_ANIMATE_DEFAULT_POS);	\
                     int autoClear =					\
                       luaL_optint(L, 5, DISPLAY_DEFAULT_AUTOCLEAR);	\
-                    int r = uBit.display.animateAsync(image,		\
+                    const uint8_t *pixels =				\
+                      luaL_checkimage(L, 1, &width, &height);		\
+                    int r = uBit.display.animateAsync(			\
+                                                      Image(width, height, pixels),\
                                                       delay,		\
                                                       stride,		\
                                                       startingPosition,	\
@@ -248,14 +266,18 @@ static int read_into_lua(lua_State *L, Read read) {
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(animate,    { lua_events_before_wait(); Image image = luaL_checkimage(L, 1);		\
+    F(animate,    { lua_events_before_wait(); int width;		\
+                    int height;						\
                     int delay = luaL_checkint(L, 2);			\
                     int stride = luaL_checkint(L, 3);			\
                     int startingPosition =				\
                       luaL_optint(L, 4, DISPLAY_ANIMATE_DEFAULT_POS);	\
                     int autoClear =					\
                       luaL_optint(L, 5, DISPLAY_DEFAULT_AUTOCLEAR);	\
-                    int r = uBit.display.animate(image,			\
+                    const uint8_t *pixels =				\
+                      luaL_checkimage(L, 1, &width, &height);		\
+                    int r = uBit.display.animate(				\
+                                                 Image(width, height, pixels),\
                                                  delay,			\
                                                  stride,		\
                                                  startingPosition,	\
@@ -638,8 +660,30 @@ Pin *luaL_checkPin(lua_State *L, int narg) {
                     return 1;						\
                   })
 
-void lua_pushManagedString(lua_State *L, ManagedString s) {
-  lua_pushlstring(L, s.toCharArray(), s.length());
+// Text CODAL makes, pushed onto Lua's stack. A Lua error raised while a
+// C++ object is alive jumps past its destructor, and what the object holds
+// on the heap is never given back; pushing text can run out of memory. So
+// the text is pushed in a protected call, and an error raised only once
+// its owner is gone.
+static int push_text_ref = LUA_NOREF;
+
+static int push_text(lua_State *L) {
+  const ManagedString *text = (const ManagedString *)lua_touserdata(L, 1);
+  lua_pushlstring(L, text->toCharArray(), text->length());
+  return 1;
+}
+
+// What make() returns, pushed
+template <typename Make>
+static int push_codal_text(lua_State *L, Make make) {
+  int status;
+  {
+    ManagedString text = make();
+    lua_rawgeti(L, LUA_REGISTRYINDEX, push_text_ref);
+    lua_pushlightuserdata(L, &text);
+    status = lua_pcall(L, 1, 1, 0);
+  }
+  return status == 0 ? 1 : lua_error(L);
 }
 
 ManagedString luaL_checkManagedString(lua_State *L, int narg) {
@@ -703,11 +747,12 @@ ManagedString luaL_checkManagedString(lua_State *L, int narg) {
     F(readAsync,  { return read_into_lua(L, [](uint8_t *b, int n) {	\
                       return uBit.serial.read(b, n, ASYNC); });		\
                   })							\
-    F(readUntil,  { lua_events_before_wait(); ManagedString delimiters =				\
-                      luaL_checkManagedString(L, 1);			\
-                    lua_pushManagedString(L,				\
-                      uBit.serial.readUntil(delimiters, SYNC_SLEEP));	\
-                    return 1;						\
+    F(readUntil,  { lua_events_before_wait();				\
+                    size_t n;						\
+                    const char *d = luaL_checklstring(L, 1, &n);	\
+                    return push_codal_text(L, [&]() {			\
+                      return uBit.serial.readUntil(ManagedString(d, n),	\
+                                                   SYNC_SLEEP); });	\
                   })							\
     F(setBaud,    { int baudrate = luaL_checkint(L, 1);			\
                     int r = uBit.serial.setBaud(baudrate);		\
@@ -857,11 +902,11 @@ extern MicroBitUARTService *uart;
                   })							\
     F(readUntil,  { if(!uart) { lua_pushnil(L); return 1; }		\
                     lua_events_before_wait();				\
-                    ManagedString delimiters =				\
-                      luaL_checkManagedString(L, 1);			\
-                    lua_pushManagedString(L,				\
-                      uart->readUntil(delimiters, SYNC_SLEEP));		\
-                    return 1;						\
+                    size_t n;						\
+                    const char *d = luaL_checklstring(L, 1, &n);	\
+                    return push_codal_text(L, [&]() {			\
+                      return uart->readUntil(ManagedString(d, n),	\
+                                             SYNC_SLEEP); });		\
                   })							\
     F(eventOn,    { if(!uart) { return 0; }				\
                     lua_events_before_wait();				\
@@ -1376,13 +1421,21 @@ static bool radio_one(const char *body, int len)
                     lua_pushinteger(L, r);					\
                     return 1;						\
                   })							\
-    F(recv,       { PacketBuffer r = uBit.radio.datagram.recv();	\
-                    if(r == PacketBuffer::EmptyPacket) {		\
+    F(recv,       { /* copied out before the push, which can raise */	\
+                    uint8_t packet[MICROBIT_RADIO_MAX_PACKET_SIZE];	\
+                    int n = -1;						\
+                    {							\
+                      PacketBuffer r = uBit.radio.datagram.recv();	\
+                      if (!(r == PacketBuffer::EmptyPacket)		\
+                          && r.length() <= (int)sizeof packet) {	\
+                        n = r.length();					\
+                        memcpy(packet, r.getBytes(), n);		\
+                      }							\
+                    }							\
+                    if (n < 0)						\
                       lua_pushnil(L);					\
-                    } else {						\
-                      lua_pushlstring(L,				\
-                        (const char*)r.getBytes(), r.length());		\
-                    }						 	\
+                    else						\
+                      lua_pushlstring(L, (const char *)packet, n);	\
                     return 1;						\
                   })							\
     F(send,       { size_t len;						\
@@ -1715,6 +1768,8 @@ static const LuaModule lua_modules[] = {
 };
 
 void register_lua_modules(lua_State *L) {
+  lua_pushcfunction(L, push_text);
+  push_text_ref = luaL_ref(L, LUA_REGISTRYINDEX);
   lua_modules_open(L, lua_modules);
 }
 
