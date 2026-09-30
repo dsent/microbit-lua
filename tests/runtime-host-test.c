@@ -20,6 +20,7 @@
 #include "lauxlib.h"
 #include "lualib.h"
 #include "lua-events.h"
+#include "lua-print.h"
 #include "tpbot.h"
 
 void lua_strip_debug(lua_State *L);
@@ -56,14 +57,36 @@ static void post(int source, int value) {
   lua_event_arrived(e);
 }
 
+// The port holds 254 characters, as the firmware sets it; what comes when
+// it is full is lost, as CODAL loses it.
+#define PORT_HOLDS 254
+static size_t lost;
+
 // Characters arriving at the port: the armed event fires on the first.
 static void type_in(const char *text) {
-  size_t n = strlen(text);
-  memcpy(typed + typed_len, text, n);
-  typed_len += n;
-  if (armed) {
+  size_t n = strlen(text), i;
+  for (i = 0; i < n; i++) {
+    if (typed_len - typed_at == PORT_HOLDS) {
+      lost++;
+      continue;
+    }
+    typed[typed_len++] = text[i];
+  }
+  if (armed && n > 0) {
     armed = 0;
     post(ID_SERIAL, HEAD_MATCH);
+  }
+}
+
+// Text sent over the cable as it goes, a few characters at a time
+static void send_paced(const char *text, size_t at_a_time) {
+  char piece[64];
+  size_t n = strlen(text), i;
+  for (i = 0; i < n; i += at_a_time) {
+    size_t k = n - i < at_a_time ? n - i : at_a_time;
+    memcpy(piece, text + i, k);
+    piece[k] = 0;
+    type_in(piece);
   }
 }
 
@@ -87,12 +110,58 @@ void lua_events_pause(uint32_t ms) {
     pauses[pauses_done++]();
 }
 
+void lua_print_out(const char *text, size_t length) {
+  char piece[1024];
+  if (length >= sizeof piece) length = sizeof piece - 1;
+  memcpy(piece, text, length);
+  piece[length] = 0;
+  note(piece);
+}
+
+// A robot that takes every command; robot_move's sleep is the firmware's,
+// which lets other fibers run and handles no events.
 int tpbot_i2c_write(int address, const char *data, size_t length) {
   (void)address; (void)data; (void)length;
-  return -1;
+  return 0;
 }
-void tpbot_sleep(uint32_t ms) { (void)ms; }
+void tpbot_sleep(uint32_t ms) {
+  char text[32];
+  snprintf(text, sizeof text, "<move %lu>", (unsigned long)ms);
+  note(text);
+  lua_events_pause(ms);
+}
 int tpbot_echo_us(void) { return -1; }
+
+// A radio link whose far end is a board that answers each line with
+// "=> " and the line: what tx sends comes back through rx, with the
+// radio's event.
+static char far_end[1024];
+static int linked;
+
+static int l_connect(lua_State *L) {
+  linked = 1;
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
+static int l_tx(lua_State *L) {
+  const char *text = luaL_checkstring(L, 1);
+  size_t n = strlen(far_end);
+  snprintf(far_end + n, sizeof far_end - n, "=> %s\n", text);
+  lua_pushboolean(L, 1);
+  post(ID_RADIO, 1);
+  return 1;
+}
+
+static int l_rx(lua_State *L) {
+  if (!linked || !far_end[0]) {
+    lua_pushnil(L);
+    return 1;
+  }
+  lua_pushstring(L, far_end);
+  far_end[0] = 0;
+  return 1;
+}
 
 static int l_send(lua_State *L) {
   note(luaL_checkstring(L, 1));
@@ -187,10 +256,10 @@ static void board(lua_State *L) {
   lua_newtable(L);
   set(L, "enable", l_nothing);
   set(L, "listen", l_nothing);
-  set(L, "connect", l_nothing);
+  set(L, "connect", l_connect);
   set(L, "answered", l_nothing);
-  set(L, "tx", l_nothing);
-  set(L, "rx", l_nothing);
+  set(L, "tx", l_tx);
+  set(L, "rx", l_rx);
   lua_setfield(L, -2, "radio");
   lua_setglobal(L, "microbit");
 }
@@ -201,6 +270,9 @@ static void plan(Action a) {
 }
 
 static void fresh(void) {
+  lost = 0;
+  linked = 0;
+  far_end[0] = 0;
   out[0] = 0;
   typed_at = typed_len = 0;
   armed = 0;
@@ -209,11 +281,40 @@ static void fresh(void) {
   on_error = NULL;
 }
 
+// The heap: how much Lua holds, and how much it may, for the tests that
+// run it out
+static size_t heap_used, heap_limit = (size_t)-1;
+
+static void *alloc(void *ud, void *ptr, size_t old, size_t size) {
+  (void)ud;
+  if (size == 0) {
+    free(ptr);
+    heap_used -= old;
+    return NULL;
+  }
+  if (size > old && heap_used + (size - old) > heap_limit)
+    return NULL;
+  ptr = realloc(ptr, size);
+  if (ptr) heap_used += size - old;
+  return ptr;
+}
+
+static int panicked;
+
+static int panic(lua_State *L) {
+  printf("PANIC %s\n", lua_tostring(L, -1));
+  panicked++;
+  exit(3);
+}
+
 // Boot the board with text as its script, as the firmware does
 static void boot_script(const char *text, size_t length) {
   lua_State *L;
   if (board_L) lua_close(board_L);
-  board_L = L = luaL_newstate();
+  heap_used = 0;
+  heap_limit = (size_t)-1;
+  board_L = L = lua_newstate(alloc, NULL);
+  lua_atpanic(L, panic);
   luaopen_base(L);
   luaopen_table(L);
   luaopen_string(L);
@@ -221,6 +322,7 @@ static void boot_script(const char *text, size_t length) {
   lua_settop(L, 0);
   board(L);
   tpbot_register_globals(L);
+  lua_print_open(L);
   lua_events_open(L, ID_SERIAL, HEAD_MATCH);
   if (luaL_loadbuffer(L, text, length, "embedded")) {
     fprintf(stderr, "%s\n", lua_tostring(L, -1));
@@ -306,6 +408,13 @@ static void press_three(void) {
   post(ID_BUTTON_AB, CLICK);
 }
 
+// The port's event, with a line, while a command sleeps
+static void type_and_post_the_port(void) {
+  memcpy(typed + typed_len, "print(3)\r", 9);
+  typed_len += 9;
+  post(ID_SERIAL, HEAD_MATCH);
+}
+
 static void press_a_and_type(void) {
   press_a();
   type_in("print(6*7)\r");
@@ -345,8 +454,32 @@ static const char *LIBRARY_FIELDS[] = {
   "string.format", "string.find", "string.gmatch", "string.match",
   "string.sub", "table.insert", "table.concat", "microbit.display.scroll",
   "microbit.serial.send", "microbit.serial.getCharAsync",
-  "microbit.serial.eventAfterAsync", "microbit.handler", NULL
+  "microbit.serial.eventAfterAsync", "microbit.handler",
+  "microbit.radio.enable", "microbit.radio.connect", "microbit.radio.tx",
+  "microbit.radio.rx", "microbit.sleep", NULL
 };
+
+// Every way into the runtime's handlers still works: a line, a line with
+// a backspace, a button, and a line over a radio link
+static void still_answers(const char *after) {
+  char what[256];
+  const char *said = line("'hi', {a = 1}");
+  snprintf(what, sizeof what, "the REPL answers after %s", after);
+  expect(strstr(said, "=> \"hi\"\t{a = 1}\r\n> ") != NULL, what);
+  said = line("6*8\b7");
+  snprintf(what, sizeof what, "... a backspace, after %s", after);
+  expect(strstr(said, "=> 42\r\n> ") != NULL, what);
+  {
+    size_t before = strlen(out);
+    press_a();
+    snprintf(what, sizeof what, "... a button, after %s", after);
+    expect(strstr(out + before, "<scroll A>") != NULL, what);
+  }
+  line("connect('zezop', 10)");
+  said = line("1+1");
+  snprintf(what, sizeof what, "... a line over the radio, after %s", after);
+  expect(strstr(said, "=> 1+1") != NULL, what);
+}
 
 static void the_repl(void) {
   const char *said;
@@ -443,22 +576,18 @@ static void globals_taken_away(void) {
     boot("");
     snprintf(take, sizeof take, "_G.%s = nil", GLOBALS[i]);
     line(take);
-    said = line("'hi', {a = 1}");
-    snprintf(what, sizeof what, "the REPL answers after %s", take);
-    expect(strstr(said, "=> \"hi\"\t{a = 1}\r\n> ") != NULL, what);
     said = line("print(6*7)");
-    snprintf(what, sizeof what, "... and print after %s", take);
+    snprintf(what, sizeof what, "print answers after %s", take);
     expect(!strcmp(GLOBALS[i], "print")
            || strstr(said, "42\r\n> ") != NULL, what);
+    still_answers(take);
   }
   for (i = 0; LIBRARY_FIELDS[i]; i++) {
     fresh();
     boot("");
     snprintf(take, sizeof take, "%s = nil", LIBRARY_FIELDS[i]);
     line(take);
-    said = line("'hi', {a = 1}");
-    snprintf(what, sizeof what, "the REPL answers after %s", take);
-    expect(strstr(said, "=> \"hi\"\t{a = 1}\r\n> ") != NULL, what);
+    still_answers(take);
   }
   for (i = 0; GLOBALS[i]; i++) {
     fresh();
@@ -469,6 +598,94 @@ static void globals_taken_away(void) {
              take);
     expect(strstr(said, "=> 42\r\n> ") != NULL, what);
   }
+}
+
+// Nothing on the way from a line to the prompt leaves the port unarmed
+static void the_repl_always_comes_back(void) {
+  static const char *const BAD[] = {
+    "error(setmetatable({}, { __tostring = function() error('x') end }))",
+    "error(setmetatable({}, { __tostring = function() return {} end }))",
+    "local p = newproxy(true) "
+    "getmetatable(p).__tostring = function() error('x') end return p",
+    NULL };
+  const char *said;
+  char what[256];
+  int i;
+  for (i = 0; BAD[i]; i++) {
+    fresh();
+    boot("");
+    line(BAD[i]);
+    said = line("print(6*7)");
+    snprintf(what, sizeof what, "the prompt comes back after %s", BAD[i]);
+    expect(armed && strstr(said, "42\r\n> ") != NULL, what);
+  }
+  // A result too big to show: the heap runs out showing it
+  fresh();
+  boot("");
+  line("t = {} for i = 1, 500 do t[i] = i end");
+  lua_gc(board_L, LUA_GCCOLLECT, 0);
+  heap_limit = heap_used + 3000;
+  said = line("t");
+  heap_limit = (size_t)-1;
+  expect(strstr(said, "not enough memory") != NULL,
+         "a result too big for the heap says so");
+  said = line("print(6*7)");
+  expect(armed && strstr(said, "42\r\n> ") != NULL,
+         "... and the prompt comes back after it");
+}
+
+// Lines sent together run one after another: a line that sleeps ends
+// before the next one starts, whether the next came with it or later
+static void lines_in_turn(void) {
+  static const char *const order[] = {
+    "<sleep>", "</sleep>", "> print(2)\r\r\n2\r\n> ", NULL };
+  static const char *const later[] = {
+    "<sleep>", "</sleep>", "print(3)", "3\r\n> ", NULL };
+  fresh();
+  boot("");
+  line("microbit.sleep(50)\rprint(2)");
+  expect(in_order(out, order), "two lines sent at once run in turn");
+  fresh();
+  boot("");
+  plan(type_and_post_the_port);
+  line("microbit.sleep(50)");
+  expect(in_order(out, later) && count(out, "print(3)") == 1,
+         "the port's event waits out a sleep");
+}
+
+// A robot program sent at once, as slalom sends one: every move arrives
+// and runs, though the first sleeps while the rest comes in
+static void robot_file(void) {
+  static const char MOVE[] = "robot_move(40, 40, 2)\r";
+  char file[512] = "";
+  char what[128];
+  int i, moves[] = { 4, 10 };
+  for (i = 0; i < 2; i++) {
+    int k;
+    fresh();
+    boot("");
+    file[0] = 0;
+    for (k = 0; k < moves[i]; k++)
+      strcat(file, MOVE);
+    type_in(file);
+    snprintf(what, sizeof what,
+             "a %d-move file (%zu characters) sent at once runs whole",
+             moves[i], strlen(file));
+    expect(count(out, "<move 2000>") == moves[i] && lost == 0
+           && strstr(out, "error") == NULL, what);
+  }
+  // 300 characters sent as the cable carries them, to an idle prompt
+  fresh();
+  boot("");
+  {
+    char text[400] = "x = \"";
+    size_t n = strlen(text);
+    memset(text + n, 'a', 290);
+    strcpy(text + n + 290, "\"\r#x\r");
+    send_paced(text, 12);
+  }
+  expect(lost == 0 && strstr(out, "=> 290\r\n> ") != NULL,
+         "300 characters sent to the prompt arrive whole");
 }
 
 static void programs_alone(void) {
@@ -520,6 +737,22 @@ static void programs_alone(void) {
     expect(in_order(out, order), "... and after boot as well");
   }
 
+  // print goes to the port, a line at a time
+  fresh();
+  boot_alone("print(1, 'a') print('x\\ny') print()");
+  expect(strstr(out, "1\ta\r\nx\r\ny\r\n\r\n<booted>") != NULL,
+         "a program's print writes to the port, lines ended by \\r\\n");
+
+  // A metamethod of _G's that fails does not reach the dispatcher
+  fresh();
+  boot_alone(
+    "setmetatable(_G, { __index = function(t, k) error('undeclared ' .. k) "
+    "end })\n"
+    "microbit.display.scroll('set')\n");
+  press_a();
+  expect(strstr(out, "<scroll set><booted>") != NULL,
+         "an _G whose __index fails leaves events harmless");
+
   // No on_event and no fallback: events go nowhere, and nothing breaks
   fresh();
   plan(press_a);
@@ -560,6 +793,9 @@ int main(int argc, char **argv) {
   events_and_the_repl();
   on_event_and_print();
   globals_taken_away();
+  the_repl_always_comes_back();
+  lines_in_turn();
+  robot_file();
   programs_alone();
   printf("%d checks, %d failed\n", checks, failures);
   return failures != 0;

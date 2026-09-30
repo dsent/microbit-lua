@@ -222,7 +222,7 @@ local function make_session(transport)
   function s.prompt()
     write(s.buffer == "" and "> " or ">> ")
   end
-  function s.submit(text)
+  local function run_line(text)
     s.buffer = s.buffer .. text .. "\n"
     if s.transport.crlf_before_result then
       write("\r\n")
@@ -236,14 +236,30 @@ local function make_session(transport)
       end
       s.buffer = ""
     end
-    collectgarbage("collect")
-    s.prompt()
   end
-  function s.run(f)
+  -- Whatever goes wrong on the way, even showing a result that cannot
+  -- be shown or running out of memory, the line is over and the prompt
+  -- comes back.
+  function s.submit(text)
+    local ran, err = pcall(run_line, text)
+    if not ran then
+      s.buffer = ""
+      collectgarbage("collect")
+      local shown, words = pcall(tostring, err)
+      if not shown or type(words) ~= "string" then
+        words = "the result cannot be shown"
+      end
+      pcall(say, "Runtime error: " .. words)
+    end
+    collectgarbage("collect")
+    pcall(s.prompt)
+  end
+  function s.run(f, ...)
     local saved = active_session
     active_session = s
-    f()
+    local ran, err = pcall(f, ...)
     active_session = saved
+    if not ran then error(err, 0) end
   end
   return s
 end
@@ -278,29 +294,40 @@ local keypress = {
 
 local typed_here = ""
 
+-- What has been typed, from c on, into the console
+local function read_port(c)
+  c = c or serial_session.transport.getChar()
+  local echo = ""
+  while c do
+    local input = keypress[c]
+    if input then
+      if #echo > 0 then
+        write(echo)
+        echo = ""
+      end
+      input()
+    else
+      serial_session.buffer = serial_session.buffer .. c
+      echo = echo .. c
+    end
+    c = serial_session.transport.getChar()
+  end
+  if #echo > 0 then
+    write(echo)
+  end
+end
+
+-- The port is armed however the reading ends, and then looked at once
+-- more: a character that came before it was armed raises no event.
 local function port_to_console(value)
   if value == HEAD_MATCH then
     serial_session.run(function()
-      local c = serial_session.transport.getChar()
-      local echo = ""
-      while c do
-        local input = keypress[c]
-        if input then
-          if #echo > 0 then
-            write(echo)
-            echo = ""
-          end
-          input()
-        else
-          serial_session.buffer = serial_session.buffer .. c
-          echo = echo .. c
-        end
+      local c
+      repeat
+        pcall(read_port, c)
+        serial_session.transport.arm()
         c = serial_session.transport.getChar()
-      end
-      if #echo > 0 then
-        write(echo)
-      end
-      serial_session.transport.arm()
+      until not c
     end)
   end
 end

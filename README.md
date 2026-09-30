@@ -151,9 +151,12 @@ deepest user is the Lua parser (~4 KB) parsing the embedded chunk; see
 ## Events
 
 The firmware calls the global `on_event(source, value, timestamp)` for each
-event: a button, the serial port, the radio. When `on_event` is not a
-function, the event goes to the handler the script gave
-`microbit.eventFallback()`, its own, so the REPL keeps answering.
+event: a button, the serial port, the radio. When `on_event` cannot be
+called, the event goes to the handler the script gave
+`microbit.eventFallback()`, its own, so the REPL keeps answering; with no
+such handler, as in a program that is the board's whole script and sets no
+`on_event`, the event goes nowhere. `on_event` is read straight from the
+globals, whatever metatable a program gives `_G`.
 
 One Lua call runs at a time. An event that comes while one runs waits in a
 line of 16, in the order the events came. The running call handles the
@@ -163,19 +166,27 @@ sleeps. The running call is the script at boot, or a command at the REPL; a
 handler's own `microbit.sleep` handles nothing, so one handler always ends
 before the next starts. What still waits when the call is over is handled
 then. When the line is full the oldest event in it is dropped;
-`microbit.eventsDropped()` says how many have been since boot. The serial
-port's event the REPL waits for is kept apart and never lost, and the port
-holds up to 64 characters typed while the script at boot runs, for the REPL
-to read when it starts.
+`microbit.eventsDropped()` says how many have been since boot.
+
+The serial port's event the REPL waits for is kept apart and never lost. It
+goes first when the running call is over, and never at a sleep, so the lines
+sent to the REPL run one after another. The port holds 254 characters that
+wait to be read, what is typed while the script at boot runs included, and
+the REPL reads them when it starts.
 
 A script that stops on a mistake at boot shows `Lua error!` and the message
 on the display, once. The board then handles events with the `on_event` the
 script set before it stopped, if any.
 
+`print` writes to the serial port, its values apart by tabs and each line
+ended by `\r\n`; the firmware's script puts its own in its place.
+
 The REPL takes what it uses (`pcall`, `print`, `tostring`, the string and
-table functions, the serial and display calls) when the script loads, so a
-program that changes or removes those globals leaves the prompt answering.
-`print` stays a global a program may replace for its own use.
+table functions, the serial, display and radio calls) when the script loads,
+so a program that changes or removes those globals leaves the prompt
+answering. `print` stays a global a program may replace for its own use.
+Whatever goes wrong on the way from a line to its result, the prompt comes
+back and the port is armed.
 
 
 ## TPBot

@@ -3,8 +3,9 @@
 # patched sources a firmware build leaves in libraries/:
 # - tpbot-host-test: source/tpbot.c beside the Lua it replaced
 #   (tests/tpbot-reference.lua), call by call;
-# - runtime-host-test: source/lua-script.lua over a stand-in board, with
-#   events through source/lua-events.c.
+# - runtime-host-test: source/lua-script.lua, and programs in its place,
+#   over a stand-in board, with events through source/lua-events.c and
+#   print through source/lua-print.c.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -28,6 +29,7 @@ STRICT=("${FLAGS[@]}" -Wall -Wextra -Werror)
 cc "${STRICT[@]}" -o "$DIR/tpbot" "$ROOT/tests/tpbot-host-test.c" \
   "$ROOT/source/tpbot.c" "$DIR"/*.o -lm
 cc "${STRICT[@]}" -o "$DIR/runtime" "$ROOT/tests/runtime-host-test.c" \
-  "$ROOT/source/tpbot.c" "$ROOT/source/lua-events.c" "$DIR"/*.o -lm
+  "$ROOT/source/tpbot.c" "$ROOT/source/lua-events.c" \
+  "$ROOT/source/lua-print.c" "$DIR"/*.o -lm
 "$DIR/tpbot" "$ROOT/tests/tpbot-reference.lua"
 "$DIR/runtime" "$ROOT/source/lua-script.lua"
