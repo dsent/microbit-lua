@@ -15,6 +15,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
+#include <unistd.h>
 
 #include "lua.h"
 #include "lauxlib.h"
@@ -26,8 +28,16 @@
 void lua_strip_debug(lua_State *L);
 
 enum {
-  ID_BUTTON_A = 1, ID_BUTTON_B = 2, ID_BUTTON_AB = 3, ID_RADIO = 9,
-  ID_SERIAL = 12, HEAD_MATCH = 2, CLICK = 3, LONG_CLICK = 4
+  ID_BUTTON_A = 1, ID_BUTTON_B = 2, ID_BUTTON_AB = 3, ID_DISPLAY = 7,
+  ID_RADIO = 9, ID_SERIAL = 12, HEAD_MATCH = 2, CLICK = 3, LONG_CLICK = 4,
+  RX_FULL = 3, DATA_RECEIVED = 4, ANIMATION_COMPLETE = 1
+};
+
+// The events the firmware lists as noise, and its port's event
+static const LuaEventId port_event = { ID_SERIAL, HEAD_MATCH };
+static const LuaEventId noise[] = {
+  { ID_SERIAL, DATA_RECEIVED }, { ID_SERIAL, RX_FULL },
+  { ID_DISPLAY, ANIMATION_COMPLETE },
 };
 
 // The board: what went out of the port and onto the display, in order,
@@ -90,10 +100,10 @@ static void send_paced(const char *text, size_t at_a_time) {
   }
 }
 
-void lua_events_show_error(const char *message) {
+void lua_events_show_error(const char *message, bool wait) {
   Action then = on_error;
   on_error = NULL;
-  note("<error ");
+  note(wait ? "<error " : "<error, going on ");
   note(message);
   note(">");
   if (then)
@@ -104,7 +114,10 @@ uint32_t lua_events_now(void) {
   return clock_ms;
 }
 
+static int pauses_all;
+
 void lua_events_pause(uint32_t ms) {
+  pauses_all++;
   clock_ms += ms;
   if (pauses_done < pauses_planned)
     pauses[pauses_done++]();
@@ -158,8 +171,24 @@ static int l_rx(lua_State *L) {
   return 1;
 }
 
+// What the port does on the next send of a given text: take in more
+// characters, unarmed, as if they came while it sent; or fail once.
+static const char *send_trigger, *send_brings;
+static int send_fails;
+
 static int l_send(lua_State *L) {
-  note(luaL_checkstring(L, 1));
+  const char *text = luaL_checkstring(L, 1);
+  if (send_fails) {
+    send_fails = 0;
+    return luaL_error(L, "the port failed");
+  }
+  note(text);
+  if (send_trigger && strcmp(text, send_trigger) == 0) {
+    size_t n = strlen(send_brings);
+    memcpy(typed + typed_len, send_brings, n);
+    typed_len += n;
+    send_trigger = NULL;
+  }
   return 0;
 }
 
@@ -178,10 +207,24 @@ static int l_arm(lua_State *L) {
   return 0;
 }
 
+// A scroll takes time, letting other fibers run, and says when it is over
 static int l_scroll(lua_State *L) {
   note("<scroll ");
   note(luaL_checkstring(L, 1));
   note(">");
+  lua_events_pause(10);
+  post(ID_DISPLAY, ANIMATION_COMPLETE);
+  return 0;
+}
+
+// Not the firmware's: lets a program post an event, as a sensor would
+static int posts_left;
+
+static int l_post(lua_State *L) {
+  if (posts_left > 0) {
+    posts_left--;
+    post(luaL_checkint(L, 1), luaL_checkint(L, 2));
+  }
   return 0;
 }
 
@@ -214,7 +257,7 @@ static int l_name(lua_State *L) {
 static const LuaApi l_microbit[] = {
   {"version", l_version, 0}, {"friendlyName", l_name, 0},
   {"sleep", l_sleep, 0}, {"eventsDropped", lua_events_dropped, 0},
-  {"eventFallback", lua_events_fallback, 0},
+  {"eventFallback", lua_events_fallback, 0}, {"post", l_post, 0},
   {"DEVICE_ID_BUTTON_A", NULL, ID_BUTTON_A},
   {"DEVICE_ID_BUTTON_B", NULL, ID_BUTTON_B},
   {"DEVICE_ID_BUTTON_AB", NULL, ID_BUTTON_AB},
@@ -258,6 +301,10 @@ static void plan(Action a) {
 }
 
 static void fresh(void) {
+  pauses_all = 0;
+  send_trigger = NULL;
+  send_fails = 0;
+  posts_left = 1000;
   bus_writes = 0;
   lost = 0;
   linked = 0;
@@ -310,7 +357,7 @@ static void boot_script(const char *text, size_t length) {
   luaopen_math(L);
   lua_settop(L, 0);
   lua_modules_open(L, modules);
-  lua_events_open(L, ID_SERIAL, HEAD_MATCH);
+  lua_events_open(L, port_event, noise, sizeof noise / sizeof noise[0]);
   if (luaL_loadbuffer(L, text, length, "embedded")) {
     fprintf(stderr, "%s\n", lua_tostring(L, -1));
     exit(2);
@@ -411,6 +458,18 @@ static void type_and_post_the_port(void) {
   post(ID_SERIAL, HEAD_MATCH);
 }
 
+static void type_a_sleeping_line(void) {
+  type_in("microbit.sleep(50)\r");
+}
+
+// A line typed at the armed prompt, whose port event is lost on its way
+static void type_and_miss_the_port(void) {
+  memcpy(typed + typed_len, "6*7\r", 4);
+  typed_len += 4;
+  armed = 0;
+  lua_events_port_missed();
+}
+
 static void press_a_and_type(void) {
   press_a();
   type_in("print(6*7)\r");
@@ -432,8 +491,9 @@ static char *slurp(const char *path, size_t *length) {
   fseek(f, 0, SEEK_END);
   *length = (size_t)ftell(f);
   fseek(f, 0, SEEK_SET);
-  text = malloc(*length);
+  text = malloc(*length + 1);
   if (fread(text, 1, *length, f) != *length) { perror(path); exit(2); }
+  text[*length] = 0;
   fclose(f);
   return text;
 }
@@ -619,6 +679,12 @@ static void globals_taken_away(void) {
   }
 }
 
+// Heap left for a line whose result, shown, needs more: enough to compile
+// the line and run it, too little for the text of 2000 numbers
+#ifndef TOO_BIG_MARGIN
+#define TOO_BIG_MARGIN 8000
+#endif
+
 // Nothing on the way from a line to the prompt leaves the port unarmed
 static void the_repl_always_comes_back(void) {
   static const char *const BAD[] = {
@@ -641,9 +707,9 @@ static void the_repl_always_comes_back(void) {
   // A result too big to show: the heap runs out showing it
   fresh();
   boot("");
-  line("t = {} for i = 1, 500 do t[i] = i end");
+  line("t = {} for i = 1, 2000 do t[i] = i end");
   lua_gc(board_L, LUA_GCCOLLECT, 0);
-  heap_limit = heap_used + 3000;
+  heap_limit = heap_used + TOO_BIG_MARGIN;
   said = line("t");
   heap_limit = (size_t)-1;
   expect(strstr(said, "not enough memory") != NULL,
@@ -819,7 +885,129 @@ static void programs_alone(void) {
   }
 }
 
+static void round_two(void) {
+  const char *said;
+  {
+    // A line whose port event waited behind another handler still has
+    // safe points: B, pressed while it sleeps, is handled in the sleep
+    static const char *const order[] = {
+      "microbit.sleep(50)", "<sleep>", "<scroll B>", "</sleep>", NULL };
+    fresh();
+    boot("");
+    line("microbit.handler[1] = function() microbit.sleep(20) end");
+    plan(type_a_sleeping_line);
+    plan(press_b);
+    press_a();
+    expect(in_order(out, order),
+           "a line that waited behind a handler handles events as it sleeps");
+  }
+  // A sleep ends on time while a handler keeps raising events
+  fresh();
+  boot_program(
+    "local n = 0\n"
+    "function on_event(s, v) n = n + 1 microbit.post(1, 3) end\n"
+    "microbit.post(1, 3)\n"
+    "microbit.sleep(100)\n"
+    "microbit.display.scroll(n > 0 and n < 50 and 'on time' or 'late')\n");
+  expect(strstr(out, "<scroll on time>") != NULL,
+         "a sleep ends on time while each handler raises another event");
+  // What the firmware lists as noise never reaches a handler
+  fresh();
+  boot_program(
+    "local shown = 0\n"
+    "function on_event(s, v) if s == 7 then shown = shown + 1 end end\n"
+    "microbit.display.scroll('x')\n"
+    "microbit.sleep(50)\n"
+    "microbit.display.scroll(shown == 0 and 'quiet' or 'noise')\n");
+  expect(strstr(out, "<scroll quiet>") != NULL,
+         "a scroll's end, and the port's own noise, reach no handler");
+  // A handler's mistake is shown without holding up the program
+  fresh();
+  boot_program(
+    "function on_event(s, v) error('oops') end\n"
+    "microbit.post(1, 3)\n"
+    "microbit.sleep(20)\n"
+    "microbit.display.scroll('went on')\n");
+  expect(strstr(out, "<error, going on ") != NULL
+         && strstr(out, "<scroll went on>") != NULL,
+         "a handler's mistake is shown without waiting for it");
+  // sleep(0) lets other fibers run
+  fresh();
+  boot_program("microbit.sleep(0)");
+  expect(pauses_all >= 1, "sleep(0) still pauses");
+  {
+    // A program's own on_event nests nothing, the port's event included
+    static const char *const order[] = {
+      "<scroll in12>", "<scroll out12>", "<scroll in2>", "<scroll out2>",
+      NULL };
+    fresh();
+    boot_program(
+      "function on_event(s, v)\n"
+      "  microbit.display.scroll('in' .. s)\n"
+      "  microbit.sleep(20)\n"
+      "  microbit.display.scroll('out' .. s)\n"
+      "end\n");
+    plan(press_b);
+    post(ID_SERIAL, HEAD_MATCH);
+    expect(in_order(out, order),
+           "a program's on_event given the port's event nests no other");
+  }
+  // The port's event, lost for want of a fiber while a handler ran, is
+  // taken as waiting
+  fresh();
+  boot("");
+  line("microbit.handler[1] = function() microbit.sleep(20) end");
+  plan(type_and_miss_the_port);
+  press_a();
+  expect(strstr(out, "6*7\r\r\n=> 42") != NULL,
+         "a port event that found no fiber is not lost");
+  // A callable table whose __call is not a function falls back
+  fresh();
+  boot("");
+  line("_G.on_event = setmetatable({}, { __call = 1 })");
+  said = line("6*7");
+  expect(strstr(said, "=> 42\r\n> ") != NULL,
+         "an on_event with a __call that is not a function falls back");
+  // An error from __gc does not keep the prompt away
+  fresh();
+  boot("");
+  said = line("p = newproxy(true) getmetatable(p).__gc = "
+              "function() error('gc') end p = nil");
+  expect(strstr(said, "> ") != NULL && armed,
+         "a __gc that raises an error leaves the prompt");
+  said = line("6*7");
+  expect(strstr(said, "=> 42\r\n> ") != NULL, "... and the REPL answering");
+  // A character that comes as the echo goes out, before the port is armed
+  // again, is read all the same
+  fresh();
+  boot("");
+  send_trigger = "6";
+  send_brings = "\r";
+  type_in("6*7");
+  expect(strstr(out, "=> 42\r\n> ") != NULL,
+         "a character that came before the port was armed is read");
+  // The port failing mid-line leaves it armed
+  fresh();
+  boot("");
+  send_fails = 1;
+  type_in("x");
+  expect(armed, "the port is armed after a failure while reading it");
+  type_in("\r");
+  said = line("6*7");
+  expect(strstr(said, "=> 42\r\n> ") != NULL, "... and the REPL answers");
+}
+
+// A handler loop that never ends would hang the run: it fails instead
+static void too_long(int signal) {
+  (void)signal;
+  printf("FAIL the checks did not finish within a minute: an event loop "
+         "that never ends?\n");
+  exit(1);
+}
+
 int main(int argc, char **argv) {
+  signal(SIGALRM, too_long);
+  alarm(60);
   if (argc != 2) {
     fprintf(stderr, "usage: %s source/lua-script.lua\n", argv[0]);
     return 2;
@@ -832,6 +1020,7 @@ int main(int argc, char **argv) {
   the_repl_always_comes_back();
   lines_in_turn();
   robot_file();
+  round_two();
   programs_alone();
   printf("%d checks, %d failed\n", checks, failures);
   return failures != 0;

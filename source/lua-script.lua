@@ -7,8 +7,9 @@ require("tpbot")
 
 -- What the REPL cannot do without, taken here so that the prompt comes
 -- back even after a line takes away the global: a line runs under pcall,
--- and every character goes out through gmatch.
-local pcall, gmatch = pcall, string.gmatch
+-- every character goes out through gmatch, and a session passes on a
+-- mistake with error.
+local pcall, gmatch, error = pcall, string.gmatch, error
 local HEAD_MATCH = uBit.CODAL_SERIAL_EVT_HEAD_MATCH
 local CLICK = uBit.DEVICE_BUTTON_EVT_CLICK
 local LONG_CLICK = uBit.DEVICE_BUTTON_EVT_LONG_CLICK

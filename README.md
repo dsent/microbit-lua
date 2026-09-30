@@ -167,24 +167,31 @@ robot. The firmware's own script requires `microbit` and its `audio`,
 ## Events
 
 The firmware calls the global `on_event(source, value, timestamp)` for each
-event: a button, the serial port, the radio. When `on_event` cannot be
-called, the event goes to the handler the script gave
-`microbit.eventFallback()`, its own, so the REPL keeps answering; with no
-such handler, as in a program that is the board's whole script and sets no
-`on_event`, the event goes nowhere. `on_event` is read straight from the
-globals, whatever metatable a program gives `_G`.
+event: a button, the serial port, the radio. It reads `on_event` straight
+from the globals, whatever metatable a program gives `_G`. A line typed at
+the REPL runs in an environment of its own, so it sets the global with
+`_G.on_event = f`. When `on_event` cannot be called, the event goes to the
+handler the script gave `microbit.eventFallback()`, its own, so the REPL
+keeps answering; with no such handler, as in a program that is the board's
+whole script and sets no `on_event`, the event goes nowhere. Events that are
+only noise to a program never reach it: the serial port saying it has data,
+or that it is full, and a scroll that has ended.
 
 One Lua call runs at a time. An event that comes while one runs waits in a
 line of 16, in the order the events came. The running call handles the
-events that wait whenever it is in `microbit.sleep`: a program that sets
-`on_event` and then loops with `microbit.sleep` gets each event while it
-sleeps. The running call is the script at boot, or a command at the REPL; a
-handler's own `microbit.sleep` handles nothing, so one handler always ends
-before the next starts. What still waits when the call is over is handled
-then. When the line is full the oldest event in it is dropped;
+events that were waiting whenever it enters `microbit.sleep`, and again
+every 10 ms while it sleeps: a program that sets `on_event` and then loops
+with `microbit.sleep` gets each event while it sleeps. A sleep ends on time
+however many events come, but lasts as long as the handlers it runs. The
+running call is the script at boot, or a command at the REPL; a handler's
+own `microbit.sleep` handles nothing, so one handler always ends before the
+next starts, and so does a program's own `on_event` when it gets the serial
+port's event. What still waits when the call is over is handled then. When
+the line is full the oldest event in it is dropped;
 `microbit.eventsDropped()` says how many have been since boot.
 
-The serial port's event the REPL waits for is kept apart and never lost. It
+The serial port's event the REPL waits for is kept apart and never lost,
+even when the firmware finds no memory for the fiber that would carry it. It
 goes first when the running call is over, and never at a sleep, so the lines
 sent to the REPL run one after another. The port holds 254 characters that
 wait to be read, what is typed while the script at boot runs included, and
@@ -193,17 +200,19 @@ the REPL reads them when it starts.
 `robot_move`'s own wait handles nothing: a button pressed while the robot
 drives is handled when the move is over.
 
+A mistake in a handler scrolls by on the display while the program goes on.
 A script that stops on a mistake at boot shows `Lua error!` and the message
-on the display, once. The board then handles events with the `on_event` the
-script set before it stopped, if any.
+on the display, once, before anything else happens. The board then handles
+events with the `on_event` the script set before it stopped, if any.
 
 Lua's own `print` writes to stdout, which goes nowhere on this board; the
 firmware's script puts its own in its place, writing to the serial port.
 
 Whatever goes wrong on the way from a line to its result, the prompt comes
-back and the port is armed. The REPL keeps `pcall` and `string.gmatch` of
-its own for that; a line that takes away another global it uses can stop
-what the REPL shows, and the global can be put back from the prompt.
+back and the port is armed. The REPL keeps `pcall`, `string.gmatch` and
+`error` of its own for that; a line that takes away another global it uses
+can stop what the REPL shows, and the global can be put back from the
+prompt.
 
 
 ## TPBot
