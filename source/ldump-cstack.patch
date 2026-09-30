@@ -1,0 +1,23 @@
+--- ldump.c
++++ ldump.c
+@@ -11,6 +11,8 @@
+ 
+ #include "lua.h"
+ 
++#include "ldebug.h"
++#include "ldo.h"
+ #include "lobject.h"
+ #include "lstate.h"
+ #include "lundump.h"
+@@ -128,6 +130,11 @@
+ 
+ static void DumpFunction(const Proto* f, const TString* p, DumpState* D)
+ {
++ /* each function nested in another is a C call deeper */
++ switch (luai_cstack()) {
++  case 1: luaG_runerror(D->L, "C stack overflow");
++  case 2: luaD_throw(D->L, LUA_ERRERR);
++ }
+  DumpString((f->source==p || D->strip) ? NULL : f->source,D);
+  DumpInt(f->linedefined,D);
+  DumpInt(f->lastlinedefined,D);

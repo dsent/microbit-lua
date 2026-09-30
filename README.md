@@ -148,6 +148,9 @@ With `DMESG_SERIAL_DEBUG` enabled, `main()` also prints
 deepest user is the Lua parser (~4 KB) parsing the embedded chunk; see
 `docs/ram-usage.md` for the breakdown and sizing guidance.
 
+Lua loads only text: `loadstring` and `load` refuse precompiled code, as
+`string.dump` makes it, whose nesting nothing checks against the C stack.
+
 
 ## Modules
 

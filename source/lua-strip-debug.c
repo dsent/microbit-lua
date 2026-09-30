@@ -10,6 +10,10 @@
 // debug section would have cost.
 //
 // Call this with the loaded function on top of the stack, before running it.
+// It walks the functions nested in it a C call deeper each, with no check
+// of the C stack: the chunk was parsed from text at the same depth, and each
+// level of nesting took the parser, which checks, far more stack than it
+// takes here.
 
 #include <stddef.h>
 

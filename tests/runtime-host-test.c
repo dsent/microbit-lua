@@ -1213,6 +1213,49 @@ static void deep_patterns(void) {
          "... and a pattern that fits still matches");
 }
 
+// string.dump of a function whose own functions nest deep: its walk
+// through them stops before it fills the C stack
+static int dump_writer(lua_State *L, const void *p, size_t size, void *ud) {
+  (void)L; (void)p; (void)size; (void)ud;
+  return 0;
+}
+
+static int dump_deep(lua_State *L) {
+  lua_getglobal(L, "f");
+  host_cstack_limit = host_cstack_used() + 2000;
+  lua_dump(L, dump_writer, NULL);
+  return 0;
+}
+
+// Only text is loaded: precompiled code, which no check has read, is not
+static void text_only(void) {
+  const char *said;
+  char f[4096] = "f = ";
+  int i, status;
+  fresh();
+  boot("");
+  said = line("loadstring(string.dump(function() return 42 end))");
+  expect(strstr(said, "=> nil\t\"precompiled code cannot be loaded, "
+                "only text\"") != NULL,
+         "loadstring refuses precompiled code");
+  for (i = 0; i < 60; i++) strcat(f, "function() return ");
+  strcat(f, "1");
+  for (i = 0; i < 60; i++) strcat(f, " end");
+  if (luaL_dostring(board_L, f)) {
+    fprintf(stderr, "%s\n", lua_tostring(board_L, -1));
+    exit(2);
+  }
+  status = lua_cpcall(board_L, dump_deep, NULL);
+  host_cstack_limit = (size_t)-1;
+  expect(status != 0 && strstr(lua_tostring(board_L, -1), "C stack overflow")
+         != NULL, "string.dump of functions nested too deep for the C stack "
+         "stops with \"C stack overflow\"");
+  lua_pop(board_L, 1);
+  said = line("#string.dump(function() return 42 end) > 0");
+  expect(strstr(said, "=> true\r\n> ") != NULL,
+         "... and string.dump of a function that fits still dumps it");
+}
+
 // A sleep deep in the stack runs no handlers: their events wait for the
 // call to return
 static void deep_sleeps(void) {
@@ -1287,6 +1330,7 @@ int main(int argc, char **argv) {
   a_full_c_stack();
   deep_coroutines();
   deep_patterns();
+  text_only();
   deep_sleeps();
   codex_round_nine();
   programs_alone();
