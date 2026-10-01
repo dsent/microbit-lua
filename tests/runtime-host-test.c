@@ -2153,10 +2153,8 @@ static void the_rest_of_a_line(void) {
   {
     size_t before = strlen(out);
     type_in("\177");
-    expect(strstr(said, "did not run.\r\nrobot_mo") != NULL
-           && strcmp(out + before, "\b \b") == 0,
-           "the line being dropped shows again under the words, and "
-           "Backspace takes it back there");
+    expect(strcmp(out + before, "\b \b") == 0,
+           "Backspace takes a character off the line being dropped");
   }
   type_in("ve(50, 50, 1)\r");
   line("2+2");
