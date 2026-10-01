@@ -21,10 +21,11 @@ int link_words_not_sent(lua_State *L) {
   luaL_addstring(&b, "Wait until the other micro:bit has finished. Then "
                  "press the reset button on the back of this micro:bit and "
                  "connect again. If the other micro:bit never finishes, or "
-                 "does not connect, press its reset button too, start it "
-                 "listening again and connect again: it then has nothing you "
-                 "typed before. Check what ran, and type again, from its "
-                 "first line, any statement that did not run.\n");
+                 "connecting says Connection timed out, press its reset "
+                 "button too, start it listening again and connect again: "
+                 "it then has nothing you typed before. Check what ran, and "
+                 "type again, from its first line, any statement that did "
+                 "not run.\n");
   luaL_pushresult(&b);
   return 1;
 }

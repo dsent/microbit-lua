@@ -514,6 +514,9 @@ local function port_to_link(value)
         -- answers were lost, and may hold a statement not yet finished:
         -- a new call starts it over
         write(not_sent_words(sub(line, 1, -2), find(rest, "[^\r\n]") ~= nil))
+        -- and the line begun shown again under them, where Backspace
+        -- takes it back
+        write(typed_here)
         return
       end
       -- what the other board said meanwhile, before its inbox here fills

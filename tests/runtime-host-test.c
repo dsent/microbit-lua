@@ -1690,10 +1690,11 @@ static const char *not_taken(const char *text, int after, char *words,
            "not have got: %s\r\n%sWait until the other micro:bit has "
            "finished. Then press the reset button on the back of this "
            "micro:bit and connect again. If the other micro:bit never "
-           "finishes, or does not connect, press its reset button too, start "
-           "it listening again and connect again: it then has nothing you "
-           "typed before. Check what ran, and type again, from its first "
-           "line, any statement that did not run.\r\n",
+           "finishes, or connecting says Connection timed out, press its "
+           "reset button too, start it listening again and connect again: "
+           "it then has nothing you typed before. Check what ran, and type "
+           "again, from its first line, any statement that did not "
+           "run.\r\n",
            text,
            after ? "What you typed after it was not sent either.\r\n" : "");
   return words;
@@ -1886,7 +1887,7 @@ static void a_paste_over_the_link(void) {
 // A line whose every answer is lost reached the other board all the same:
 // it is said that it may not have got it, and what was typed after it
 static void a_line_that_arrived(void) {
-  char words[512], held[256];
+  char words[768], held[256];
   const char *said;
   fresh();
   real_link = 1;
@@ -2152,8 +2153,10 @@ static void the_rest_of_a_line(void) {
   {
     size_t before = strlen(out);
     type_in("\177");
-    expect(strcmp(out + before, "\b \b") == 0,
-           "Backspace takes back what shows of the line being dropped");
+    expect(strstr(said, "did not run.\r\nrobot_mo") != NULL
+           && strcmp(out + before, "\b \b") == 0,
+           "the line being dropped shows again under the words, and "
+           "Backspace takes it back there");
   }
   type_in("ve(50, 50, 1)\r");
   line("2+2");
@@ -2168,7 +2171,7 @@ static void the_rest_of_a_line(void) {
 // A line that did not go after one that opened a statement, the other
 // board's answers to both lost: the words say to start over all the same
 static void a_loss_in_an_open_statement(void) {
-  char words[512];
+  char words[768];
   const char *said;
   fresh();
   real_link = 1;
@@ -2255,7 +2258,7 @@ static void far_inbox(char *text, size_t size) {
 // nothing meanwhile: its inbox takes eight pieces, and a line that finds it
 // full is said to be lost, in words, and never arrives
 static void a_full_inbox(void) {
-  char words[512], held[256];
+  char words[768], held[256];
   const char *said;
   int i, taken = 1;
   fresh();
@@ -2297,7 +2300,7 @@ static void a_full_inbox(void) {
 // A line to a board gone from the air is said to be lost, in words, and
 // what was typed after it goes with it
 static void a_line_not_taken(void) {
-  char words[512];
+  char words[768];
   const char *said;
   fresh();
   real_link = 1;

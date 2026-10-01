@@ -18,4 +18,5 @@
   needs only `cc`.
 - `bash tests/host-tests.sh` compares `source/tpbot.c` with the Lua it
   replaced, `tests/tpbot-reference.lua`, and runs `source/lua-script.lua` over
-  a stand-in board; it needs `cc` and a firmware build's `libraries/lua-5.1.5`.
+  a stand-in board; it needs `cc`, `patch`, `cmake` and the Lua tarball a
+  firmware build leaves in `libraries/`.

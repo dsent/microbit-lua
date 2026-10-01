@@ -85,7 +85,7 @@ table is `arm-none-eabi-size`'s data + bss for each build's link, a measure
 that takes in the 8 KB `.stack` and leaves out `.data`: the firmware as it
 ships has 14,692 B by it, and 7,144 B in its `.data` and `.bss` sections.
 
-| build | Lua heap after boot | `.bss` + `.data` |
+| build | Lua heap after boot | `size` data + bss |
 |---|---:|---:|
 | daa2f77, before `require` (TPBot commands in Lua) | 29,080 B | 14,704 B |
 | upstream 1733ccd (`require`, TPBot in C for tpbot2) | 26,191 B | 14,712 B |
