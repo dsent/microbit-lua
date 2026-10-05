@@ -222,6 +222,11 @@ Image luaL_checkimage(lua_State *L, int narg) {
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
+    F(show,      { Image image = luaL_checkimage(L, 1);			\
+                    int r = uBit.display.print(image);			\
+                    lua_pushboolean(L, r == DEVICE_OK);			\
+                    return 1;						\
+                  })							\
     F(setPixelValue, {							\
                     uint16_t x = (uint16_t)luaL_checkint(L, 1);		\
                     uint16_t y = (uint16_t)luaL_checkint(L, 2);		\
