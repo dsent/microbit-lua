@@ -64,7 +64,7 @@ I2C &i2c = uBit.i2c;
 
 // create a Lua image table from C ImageData and place it on the stack
 void lua_createimage(lua_State *L, ImageData *ptr) {
-  int size = ptr->width * ptr->height;
+  size_t size = ptr->width * ptr->height;
   lua_createtable(L, 0, 3);
   lua_pushliteral(L, "width");
   lua_pushinteger(L, ptr->width);
@@ -73,11 +73,7 @@ void lua_createimage(lua_State *L, ImageData *ptr) {
   lua_pushinteger(L, ptr->height);
   lua_settable(L, -3);
   lua_pushliteral(L, "data");
-  lua_createtable(L, size, 0);
-  for(int i = 0; i < size; i++) {
-    lua_pushinteger(L, ptr->data[i]);
-    lua_rawseti(L, -2, i + 1);
-  }
+  lua_pushlstring(L, (const char *)(ptr->data), size);
   lua_settable(L, -3);
 }
 
@@ -86,7 +82,8 @@ Image luaL_checkimage(lua_State *L, int narg) {
   Image r;
   int width;
   int height;
-  uint8_t value;
+  const char *data;
+  size_t size;
   luaL_checktype(L, narg, LUA_TTABLE);
   lua_getfield(L, narg, "width");
   width = (int)lua_tointeger(L, -1);
@@ -95,15 +92,17 @@ Image luaL_checkimage(lua_State *L, int narg) {
   lua_pop(L, 2);
   r = Image(width, height);
   lua_getfield(L, narg, "data");
+  data = lua_tolstring(L, -1, &size);
   for(int y = 0; y < height; y++) {
     for(int x = 0; x < width; x++) {
-      lua_pushinteger(L, 1 + x + width * y);
-      lua_gettable(L, -2);
-      value = (uint8_t)lua_tointeger(L, -1);
-      lua_pop(L, 1);
-      if(r.setPixelValue(x, y, value) != DEVICE_OK) {
+      if(size == 0) {
+        lua_pop(L, 1);
+        return r;
+      }
+      if(r.setPixelValue(x, y, *data) != DEVICE_OK) {
         luaL_error(L, "image error");
       }
+      ++data; --size;
     }
   }
   lua_pop(L, 1);

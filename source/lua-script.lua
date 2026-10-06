@@ -8,13 +8,13 @@ local tpbot = require("tpbot2")
 local heart = {
   width = 10,
   height = 5,
-  data = {
+  data = string.char(
       0,   0,   0,   0,   0,    0, 255,   0, 255,   0,
       0, 255,   0, 255,   0,  255,  64, 255,  64, 255,
       0, 255, 255, 255,   0,  255,  64,  64,  64, 255,
       0,   0, 255,   0,   0,    0, 255,  64, 255,   0,
       0,   0,   0,   0,   0,    0,   0, 255,   0,   0
-  }
+  )
 }
 
 uBit.audio.setVolume(20)
@@ -316,7 +316,7 @@ function turn(h)
 end
 
 function straight(l)
-  tpbot.run_distance(110 * l)
+  tpbot.run_distance(145 * l)
 end
 
 local function button(value, btn)
