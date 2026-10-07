@@ -36,13 +36,13 @@ local LONG_CLICK = uBit.DEVICE_BUTTON_EVT_LONG_CLICK
 local heart = {
   width = 10,
   height = 5,
-  data = {
+  data = string.char(
       0,   0,   0,   0,   0,    0, 255,   0, 255,   0,
       0, 255,   0, 255,   0,  255,  64, 255,  64, 255,
       0, 255, 255, 255,   0,  255,  64,  64,  64, 255,
       0,   0, 255,   0,   0,    0, 255,  64, 255,   0,
       0,   0,   0,   0,   0,    0,   0, 255,   0,   0
-  }
+  )
 }
 
 uBit.audio.setVolume(20)

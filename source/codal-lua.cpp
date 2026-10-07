@@ -101,11 +101,7 @@ static void lua_createimage(lua_State *L, int width, int height,
   lua_pushinteger(L, height);
   lua_settable(L, -3);
   lua_pushliteral(L, "data");
-  lua_createtable(L, size, 0);
-  for(int i = 0; i < size; i++) {
-    lua_pushinteger(L, data[i]);
-    lua_rawseti(L, -2, i + 1);
-  }
+  lua_pushlstring(L, (const char *)data, size);
   lua_settable(L, -3);
 }
 
@@ -129,30 +125,48 @@ static int push_screenshot(lua_State *L) {
 
 // An image table's pixels, read into a buffer on Lua's heap left on the
 // stack, and its width and height: all the Lua is done here, before any
-// C++ Image is made of them (see push_codal_text).
+// C++ Image is made of them (see push_codal_text). data is a string, a
+// byte a pixel row by row, or a table of numbers, one a pixel; pixels it
+// does not reach stay off. Its size and the kind of its data are checked
+// before the buffer is asked for: a buffer the heap cannot give stops the
+// board with panic 020, where a check is an argument error.
+#define IMAGE_PIXELS_MAX 4096
 static const uint8_t *luaL_checkimage(lua_State *L, int narg,
                                       int *width, int *height) {
   uint8_t *pixels;
+  size_t size, count, i;
+  int kind;
   luaL_checktype(L, narg, LUA_TTABLE);
   lua_getfield(L, narg, "width");
   *width = (int)lua_tointeger(L, -1);
   lua_getfield(L, narg, "height");
   *height = (int)lua_tointeger(L, -1);
   lua_pop(L, 2);
-  luaL_argcheck(L, 0 <= *width && *width <= INT16_MAX
-                && 0 <= *height && *height <= INT16_MAX, narg,
-                "width and height from 0 to 32767");
-  pixels = (uint8_t *)lua_newuserdata(L, (size_t)*width * *height);
+  luaL_argcheck(L, 0 <= *width && 0 <= *height, narg,
+                "an image's width and height are 0 or more");
+  luaL_argcheck(L, *width <= IMAGE_PIXELS_MAX && *height <= IMAGE_PIXELS_MAX
+                && *width * *height <= IMAGE_PIXELS_MAX, narg,
+                "an image has at most 4096 pixels, width times height");
+  count = (size_t)*width * *height;
   lua_getfield(L, narg, "data");
-  for (int y = 0; y < *height; y++) {
-    for (int x = 0; x < *width; x++) {
-      lua_pushinteger(L, 1 + x + *width * y);
-      lua_gettable(L, -2);
-      pixels[x + *width * y] = (uint8_t)lua_tointeger(L, -1);
+  kind = lua_type(L, -1);
+  luaL_argcheck(L, kind == LUA_TSTRING || kind == LUA_TTABLE, narg,
+                "an image's data is a string, or a list of numbers, one "
+                "for each pixel");
+  pixels = (uint8_t *)lua_newuserdata(L, count);
+  memset(pixels, 0, count);
+  if (kind == LUA_TSTRING) {
+    const char *data = lua_tolstring(L, -2, &size);
+    memcpy(pixels, data, size < count ? size : count);
+  } else {
+    for (i = 0; i < count; i++) {
+      lua_pushinteger(L, (lua_Integer)i + 1);
+      lua_gettable(L, -3);
+      pixels[i] = (uint8_t)lua_tointeger(L, -1);
       lua_pop(L, 1);
     }
   }
-  lua_pop(L, 1);
+  lua_remove(L, -2);
   return pixels;
 }
 
@@ -289,6 +303,14 @@ static int read_into_lua(lua_State *L, Read read) {
                                                  stride,		\
                                                  startingPosition,	\
                                                  autoClear);		\
+                    lua_pushboolean(L, r == DEVICE_OK);			\
+                    return 1;						\
+                  })							\
+    F(show,       { lua_events_before_wait(); int width;		\
+                    int height;						\
+                    const uint8_t *pixels =				\
+                      luaL_checkimage(L, 1, &width, &height);		\
+                    int r = uBit.display.print(Image(width, height, pixels));\
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
@@ -1387,6 +1409,7 @@ static const int digitalRJ[] = { 8, 12, 14, 16 };
     C(DEVICE_ID_RADIO) \
     C(DEVICE_ID_RADIO_DATA_READY) \
     C(ACCELEROMETER_EVT_DATA_UPDATE) \
+    C(ACCELEROMETER_EVT_NONE) \
     C(ACCELEROMETER_EVT_TILT_UP) \
     C(ACCELEROMETER_EVT_TILT_DOWN) \
     C(ACCELEROMETER_EVT_TILT_LEFT) \
@@ -1394,6 +1417,7 @@ static const int digitalRJ[] = { 8, 12, 14, 16 };
     C(ACCELEROMETER_EVT_FACE_UP) \
     C(ACCELEROMETER_EVT_FACE_DOWN) \
     C(ACCELEROMETER_EVT_FREEFALL) \
+    C(ACCELEROMETER_EVT_2G) \
     C(ACCELEROMETER_EVT_3G) \
     C(ACCELEROMETER_EVT_6G) \
     C(ACCELEROMETER_EVT_8G) \

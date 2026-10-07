@@ -1,6 +1,7 @@
 -- The TPBot commands as source/lua-script.lua held them in Lua at
--- daa2f77 (its lines 282-435, unchanged), before they moved to C in
--- source/tpbot.c. tests/host-tests.sh runs them beside the C and
+-- daa2f77 (its lines 282-435), before they moved to C in
+-- source/tpbot.c, with one change since: straight drives 145 mm a
+-- square, where daa2f77 drove 110. tests/host-tests.sh runs them beside the C and
 -- compares what each writes to the bus and says back.
 
 -- TPBot library, for the TPBot Edu and the TPBot Classic
@@ -155,5 +156,5 @@ function turn(h)
 end
 
 function straight(l)
-  tpbot.run_distance(110 * l)
+  tpbot.run_distance(145 * l)
 end

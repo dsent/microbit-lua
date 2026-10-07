@@ -367,13 +367,13 @@ int tpbot_turn_hours(lua_State *L) {
   return 0;
 }
 
-// straight(l): l squares of 11 cm.
+// straight(l): l squares of 14.5 cm.
 int tpbot_straight(lua_State *L) {
   lua_Number l;
   lua_settop(L, 1);
   if (command(L, "run_distance") || arithmetic_on(L, 1, &l))
     return lua_error(L);
-  lua_pushnumber(L, (lua_Number)110 * l);
+  lua_pushnumber(L, (lua_Number)145 * l);
   if (call_command(L, "run_distance"))
     return lua_error(L);
   return 0;
