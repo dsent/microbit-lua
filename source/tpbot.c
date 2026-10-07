@@ -86,6 +86,7 @@ static int to_robot(const char *frame, size_t length) {
 static int send(int command, const char *params, int count) {
   char frame[4 + 5];
   int i;
+  (void)sizeof(char[sizeof frame <= TPBOT_FRAME_MAX ? 1 : -1]);
   frame[0] = (char)255;
   frame[1] = (char)249;
   frame[2] = (char)command;

@@ -59,6 +59,11 @@ int tpbot_i2c_write(int address, const char *data, size_t length) {
   char text[64];
   int took = bus_takes(address);
   size_t i;
+  if (length > TPBOT_FRAME_MAX) {
+    fprintf(stderr, "a %u-byte frame: tpbot_i2c_write takes at most %d\n",
+            (unsigned)length, TPBOT_FRAME_MAX);
+    exit(2);
+  }
   snprintf(text, sizeof text, "write %d [", address);
   logf_(text);
   for (i = 0; i < length; i++) {

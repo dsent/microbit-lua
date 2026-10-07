@@ -40,8 +40,13 @@ extern const char tpbot_no_answer[];
 // What the commands need of the board, given by the firmware, or by the
 // host test in its place.
 
-// Write length bytes to the device at address on the I2C bus: 0 when it
-// took them, anything else when it did not.
+// The most bytes tpbot_i2c_write takes in one frame; the longest frame a
+// robot command writes is 9 bytes.
+#define TPBOT_FRAME_MAX 16
+
+// Write length bytes, at most TPBOT_FRAME_MAX, to the device at address
+// on the I2C bus: 0 when it took them, anything else when it did not.
+// data may be anywhere, a string literal in flash included.
 int tpbot_i2c_write(int address, const char *data, size_t length);
 
 // Sleep, letting other fibers run.

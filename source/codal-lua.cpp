@@ -1059,8 +1059,16 @@ static int pulse_width(Pin &pin, uint32_t timeout) {
 // What source/tpbot.c needs of the board. The bus and the sleep are the
 // ones microbit.i2c.write and microbit.sleep use.
 
+// The bus hardware reads the frame by DMA, which cannot read flash: a
+// frame there, a string literal, would go out as whatever the DMA read
+// while the write reported success. That is how a TPBot Classic's stop
+// once left a wheel turning. So each frame is copied to the stack first.
 extern "C" int tpbot_i2c_write(int address, const char *data, size_t length) {
-  return i2c.write(address, (char *)data, length) == MICROBIT_OK ? 0 : -1;
+  char frame[TPBOT_FRAME_MAX];
+  if (length > sizeof frame)
+    return -1;
+  memcpy(frame, data, length);
+  return i2c.write(address, frame, length) == MICROBIT_OK ? 0 : -1;
 }
 
 extern "C" void tpbot_sleep(uint32_t ms) {

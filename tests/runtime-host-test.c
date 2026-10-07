@@ -203,6 +203,11 @@ static char bus_log[1024];
 int tpbot_i2c_write(int address, const char *data, size_t length) {
   size_t i, n;
   (void)address;
+  if (length > TPBOT_FRAME_MAX) {
+    fprintf(stderr, "a %u-byte frame: tpbot_i2c_write takes at most %d\n",
+            (unsigned)length, TPBOT_FRAME_MAX);
+    exit(2);
+  }
   bus_writes++;
   for (i = 0; i < length; i++) {
     n = strlen(bus_log);
