@@ -37,6 +37,13 @@ void tpbot_register_globals(lua_State *L);
 // What a robot command says when no robot answers on the bus
 extern const char tpbot_no_answer[];
 
+// The shortest distance run_distance sends, in mm, and the smallest
+// angle turn sends, in degrees, either way: a TPBot Edu sent 1 or 2 mm,
+// or 1 degree, drives or spins on and never stops. Less does nothing, as
+// 0 does.
+#define TPBOT_DISTANCE_MIN 10
+#define TPBOT_ANGLE_MIN 5
+
 // What the commands need of the board, given by the firmware, or by the
 // host test in its place.
 

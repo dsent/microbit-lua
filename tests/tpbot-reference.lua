@@ -1,7 +1,11 @@
 -- The TPBot commands as source/lua-script.lua held them in Lua at
 -- daa2f77 (its lines 282-435), before they moved to C in
--- source/tpbot.c, with one change since: straight drives 145 mm a
--- square, where daa2f77 drove 110. tests/host-tests.sh runs them beside the C and
+-- source/tpbot.c, with two changes since: straight drives 145 mm a
+-- square, where daa2f77 drove 110; run_distance under 10 mm and turn
+-- under 5 degrees do nothing, as 0 does (a TPBot Edu sent 1 or 2 mm, or
+-- 1 degree, never stops), and both refuse what two bytes cannot carry
+-- before cutting it to an integer: not a number and infinity went out
+-- as 0. tests/host-tests.sh runs them beside the C and
 -- compares what each writes to the bus and says back.
 
 -- TPBot library, for the TPBot Edu and the TPBot Classic
@@ -135,15 +139,25 @@ end
 function tpbot.run_distance(mm)
   if mm ~= 0 then
     local d, f = abs(mm, 3)
-    send(65, hl(d)..char(f))
+    if not (d < 65536) then
+      error("bad argument #1 to '?' (invalid value)", 0)
+    end
+    if d >= 10 then
+      send(65, hl(d)..char(f))
+    end
   end
 end
 
 function tpbot.turn(deg)
   if deg ~= 0 then
     local d, f = abs(deg, 1)
-    local hl = hl(d)
-    send(66, hl..hl..char(f + 1))
+    if not (d < 65536) then
+      error("bad argument #1 to '?' (invalid value)", 0)
+    end
+    if d >= 5 then
+      local hl = hl(d)
+      send(66, hl..hl..char(f + 1))
+    end
   end
 end
 

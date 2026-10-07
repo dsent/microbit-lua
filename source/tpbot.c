@@ -36,6 +36,8 @@ const char tpbot_no_answer[] =
   "The robot does not answer. Check that it is "
   "switched on, or switch it off and on again.";
 
+static const char invalid_value[] = "bad argument #1 to '?' (invalid value)";
+
 // string.char's check of its argument, as the Lua called it: through an
 // upvalue whose name the stripped script no longer knows.
 static int byte_of(lua_State *L, lua_Number n, char *out) {
@@ -44,7 +46,7 @@ static int byte_of(lua_State *L, lua_Number n, char *out) {
   lua_number2integer(i, n);
   c = (int)i;
   if ((unsigned char)c != c)
-    return stop_with(L, "bad argument #1 to '?' (invalid value)");
+    return stop_with(L, invalid_value);
   *out = (char)c;
   return 0;
 }
@@ -250,14 +252,29 @@ static int is_zero(lua_State *L, int arg) {
   return lua_type(L, arg) == LUA_TNUMBER && lua_tonumber(L, arg) == 0;
 }
 
+// A distance or an angle's magnitude, d: what two bytes cannot carry,
+// not a number and infinity included, is refused as a byte too large is,
+// before any of it is cut to an integer; less than min does nothing.
+static int too_small(lua_State *L, lua_Number d, lua_Number min,
+                     int *small) {
+  if (!(d < 65536))
+    return stop_with(L, invalid_value);
+  *small = d < min;
+  return 0;
+}
+
 static int run_distance(lua_State *L, int arg) {
   lua_Number d;
-  int f;
+  int f, small;
   char params[3];
   if (is_zero(L, arg))
     return 0;
-  if (abs_at(L, arg, 3, &d, &f) || two_bytes(L, d, params)
-      || byte_of(L, (lua_Number)f, &params[2]))
+  if (abs_at(L, arg, 3, &d, &f)
+      || too_small(L, d, TPBOT_DISTANCE_MIN, &small))
+    return 1;
+  if (small)
+    return 0;
+  if (two_bytes(L, d, params) || byte_of(L, (lua_Number)f, &params[2]))
     return 1;
   if (send(65, params, 3))
     return stop_with(L, tpbot_no_answer);
@@ -273,11 +290,15 @@ int tpbot_run_distance(lua_State *L) {
 
 static int turn(lua_State *L, int arg) {
   lua_Number d;
-  int f;
+  int f, small;
   char params[5];
   if (is_zero(L, arg))
     return 0;
-  if (abs_at(L, arg, 1, &d, &f) || two_bytes(L, d, params)
+  if (abs_at(L, arg, 1, &d, &f) || too_small(L, d, TPBOT_ANGLE_MIN, &small))
+    return 1;
+  if (small)
+    return 0;
+  if (two_bytes(L, d, params)
       || byte_of(L, (lua_Number)(f + 1), &params[4]))
     return 1;
   params[2] = params[0];

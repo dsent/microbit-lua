@@ -1120,9 +1120,11 @@ static void tpbot2_header(uint8_t *data, int code, int count) {
                     return robot_send(L, data, 7);			\
                   })							\
     F(run_distance, {							\
-                    int mm = luaL_checkint(L, 1);			\
-                    if (mm == 0)					\
+                    lua_Number x = luaL_checknumber(L, 1);		\
+                    luaL_argcheck(L, fabs(x) < 65536, 1, "out of range"); \
+                    if (fabs(x) < TPBOT_DISTANCE_MIN)			\
                       return 0;						\
+                    int mm = (int)x;					\
                     int d = abs(mm);					\
                     uint8_t data[7];					\
                     tpbot2_header(data, 65, 3);				\
@@ -1132,9 +1134,11 @@ static void tpbot2_header(uint8_t *data, int code, int count) {
                     return robot_send(L, data, 7);			\
                   })							\
     F(turn, {								\
-                    int deg = luaL_checkint(L, 1);			\
-                    if (deg == 0)					\
+                    lua_Number x = luaL_checknumber(L, 1);		\
+                    luaL_argcheck(L, fabs(x) < 65536, 1, "out of range"); \
+                    if (fabs(x) < TPBOT_ANGLE_MIN)			\
                       return 0;						\
+                    int deg = (int)x;					\
                     int d = abs(deg);					\
                     uint8_t data[9];					\
                     tpbot2_header(data, 66, 5);				\

@@ -284,6 +284,19 @@ static const char *CALLS[] = {
   "tpbot.run_distance('0')", "tpbot.run_distance('x')",
   "tpbot.run_distance(nil)", "tpbot.run_distance()",
   "tpbot.run_distance({})", "tpbot.run_distance(1e9)",
+  "tpbot.run_distance(1)", "tpbot.run_distance(-2)",
+  "tpbot.run_distance(9.99)", "tpbot.run_distance(-9.99)",
+  "tpbot.run_distance(10)", "tpbot.run_distance(-10)",
+  "tpbot.run_distance('9')", "tpbot.run_distance(0/0)",
+  "tpbot.run_distance(1/0)", "tpbot.run_distance(-1/0)",
+  "straight(0.06)", "straight(0.07)", "straight(-0.06)", "straight(0/0)",
+  "straight(1/0)", "straight(3e36)", "tpbot.run_distance(1e20)",
+  "tpbot.run_distance(-1099511627776)", "tpbot.turn(1099511627776)",
+  "straight(1e20)",
+  "tpbot.turn(1)", "tpbot.turn(-1)", "tpbot.turn(4.99)", "tpbot.turn(-4.99)",
+  "tpbot.turn(5)", "tpbot.turn(-5)", "tpbot.turn(0/0)", "tpbot.turn(1/0)",
+  "tpbot.turn(-1/0)", "turn(0.1)", "turn(-0.1)", "turn(0.2)", "turn(0/0)",
+  "turn(1/0)",
   "tpbot.turn(0)", "tpbot.turn(90)", "tpbot.turn(-90)", "tpbot.turn(360)",
   "tpbot.turn(180.5)", "tpbot.turn(-0.5)", "tpbot.turn(65535)",
   "tpbot.turn(65536)", "tpbot.turn('90')", "tpbot.turn('x')",
@@ -307,6 +320,46 @@ static const char *CALLS[] = {
   "tpbot.set_motors_speed(50, 50) robot_move(10, 10, 1)",
   "local ok = pcall(robot_move, 'x', 0, 1) return ok, robot_info()",
   NULL
+};
+
+// What the C must do, whatever the Lua does: a distance under 10 mm or a
+// turn under 5 degrees writes nothing and returns; what two bytes cannot
+// carry writes nothing and stops; the smallest that go out go out, alone.
+#define REFUSED "error bad argument #1 to '?' (invalid value)"
+static const struct { const char *code, *heard; } EXPECTED[] = {
+  { "tpbot.run_distance(1)", "returned " },
+  { "tpbot.run_distance(-2)", "returned " },
+  { "tpbot.run_distance(9.99)", "returned " },
+  { "tpbot.run_distance(-9.99)", "returned " },
+  { "straight(0.06)", "returned " },
+  { "straight(-0.06)", "returned " },
+  { "tpbot.turn(1)", "returned " },
+  { "tpbot.turn(-4.99)", "returned " },
+  { "turn(0.1)", "returned " },
+  { "turn(-0.1)", "returned " },
+  { "tpbot.run_distance(0/0)", REFUSED },
+  { "tpbot.run_distance(1/0)", REFUSED },
+  { "tpbot.run_distance(-1/0)", REFUSED },
+  { "straight(0/0)", REFUSED },
+  { "straight(1/0)", REFUSED },
+  { "tpbot.turn(0/0)", REFUSED },
+  { "tpbot.turn(1/0)", REFUSED },
+  { "tpbot.turn(-1/0)", REFUSED },
+  { "turn(0/0)", REFUSED },
+  { "turn(1/0)", REFUSED },
+  { "tpbot.run_distance(65536)", REFUSED },
+  { "tpbot.run_distance(1e20)", REFUSED },
+  { "tpbot.run_distance(-1099511627776)", REFUSED },
+  { "tpbot.turn(1099511627776)", REFUSED },
+  { "straight(1e20)", REFUSED },
+  { "tpbot.run_distance(10)", "write 32 [FF F9 41 03 00 0A 00] taken\n"
+    "returned " },
+  { "tpbot.run_distance(-10)", "write 32 [FF F9 41 03 00 0A 03] taken\n"
+    "returned " },
+  { "tpbot.turn(5)", "write 32 [FF F9 42 05 00 05 00 05 01] taken\n"
+    "returned " },
+  { "tpbot.turn(-5)", "write 32 [FF F9 42 05 00 05 00 05 02] taken\n"
+    "returned " },
 };
 
 static const char *SONAR[] = {
@@ -392,6 +445,14 @@ int main(int argc, char **argv) {
       compare(CALLS[i], PLANS[p].name, &failures);
   }
   bus.plan = ALL_TAKEN;
+  for (e = 0; e < sizeof EXPECTED / sizeof EXPECTED[0]; e++, cases++) {
+    run(0, EXPECTED[e].code, heard[1], sizeof heard[1]);
+    if (strcmp(heard[1], EXPECTED[e].heard) == 0)
+      continue;
+    failures++;
+    printf("UNEXPECTED: %s\n--- want\n%s\n--- C\n%s\n", EXPECTED[e].code,
+           EXPECTED[e].heard, heard[1]);
+  }
   for (e = 0; e < sizeof ECHOES / sizeof ECHOES[0]; e++) {
     char plan[32];
     bus.echo = ECHOES[e];
