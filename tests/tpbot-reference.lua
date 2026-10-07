@@ -1,7 +1,8 @@
 -- The TPBot commands as source/lua-script.lua held them in Lua at
 -- daa2f77 (its lines 282-435), before they moved to C in
--- source/tpbot.c, with two changes since: straight drives 145 mm a
--- square, where daa2f77 drove 110; run_distance under 10 mm and turn
+-- source/tpbot.c, with three changes since: straight drives 145 mm a
+-- square, where daa2f77 drove 110; get_distance answers in mm, where
+-- daa2f77 answered in cm; run_distance under 10 mm and turn
 -- under 5 degrees do nothing, as 0 does (a TPBot Edu sent 1 or 2 mm, or
 -- 1 degree, never stops), and both refuse what two bytes cannot carry
 -- before cutting it to an integer: not a number and infinity went out
@@ -127,7 +128,7 @@ function tpbot.get_distance()
   read_digital(e)
   pulse_us(t, 1, 10)
   local r = time_pulse_us(e, 1, 25000)
-  return r and r * 0.01715
+  return r and r * 0.1715
 end
 
 local function hl(x)

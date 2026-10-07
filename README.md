@@ -355,14 +355,17 @@ program there that reads the radio itself with `recv` gets none.
 `straight` are in C, in `source/tpbot.c`, for the TPBot Edu and the TPBot
 Classic at once.
 
-`straight(l)` drives `l` squares of 145 mm. A distance under 10 mm and a
-turn under 5 degrees, either way, do nothing, as 0 does: a TPBot Edu sent 1
-or 2 mm, or 1 degree, drives or spins on and never stops. This holds for
-`tpbot.run_distance` and `tpbot.turn`, for `tpbot2`'s, and so for
-`straight(l)` under about 0.069 (10/145) and `turn(h)` within about 1/6 of an
-hour of 12 o'clock, either side; float rounding moves both edges a little. A
-distance or an angle of 65536 or more, not a number and infinity included,
-is refused.
+`straight(l)` drives `l` squares of 145 mm. `tpbot.get_distance()` and
+`tpbot2.get_distance()` answer in mm, the unit `run_distance` takes, or `nil`
+when nothing is within about 4 m to echo back.
+
+A distance under 10 mm and a turn under 5 degrees, either way, do nothing, as 0
+does: a TPBot Edu sent 1 or 2 mm, or 1 degree, drives or spins on and never
+stops. This holds for `tpbot.run_distance` and `tpbot.turn`, for `tpbot2`'s,
+and so for `straight(l)` under about 0.069 (10/145) and `turn(h)` within about
+1/6 of an hour of 12 o'clock, either side; float rounding moves both edges a
+little. A distance or an angle of 65536 or more, not a number and infinity
+included, is refused.
 
 
 ## Host tests

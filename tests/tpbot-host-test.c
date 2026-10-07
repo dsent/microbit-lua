@@ -453,6 +453,15 @@ int main(int argc, char **argv) {
     printf("UNEXPECTED: %s\n--- want\n%s\n--- C\n%s\n", EXPECTED[e].code,
            EXPECTED[e].heard, heard[1]);
   }
+  // A 1000 us echo is 171.5 mm away, whatever the Lua says
+  bus.echo = 1000;
+  run(0, "local d = tpbot.get_distance() return d > 171.4 and d < 171.6",
+      heard[1], sizeof heard[1]);
+  cases++;
+  if (strcmp(heard[1], "sonar\nreturned boolean true") != 0) {
+    failures++;
+    printf("UNEXPECTED: get_distance at 1000 us\n--- C\n%s\n", heard[1]);
+  }
   for (e = 0; e < sizeof ECHOES / sizeof ECHOES[0]; e++) {
     char plan[32];
     bus.echo = ECHOES[e];

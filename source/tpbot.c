@@ -7,11 +7,12 @@
 // robots' commands; each robot ignores the other's.
 //
 // These were Lua in source/lua-script.lua; tests/tpbot-reference.lua keeps
-// that Lua. Every byte on the bus, every value returned and every message
-// is the Lua's, and tests/host-tests.sh runs the two side by side to
-// show it. The arithmetic is written as Lua's VM does it on lua_Number, and
-// a mistake in a call reads as the Lua's did, save for the position the
-// Lua put in front of a few.
+// that Lua, with the changes its header names. Every byte on the bus, every
+// value returned and every message is the reference's, and
+// tests/host-tests.sh runs the two side by side to show it. The arithmetic
+// is written as Lua's VM does it on lua_Number, and a mistake in a call
+// reads as the Lua's did, save for the position the Lua put in front of a
+// few.
 
 #include <math.h>
 
@@ -236,14 +237,15 @@ int tpbot_robot_move(lua_State *L) {
   return 0;
 }
 
-// Measured by polling the echo pin: getPulseUs would flood the event
-// handler with PulseIn events.
+// In mm, the unit run_distance takes: the echo's microseconds times half
+// the speed of sound. Measured by polling the echo pin: getPulseUs would
+// flood the event handler with PulseIn events.
 int tpbot_get_distance(lua_State *L) {
   int width = tpbot_echo_us();
   if (width < 0)
     lua_pushnil(L);
   else
-    lua_pushnumber(L, (lua_Number)width * (lua_Number)0.01715);
+    lua_pushnumber(L, (lua_Number)width * (lua_Number)0.1715);
   return 1;
 }
 
