@@ -292,16 +292,23 @@ random by the board that calls; a board takes the pieces and answers that carry
 its link's number, and a board that calls again, reset or not, is taken as it
 comes. `tx(message)` sends the message in pieces, each sent again every 30 ms,
 8 times at most, until the other board takes it, and returns false when none of
-the 8 was answered in time. A board takes a piece only from Lua: the serving
-board in its `listen()` loop, every 5 ms, and the calling board when the radio's
-event brings it, or between the frames of what it sends: while `tx` waits for
-an answer a board takes nothing, so the calling board sends what is typed a
-frame at a time and drains the link after each, which answers the echo the
-serving board sends as soon as it has the frame. A key typed on the calling
-board while the serving board prints over the link, or a line typed there that
-the serving board's prompt has not yet answered, still meets a `tx` on each side
-waiting for the other: both give up after a quarter of a second, and the frames
-each held are taken then. A key typed while the serving board runs a command, driving
+the 8 was answered in time, and stops there. A board takes a piece only from
+Lua: the serving board in its `listen()` loop, every 5 ms, and the calling board
+when the radio's event brings it, after the call that is running; while `tx`
+waits for an answer a board takes nothing. So what the calling board sends in
+one read goes whole only up to one frame, 26 characters: with more, the serving
+board's echo of the first frame meets the second frame half way, each board's
+`tx` waits out its 8 tries for an answer the other cannot give, a quarter of a
+second, and then each takes the frame it held meanwhile; a read of two frames,
+up to 52 characters, arrives whole after that pause, and of a longer one the
+third frame on is never sent, since `tx` stopped at the second. A terminal that
+sends a line in one write, as the Compy's does, meets this on a line over 26
+characters. The same two-sided wait meets a key typed on the calling board while
+the serving board prints over the link. nagydani/microbit-lua has none of this:
+there the radio's event takes the echo while `tx` waits, in a fiber of its own;
+here events wait behind the running call. A `tx` that answered the frames it
+meets while it waits would end it, and is proposed upstream
+(compy-microbit-radio-tx-answers-data). A key typed while the serving board runs a command, driving
 the robot for instance, is not answered in time, and the calling board gives it
 up after a quarter of a second without a word; the serving board may still find
 it in its radio's queue of 4 datagrams when the command ends, and type it then,

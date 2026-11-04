@@ -1530,6 +1530,9 @@ static void names_and_roles(void) {
   said = line("listen('x')");
   expect(strstr(said, "Runtime error: a board name is five letters\r\n> ")
          != NULL, "listen() refuses a name that is not five letters");
+  said = line("listen({1, 2, 3, 4, 5})");
+  expect(strstr(said, "Runtime error: a board name is five letters\r\n> ")
+         != NULL, "... or that is not a string");
   caller_types = "1\r";
   line("listen('gigat')");
   expect_text(caller_hears, "> 1\r\n=> 1\r\n> ",
@@ -1582,46 +1585,32 @@ static void connected(void) {
   expect(strcmp(far_heard, "print(1)\r") == 0 && tx_calls == 2,
          "what is typed goes over the link as it is, unechoed here, a port "
          "read at a time");
-  expect_text(said, "<sleep></sleep>print(1)\r\n1\r\n> <sleep></sleep>",
-              "... and what the other board says comes to the port as it is, "
-              "taken after each frame");
+  expect_text(said, "print(1)\r\n1\r\n> ",
+              "... and what the other board says comes to the port as it is");
   before = strlen(out);
   type_in("1+\4");
   line("1");
   expect(strcmp(far_heard, "print(1)\r1+") == 0 && closed == 1 && !linked,
          "what comes before Ctrl+D still goes over, and the link is closed");
-  expect_text(out + before,
-              "<sleep></sleep>\r\ngigat disconnected.\r\n> 1\r\n=> 1\r\n> ",
+  expect_text(out + before, "\r\ngigat disconnected.\r\n> 1\r\n=> 1\r\n> ",
               "... the console says so, on a line of its own after the "
               "other board's prompt, and takes what follows");
 }
 
-// A line longer than a frame goes a frame at a time, the link drained
-// after each: the echo of the first frame is on the port before the second
-// goes
+// A read longer than a frame goes to tx whole, which sends it a frame at
+// a time: how its frames fare on the air is the C link's, which the
+// stand-in does not play
 static void a_long_line_over_the_link(void) {
   static const char LINE[] =
     "robot_move(40, 40, 1) robot_move(-40, -40, 1) print('done')";
-  size_t before;
   fresh();
   boot("");
   line("connect('gigat')");
-  before = strlen(out);
-  far_says = "robot_move(40, 40, 1) robot";
   line(LINE);
   expect_text(far_heard, "robot_move(40, 40, 1) robot_move(-40, -40, 1) "
               "print('done')\r",
-              "a line of 59 characters goes over whole");
-  {
-    char what[64];
-    snprintf(what, sizeof what, "... in three frames and its Enter: %d sends",
-             tx_calls);
-    expect(tx_calls == 4, what);
-  }
-  expect(strncmp(out + before, "<sleep></sleep>robot_move(40, 40, 1) robot",
-                 42) == 0,
-         "... and the echo of the first frame is taken before the second "
-         "goes");
+              "a line of 59 characters goes to tx whole");
+  expect(tx_calls == 2, "... in one send, and one for its Enter");
 }
 
 static void the_far_end_closes(void) {
