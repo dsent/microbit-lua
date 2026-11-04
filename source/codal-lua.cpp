@@ -57,6 +57,9 @@ I2C &i2c = uBit.i2c;
     F(stackReset, { stack_probe_paint();				\
                     return 0;						\
                   })							\
+    F(stackCurrent, { lua_pushinteger(L, (lua_Integer)stack_probe_current()); \
+                    return 1;						\
+                  })							\
     F(panic,      { int statusCode = (int)luaL_checkinteger(L, 1);      \
                     microbit_panic(statusCode);				\
                     return 0;						\

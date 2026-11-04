@@ -1,0 +1,14 @@
+--- ldo.c
++++ ldo.c
+@@ -388,6 +388,11 @@
+ static void resume (lua_State *L, void *ud) {
+   StkId firstArg = cast(StkId, ud);
+   CallInfo *ci = L->ci;
++  /* a coroutine runs on the C stack of the call that resumes it */
++  switch (luai_cstack()) {
++    case 1: luaG_runerror(L, "C stack overflow");
++    case 2: luaD_throw(L, LUA_ERRERR);
++  }
+   if (L->status == 0) {  /* start coroutine? */
+     lua_assert(ci == L->base_ci && firstArg > L->base);
+     if (luaD_precall(L, firstArg - 1, LUA_MULTRET) != PCRLUA)

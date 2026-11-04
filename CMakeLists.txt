@@ -267,6 +267,12 @@ RECURSIVE_FIND_FILE(SOURCE_FILES "${PROJECT_SOURCE_DIR}/${CODAL_APP_SOURCE_DIR}"
 RECURSIVE_FIND_FILE(S_FILES "${PROJECT_SOURCE_DIR}/${CODAL_APP_SOURCE_DIR}" "*.s")
 RECURSIVE_FIND_FILE(C_FILES "${PROJECT_SOURCE_DIR}/${CODAL_APP_SOURCE_DIR}" "*.c")
 RECURSIVE_FIND_FILE(CC_FILES "${PROJECT_SOURCE_DIR}/${CODAL_APP_SOURCE_DIR}" "*.cc")
+# An array on the C stack sized by a value from Lua does not build: the C
+# stack check (source/lua-cstack.c) cannot see how much it takes. CODAL is
+# built without this; the bindings keep off its own such arrays
+# (Serial::read(n), the BLE UART's read(n)).
+set_property(SOURCE ${SOURCE_FILES} ${C_FILES} ${CC_FILES}
+    APPEND PROPERTY COMPILE_OPTIONS "-Werror=vla")
 list(APPEND SOURCE_FILES ${S_FILES})
 list(APPEND SOURCE_FILES ${C_FILES})
 list(APPEND SOURCE_FILES ${CC_FILES})
@@ -390,6 +396,23 @@ lua_patch(luaconf.h luaconf-float.patch)
 # float support.
 lua_patch(luaconf.h luaconf-number-text.patch)
 lua_patch(lstrlib.c lstrlib-number-text.patch)
+# A C stack too full to go deeper is a "C stack overflow" error, as too many
+# nested C calls are: source/lua-cstack.c measures it.
+lua_patch(luaconf.h luaconf-cstack.patch)
+lua_patch(ldo.c ldo-cstack.patch)
+lua_patch(lparser.c lparser-cstack.patch)
+lua_patch(lparser.c lparser-assign-cstack.patch)
+lua_patch(ldo.c ldo-resume-cstack.patch)
+lua_patch(lstrlib.c lstrlib-cstack.patch)
+# Only text is loaded, so every function's nesting passed the parser's check;
+# string.dump checks its own walk through them.
+lua_patch(ldo.c ldo-text-only.patch)
+lua_patch(ldump.c ldump-cstack.patch)
+# The message of an error thrown with none, made at the start as the one
+# for running out of memory is.
+lua_patch(lstate.c lstate-errerr.patch)
+# A smaller string buffer on the C stack, so the check leaves more of it.
+lua_patch(luaconf.h luaconf-buffer.patch)
 lua_patch_apply()
 # Application sources build at -O2; this file is 1.3 KB smaller at -Os.
 set_source_files_properties("${CMAKE_SOURCE_DIR}/source/lua-number.c"

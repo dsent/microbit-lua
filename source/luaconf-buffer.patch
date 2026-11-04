@@ -1,0 +1,16 @@
+--- luaconf.h
++++ luaconf.h
+@@ -492,8 +492,12 @@
+ 
+ /*
+ @@ LUAL_BUFFERSIZE is the buffer size used by the lauxlib buffer system.
++@* A buffer lives on the C stack of the function that builds a string
++@* (string.format, gsub, rep, table.concat, print), whose frame is the
++@* deepest a Lua call makes below the C stack check (luai_cstack): a
++@* smaller buffer leaves that check more of the 8 KB stack.
+ */
+-#define LUAL_BUFFERSIZE		BUFSIZ
++#define LUAL_BUFFERSIZE		256
+ 
+ /* }================================================================== */
+ 

@@ -1,0 +1,12 @@
+--- lstate.c
++++ lstate.c
+@@ -77,6 +77,9 @@
+   luaT_init(L);
+   luaX_init(L);
+   luaS_fix(luaS_newliteral(L, MEMERRMSG));
++  /* made now, as that one is: where it is thrown, the C stack or the heap
++     may be too full to make it */
++  luaS_fix(luaS_newliteral(L, "error in error handling"));
+   g->GCthreshold = 4*g->totalbytes;
+ }
+ 

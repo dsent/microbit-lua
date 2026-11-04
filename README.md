@@ -118,6 +118,21 @@ With `DMESG_SERIAL_DEBUG` enabled, `main()` also prints
 deepest user is the Lua parser (~4 KB) parsing the embedded chunk; see
 `docs/ram-usage.md` for the breakdown and sizing guidance.
 
+Every fiber runs in that one 8 KB region, and nothing guards its bottom: a
+call that goes past it writes over the top of the heap, and the scheduler
+notices only at the next switch, with a 045 panic. So Lua checks the C stack
+before each call it makes from C, where it resumes a coroutine, and at each
+level of the parser: a call that finds more than 5,888 bytes in use stops with
+"C stack overflow", which a `pcall` catches, and past 6,400 bytes, where even
+the message could overflow, it throws with none; a pattern that would match
+deeper stops with "pattern too complex" (`microbit.stackCurrent()` says how
+much is in use now, `microbit.stackUsage()` the most since boot). These limits
+are the stack's size less fixed margins (`source/lua-cstack.h`), so they
+follow `__StackSize`, down to 4 KB: the linker refuses a smaller one.
+
+Lua loads only text: `loadstring` and `load` refuse precompiled code, as
+`string.dump` makes it, whose nesting nothing checks against the C stack.
+
 
 ## Numbers as text
 

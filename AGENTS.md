@@ -27,6 +27,8 @@
   it; it needs `patch` and the Lua tarball a build leaves in `libraries/`.
 - `bash tests/lua-number-tests.sh` tests `source/lua-number.c` on the host; it
   needs only `cc`.
+- `bash tests/cstack-host-tests.sh` tests `source/lua-cstack.c`'s limits at
+  four stack sizes; it needs `cc` and the unpacked Lua in `libraries/`.
 - The build itself needs no host Lua. `tests/hextract-tests.sh` does: `utils/hextract`
   pins its interpreter with `#!/usr/bin/env lua5.1`, and the harness runs the script
   directly, so only the `lua5.1` package is required (no PATH or alternatives setup).
