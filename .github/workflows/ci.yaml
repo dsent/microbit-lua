@@ -59,3 +59,31 @@ jobs:
 
       - name: Run hextract tests
         run: bash tests/hextract-tests.sh
+
+      - name: Keep the Lua tarball for the host tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lua tarball
+          path: libraries/lua-5.1.5.tar.gz
+
+  # The host tests need a host C compiler, which the build image has not.
+  host-tests:
+    name: "host tests"
+    needs: build-linux-amd64
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          show-progress: false
+
+      - name: Get the Lua tarball the build fetched
+        uses: actions/download-artifact@v4
+        with:
+          name: Lua tarball
+          path: libraries
+
+      - run: bash tests/host-tests.sh
+
+      - run: bash tests/lua-number-tests.sh
