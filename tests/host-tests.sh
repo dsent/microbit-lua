@@ -4,6 +4,8 @@
 # CMakeLists.txt applies to it:
 # - tpbot-host-test: the frames source/tpbot.c writes and what it says,
 #   case by case;
+# - runtime-host-test: source/lua-script.lua over a stand-in board, with
+#   events through source/lua-events.c;
 # - cstack-host-test: source/lua-cstack.c, whose limit follows the stack
 #   region's size.
 set -euo pipefail
@@ -36,7 +38,11 @@ FLAGS=(-std=gnu99 -O2 -DLUA_NUMBER_IS_FLOAT=1 -I"$LUA" -I"$ROOT/source")
 STRICT=("${FLAGS[@]}" -I"$ROOT/tests" -Wall -Wextra -Werror)
 cc "${STRICT[@]}" -o "$DIR/tpbot" "$ROOT/tests/tpbot-host-test.c" \
   "$ROOT/tests/host-cstack.c" "$ROOT/source/tpbot.c" "$DIR"/*.o -lm
+cc "${STRICT[@]}" -o "$DIR/runtime" "$ROOT/tests/runtime-host-test.c" \
+  "$ROOT/tests/host-cstack.c" "$ROOT/source/tpbot.c" \
+  "$ROOT/source/lua-events.c" "$DIR"/*.o -lm
 "$DIR/tpbot"
+"$DIR/runtime" "$ROOT/source/lua-script.lua"
 cc "${STRICT[@]}" -o "$DIR/cstack" "$ROOT/tests/cstack-host-test.c" \
   "$ROOT/source/lua-cstack.c"
 "$DIR/cstack"

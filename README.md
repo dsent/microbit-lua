@@ -152,6 +152,37 @@ write zeros, and the `#` flag is ignored.
 compiler and checks it against the host's printf.
 
 
+## Events
+
+The firmware calls the global `on_event(source, value, timestamp)` for each
+event: a button, the serial port, the radio. One Lua call runs at a time:
+the script at boot, a line typed at the REPL, or a handler. An event that
+comes while one runs waits, in the order the events came, up to 16; one
+that comes when 16 wait is dropped. The running call handles the waiting events
+whenever it enters `microbit.sleep`, and every 10 ms while it sleeps; what
+still waits when the call is over is handled then. A handler's own
+`microbit.sleep` handles nothing, so one handler always ends before the next
+starts. Other waits handle nothing either: a button pressed while the robot
+drives, or while a handler scrolls, is handled once that call is over.
+
+The serial port's event, which brings the REPL what was typed, is never
+dropped. It waits for the running call to end, and never runs at a sleep, so
+lines sent to the REPL run one after another. The port's data-received and
+RX-full events never reach Lua, and neither do the accelerometer's samples,
+which come about fifty times a second: a gesture reaches Lua as its own
+event.
+
+A mistake in a handler goes to the serial port as `Runtime error: ` and the
+message, on a line of its own, and scrolls by on the display if the display
+is free, while the running call goes on.
+
+On a radio link, a calling board's `tx` takes nothing from the link while it
+waits, since the radio's event waits for the running call: a read of more
+than one frame, 26 characters, as the Compy's terminal sends a long line,
+waits out both boards' tries, a quarter of a second, and may lose what
+follows its first frame.
+
+
 ## TPBot
 
 `tpbot` and `tpbot2` are in C, in `source/tpbot.c`.
@@ -186,6 +217,10 @@ switched-off TPBot Edu that holds the bus (`NRF52I2C_TIMEOUT10US` in
 
 - every TPBot command over a stand-in bus, checking the bytes each writes,
   what it returns and the words of each error;
+- `source/lua-script.lua` over a stand-in board, with events through
+  `source/lua-events.c`: lines at the REPL, presses while Lua sleeps or
+  drives, mistakes in handlers, a program's own `on_event`, and a radio link
+  whose other board the test plays;
 - `source/lua-cstack.c`'s limit at two stack sizes.
 
 It needs `cc`, `patch`, and the Lua tarball a firmware build leaves in

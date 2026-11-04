@@ -408,6 +408,10 @@ lua_patch(lstrlib.c lstrlib-number-text.patch)
 lua_patch(luaconf.h luaconf-cstack.patch)
 lua_patch(ldo.c ldo-cstack.patch)
 lua_patch(lparser.c lparser-cstack.patch)
+# An error in a chunk with no line info, as the host test and the firmware
+# strip a chunk once loaded, names the chunk with no ":0".
+lua_patch(ldebug.c ldebug-no-line.patch)
+lua_patch(lauxlib.c lauxlib-no-line.patch)
 # A smaller string buffer on the C stack, so the check leaves more of it.
 lua_patch(luaconf.h luaconf-buffer.patch)
 # Nested Lua calls stop at 128 with "stack overflow": the heap holds about

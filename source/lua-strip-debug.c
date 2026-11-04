@@ -14,6 +14,7 @@
 #include <stddef.h>
 
 #include "lua.h"
+#include "lua-strip-debug.h"
 #include "lobject.h"
 #include "lmem.h"
 

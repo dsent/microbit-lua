@@ -15,6 +15,7 @@ extern "C" {
 #include "neopixel.h"
 #include "stack-probe.h"
 #include "tpbot.h"
+#include "lua-events.h"
 
 extern MicroBit uBit;
 
@@ -28,7 +29,7 @@ I2C &i2c = uBit.i2c;
                     return 0;						\
                   })							\
     F(sleep,      { uint32_t ms = (uint32_t)luaL_checkinteger(L, 1);	\
-                    uBit.sleep(ms);					\
+                    lua_events_sleep(ms);				\
                     return 0;						\
                   })							\
     F(seedRandom, { uint32_t seed = (uint32_t)luaL_optinteger(L, 1, 0);	\
@@ -2149,29 +2150,29 @@ void register_lua_modules(lua_State *L) {
   lua_register(L, "require", l_require);
 }
 
-static lua_State *lua_state;
+// What source/lua-events.c needs of the board
+extern "C" void lua_events_mistake(const char *message) {
+  uBit.serial.send(ManagedString("\r\nRuntime error: ") + message + "\r\n");
+  uBit.display.scrollAsync(message);
+}
+
+extern "C" uint32_t lua_events_now(void) {
+  return (uint32_t)uBit.systemTime();
+}
+
+extern "C" void lua_events_pause(uint32_t ms) {
+  uBit.sleep(ms);
+}
 
 // Runs in a dedicated fiber (spawned by on_codal_event).  Has a full
 // fiber stack so lua_pcall won't overflow the idle or interrupt stacks.
+// The event goes to Lua now, or once the call running there lets it in
+// (source/lua-events.c).
 static void lua_event_handler_fiber(void *arg) {
-  codal::Event e = *(codal::Event *)arg;
-  delete (codal::Event *)arg;
-
-  lua_getglobal(lua_state, "on_event");
-  if (!lua_isfunction(lua_state, -1)) {
-    lua_pop(lua_state, 1);
-    return;
-  }
-  lua_pushinteger(lua_state, e.source);
-  lua_pushinteger(lua_state, e.value);
-  lua_pushinteger(lua_state, e.timestamp);
-  if (lua_pcall(lua_state, 3, 0, 0) != LUA_OK) {
-    const char *err = lua_tostring(lua_state, -1);
-    if (err) {
-      uBit.display.scroll(err);
-    }
-    lua_pop(lua_state, 1);
-  }
+  codal::Event *event = (codal::Event *)arg;
+  LuaEvent e = { event->source, event->value, (uint32_t)event->timestamp };
+  delete event;
+  lua_event_arrived(e);
 }
 
 // Called by the MessageBus for every event matching DEVICE_ID_ANY /
@@ -2198,18 +2199,31 @@ static void lua_event_handler_fiber(void *arg) {
 // fired from the UARTE IRQ for every transmitted char). These are pure
 // internal noise — no Lua script ever handles them — but every one would
 // otherwise spawn a Lua fiber (two heap allocations plus a lua_pcall).
-// Filtering removes ~99% of the per-tick/per-char fiber traffic.
+// Filtering removes ~99% of the per-tick/per-char fiber traffic. So are the
+// serial port's data-received event, raised at an idle tick after any
+// character, and its RX-full event, raised for every character lost: no
+// script reads them, and while a Lua call runs they would fill the line of
+// events that wait for it. So would the accelerometer's samples, about
+// fifty a second once the script requires it for gestures, which come to
+// Lua as gesture events of their own.
 static void on_codal_event(codal::Event e, void *arg) {
   (void)arg;
   if (e.source == DEVICE_ID_SCHEDULER || e.source == DEVICE_ID_COMPONENT ||
       e.source == DEVICE_ID_NOTIFY || e.source == DEVICE_ID_NOTIFY_ONE)
+    return;
+  if (e.source == DEVICE_ID_SERIAL
+      && (e.value == CODAL_SERIAL_EVT_DATA_RECEIVED
+          || e.value == CODAL_SERIAL_EVT_RX_FULL))
+    return;
+  if (e.source == DEVICE_ID_ACCELEROMETER
+      && e.value == ACCELEROMETER_EVT_DATA_UPDATE)
     return;
   codal::Event *copy = new codal::Event(e);
   create_fiber(lua_event_handler_fiber, copy);
 }
 
 void register_lua_event_listener(lua_State *L) {
-  lua_state = L;
+  lua_events_open(L, DEVICE_ID_SERIAL, CODAL_SERIAL_EVT_HEAD_MATCH);
   uBit.messageBus.listen(DEVICE_ID_ANY, DEVICE_EVT_ANY,
                          on_codal_event, NULL,
                          MESSAGE_BUS_LISTENER_IMMEDIATE);
