@@ -9,20 +9,17 @@
 +#define LUA_NUMBER_DOUBLE
 +#define LUA_NUMBER	double
 +#endif
-@@ -521,5 +521,16 @@
+@@ -521,5 +521,14 @@
 -#define LUA_NUMBER_SCAN		"%lf"
 -#define LUA_NUMBER_FMT		"%.14g"
 +#if defined(LUA_NUMBER_IS_FLOAT) && LUA_NUMBER_IS_FLOAT
 +#define LUA_NUMBER_SCAN		"%f"
 +#define LUA_NUMBER_FMT		"%.9g"
-+void lua_float2str(char *s, float n);
-+#define lua_number2str(s,n)	lua_float2str((s), (n))
 +#else
 +#define LUA_NUMBER_SCAN		"%lf"
 +#define LUA_NUMBER_FMT		"%.14g"
-+#define lua_number2str(s,n)	sprintf((s), LUA_NUMBER_FMT, (n))
 +#endif
--#define lua_number2str(s,n)	sprintf((s), LUA_NUMBER_FMT, (n))
+ #define lua_number2str(s,n)	sprintf((s), LUA_NUMBER_FMT, (n))
  #define LUAI_MAXNUMBER2STR	32 /* 16 digits, sign, point, and \0 */
 -#define lua_str2number(s,p)	strtod((s), (p))
 +#if defined(LUA_NUMBER_IS_FLOAT) && LUA_NUMBER_IS_FLOAT

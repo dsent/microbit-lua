@@ -1,0 +1,14 @@
+--- luaconf.h
++++ luaconf.h
+@@ -529,7 +529,10 @@
+ #define LUA_NUMBER_SCAN		"%lf"
+ #define LUA_NUMBER_FMT		"%.14g"
+ #endif
+-#define lua_number2str(s,n)	sprintf((s), LUA_NUMBER_FMT, (n))
++/* This build's sprintf has no floats: source/lua-number.c writes numbers */
++int luai_number2str (char *s, double n);
++int luai_numformat (char *s, const char *form, double n);
++#define lua_number2str(s,n)	luai_number2str((s), (n))
+ #define LUAI_MAXNUMBER2STR	32 /* 16 digits, sign, point, and \0 */
+ #if defined(LUA_NUMBER_IS_FLOAT) && LUA_NUMBER_IS_FLOAT
+ #define lua_str2number(s,p)	strtof((s), (p))

@@ -25,6 +25,8 @@
   edited, stops the build and says to delete `libraries/lua-5.1.5`.
   `cmake -DROOT=$PWD -DWORK=<empty dir> -P tests/lua-patch-test.cmake` checks
   it; it needs `patch` and the Lua tarball a build leaves in `libraries/`.
+- `bash tests/lua-number-tests.sh` tests `source/lua-number.c` on the host; it
+  needs only `cc`.
 - The build itself needs no host Lua. `tests/hextract-tests.sh` does: `utils/hextract`
   pins its interpreter with `#!/usr/bin/env lua5.1`, and the harness runs the script
   directly, so only the `lua5.1` package is required (no PATH or alternatives setup).

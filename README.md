@@ -119,6 +119,22 @@ deepest user is the Lua parser (~4 KB) parsing the embedded chunk; see
 `docs/ram-usage.md` for the breakdown and sizing guidance.
 
 
+## Numbers as text
+
+The firmware leaves printf's float support out to save flash, so
+`source/lua-number.c` turns numbers into text: `tostring`, `..`,
+`table.concat`, and `string.format`'s `%e`, `%f` and `%g`. Two patches,
+`source/luaconf-number-text.patch` and `source/lstrlib-number-text.patch`,
+route Lua's own calls there. As `tostring` and `..` write it, a whole number
+that fits in 32 bits shows in full, and any other number with 7 significant
+digits. `string.format` follows its format: `%f` gives 6 decimals unless the
+format says otherwise, and a precision past 14 significant digits is only
+approximate.
+
+`tests/lua-number-tests.sh` builds it with the host's C compiler and checks it
+against the host's printf.
+
+
 # Where
 
 The project's home is at

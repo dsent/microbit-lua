@@ -86,6 +86,15 @@ apply(build)
 same(build)
 check("... and a second time change nothing" _rc EQUAL 0 AND _same)
 
+# patched in part: luaconf.h holding its first patch only
+fresh_lua(part)
+execute_process(COMMAND patch --forward --batch --silent
+                "${WORK}/part/lua-5.1.5/src/luaconf.h"
+                "${ROOT}/source/luaconf-float.patch")
+apply(part)
+same(part)
+check("a luaconf.h holding its first patch gets the rest" _rc EQUAL 0 AND _same)
+
 # a comment holding the new block's words does not pass for it: the file is
 # not Lua's own, and stops the build
 fresh_lua(comment)
@@ -124,7 +133,7 @@ function(damaged FILE LINE NTH WHAT)
     string(FIND "${_said}" "Delete" _named)
     check("${WHAT}" NOT _rc EQUAL 0 AND NOT _named EQUAL -1)
 endfunction()
-damaged(luaconf.h "#define lua_number2str(s,n)\tsprintf((s), LUA_NUMBER_FMT, (n))\n" 0
+damaged(luaconf.h "#define lua_number2str(s,n)\tluai_number2str((s), (n))\n" 0
         "a luaconf.h whose patched block lost a line stops the build, naming the way back")
 
 # the fully patched Lua in WORK/<dir>
