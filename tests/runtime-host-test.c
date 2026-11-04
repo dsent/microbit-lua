@@ -1571,6 +1571,20 @@ static void ctrl_d_then_connect(void) {
 // connect() carries the port over: what is typed goes as it is, what
 // the other board says comes to the port as it is, and Ctrl+D hands the
 // port back
+// A command typed after the Ctrl+D is the console's: its sleeps handle
+// events, as a command read from the port does
+static void a_command_after_ctrl_d(void) {
+  size_t before;
+  fresh();
+  boot("");
+  line("connect('gigat')");
+  before = strlen(out);
+  plan(press_a);
+  type_in("\4microbit.sleep(50)\r");
+  expect(strstr(out + before, "<sleep><scroll A></sleep>") != NULL,
+         "a command typed after Ctrl+D handles a press in its sleep");
+}
+
 static void connected(void) {
   const char *said;
   size_t before;
@@ -2068,6 +2082,7 @@ int main(int argc, char **argv) {
   another_board_awaited();
   names_and_roles();
   ctrl_d_then_connect();
+  a_command_after_ctrl_d();
   connected();
   a_long_line_over_the_link();
   the_far_end_closes();

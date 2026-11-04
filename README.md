@@ -262,8 +262,8 @@ The REPL keeps `loadstring`, `setfenv`, `pcall`, `string.gsub`, `string.sub`,
 `string.find`, `string.match`, `string.format`, `table.concat`,
 `microbit.serial.eventAfterAsync`, `microbit.serial.getCharAsync` and
 `microbit.eventRepl` of its own for that, and a radio link's `tx`, `rx`,
-`answered` and `microbit.sleep` from when it opens, so the REPL over a link
-answers too; a line that takes away another global it uses can
+`answered`, `beacon`, `close` and `microbit.sleep` from when it opens, so the
+REPL over a link answers too; a line that takes away another global it uses can
 stop what the REPL shows, and the global can be put back from the prompt. The
 firmware arms the port itself after an `on_event` that fails on the port's
 event, and has what already waits there read.
@@ -299,12 +299,15 @@ waits for an answer a board takes nothing. So what the calling board sends in
 one read goes whole only up to one frame, 26 characters: with more, the serving
 board's echo of the first frame meets the second frame half way, each board's
 `tx` waits out its 8 tries for an answer the other cannot give, a quarter of a
-second, and then each takes the frame it held meanwhile; a read of two frames,
-up to 52 characters, arrives whole after that pause, and of a longer one the
-third frame on is never sent, since `tx` stopped at the second. A terminal that
+second, and then each takes the one frame it holds meanwhile, the newest to
+come; a read of two frames, up to 52 characters, arrives whole after that
+pause, and of a longer one the third frame on is never sent, since `tx` stopped
+at the second. A terminal that
 sends a line in one write, as the Compy's does, meets this on a line over 26
 characters. The same two-sided wait meets a key typed on the calling board while
-the serving board prints over the link. nagydani/microbit-lua has none of this:
+the serving board prints over the link: the key arrives late, and of the
+output, what the serving board sent beyond the one frame the calling board
+holds is lost, up to a piece of 64 characters. nagydani/microbit-lua has none of this:
 there the radio's event takes the echo while `tx` waits, in a fiber of its own;
 here events wait behind the running call. A `tx` that answered the frames it
 meets while it waits would end it, and is proposed upstream
@@ -317,7 +320,10 @@ or not at all, and nothing says which: wait for the echo before typing on. A
 piece sent to a board that is gone is lost the same way.
 
 A listening board sends a beacon every one to two seconds with its name and the
-name of the board it waits for. `microbit.radio.scan()` listens for three of the
+name of the board it waits for, from its `listen()` loop, so none while a
+command typed over the link runs: a command that runs longer than six seconds,
+`robot_move(40, 40, 10)` for one, ends the link at the calling board, which
+says `<name> disconnected.` and must `connect` again once the command is over. `microbit.radio.scan()` listens for three of the
 longest gaps and answers a table of the boards heard, each `true` when it waits
 for this board. A calling board that hears no beacon for itself for that long
 takes the link for lost, and `rx()` answers `false`, as it does once the other
