@@ -1,0 +1,16 @@
+--- luaconf.h
++++ luaconf.h
+@@ -467,6 +467,13 @@
+ */
+ #define LUAI_MAXCCALLS		200
+ 
++/*
++@@ luai_cstack is true when the C stack is too full to go deeper: a call
++@* from C, or a level of the parser, is then a "C stack overflow" error.
++@* The firmware measures the stack in use (source/lua-cstack.c).
++*/
++int luai_cstack (void);
++
+ 
+ /*
+ @@ LUAI_MAXVARS is the maximum number of local variables per function

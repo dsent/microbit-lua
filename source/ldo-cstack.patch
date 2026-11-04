@@ -1,0 +1,11 @@
+--- ldo.c
++++ ldo.c
+@@ -374,6 +374,8 @@
+     else if (L->nCcalls >= (LUAI_MAXCCALLS + (LUAI_MAXCCALLS>>3)))
+       luaD_throw(L, LUA_ERRERR);  /* error while handing stack error */
+   }
++  else if (luai_cstack())
++    luaG_runerror(L, "C stack overflow");
+   if (luaD_precall(L, func, nResults) == PCRLUA)  /* is a Lua function? */
+     luaV_execute(L, 1);  /* call it */
+   L->nCcalls--;

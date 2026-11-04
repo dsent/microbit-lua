@@ -118,6 +118,15 @@ With `DMESG_SERIAL_DEBUG` enabled, `main()` also prints
 deepest user is the Lua parser (~4 KB) parsing the embedded chunk; see
 `docs/ram-usage.md` for the breakdown and sizing guidance.
 
+Every fiber runs in that one 8 KB region, and nothing guards its bottom: a
+call that goes past it writes over the top of the heap, and the board stops
+with a 045 panic. Lua's own limit of 200 nested C calls does not keep it off:
+a recursion through a metamethod takes 140 to 220 bytes a level here, through
+`pcall` 430. So Lua checks the C stack before each call it makes from C and
+at each level of the parser, and with more than 5,888 bytes in use it stops
+with "C stack overflow", an error a `pcall` catches. The limit is the region's
+size less a margin (`source/lua-cstack.c`).
+
 
 ## Numbers as text
 

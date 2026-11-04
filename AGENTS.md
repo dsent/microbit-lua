@@ -25,6 +25,8 @@
   `libraries/lua-5.1.5` left by older builds is unused and can be deleted.
 - `bash tests/lua-number-tests.sh` tests `source/lua-number.c` on the host; it
   needs only `cc`.
+- `bash tests/cstack-host-tests.sh` tests `source/lua-cstack.c`'s limit; it
+  needs `cc` and the Lua tarball a firmware build leaves in `libraries/`.
 - The build itself needs no host Lua. `tests/hextract-tests.sh` does: `utils/hextract`
   pins its interpreter with `#!/usr/bin/env lua5.1`, and the harness runs the script
   directly, so only the `lua5.1` package is required (no PATH or alternatives setup).
