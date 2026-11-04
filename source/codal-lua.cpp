@@ -14,6 +14,7 @@ extern "C" {
 #include "I2C.h"
 #include "neopixel.h"
 #include "stack-probe.h"
+#include "tpbot.h"
 
 extern MicroBit uBit;
 
@@ -1049,15 +1050,20 @@ static uint8_t robot_byte(lua_State *L, int narg, int value) {
   return (uint8_t)value;
 }
 
+// A robot that does not answer is told in the words tpbot uses.
 static int robot_send(lua_State *L, uint8_t *data, int length) {
-  if (i2c.write(32, data, length) != MICROBIT_OK)
-    return luaL_error(L, "i2c write error");
+  if (i2c.write(32, data, length) != MICROBIT_OK) {
+    lua_pushstring(L, tpbot_no_answer);
+    return lua_error(L);
+  }
   return 0;
 }
 
 static void robot_read(lua_State *L, uint8_t *data, int length) {
-  if (i2c.read(32, data, length) != MICROBIT_OK)
-    luaL_error(L, "i2c read error");
+  if (i2c.read(32, data, length) != MICROBIT_OK) {
+    lua_pushstring(L, tpbot_no_answer);
+    lua_error(L);
+  }
 }
 
 // Width in microseconds of the next high pulse on pin, -1 on timeout.
@@ -1072,40 +1078,42 @@ static int pulse_width(Pin &pin, uint32_t timeout) {
   return system_timer_current_time_us() - rise;
 }
 
-// TPBot Classic; sonar trigger on P16, echo on P15.
+// The longest a sonar's echo lasts, with nothing in front of it.
+#define ECHO_LONGEST_US 60000
 
-#define LUA_TPBOT_FUNCTIONS						\
-    F(set_car_light, {							\
-                    uint8_t data[4];					\
-                    data[0] = 32;					\
-                    data[1] = robot_byte(L, 1, luaL_checkint(L, 1));	\
-                    data[2] = robot_byte(L, 2, luaL_checkint(L, 2));	\
-                    data[3] = robot_byte(L, 3, luaL_checkint(L, 3));	\
-                    return robot_send(L, data, 4);			\
-                  })							\
-    F(set_motors_speed, {						\
-                    int left = luaL_checkint(L, 1);			\
-                    int right = luaL_checkint(L, 2);			\
-                    uint8_t data[4];					\
-                    data[0] = 1;					\
-                    data[1] = robot_byte(L, 1, abs(left));		\
-                    data[2] = robot_byte(L, 2, abs(right));		\
-                    data[3] = (left < 0) + 2 * (right < 0);		\
-                    return robot_send(L, data, 4);			\
-                  })							\
-    F(get_distance, {							\
-                    Pin &trigger = uBit.io.pin[16];			\
-                    Pin &echo = uBit.io.pin[15];			\
-                    trigger.setDigitalValue(1);				\
-                    system_timer_wait_us(10);				\
-                    trigger.setDigitalValue(0);				\
-                    int width = pulse_width(echo, 25000);		\
-                    if (width < 0)					\
-                      lua_pushnil(L);					\
-                    else						\
-                      lua_pushnumber(L, width * 0.01715f);		\
-                    return 1;						\
-                  })
+// What source/tpbot.c needs of the board. The bus and the sleep are the
+// ones microbit.i2c.write and microbit.sleep use.
+
+// The bus hardware reads the frame by DMA, which cannot read flash: a
+// frame there, a string literal, would go out as whatever the DMA read
+// while the write reported success. That is how a TPBot Classic's stop
+// once left a wheel turning. So each frame is copied to the stack first.
+extern "C" int tpbot_i2c_write(int address, const char *data, size_t length) {
+  char frame[TPBOT_FRAME_MAX];
+  if (length > sizeof frame)
+    return -1;
+  memcpy(frame, data, length);
+  return i2c.write(address, frame, length) == MICROBIT_OK ? 0 : -1;
+}
+
+extern "C" void tpbot_sleep(uint32_t ms) {
+  uBit.sleep(ms);
+}
+
+// The sonar, trigger on P16 and echo on P15. An echo still high from the
+// reading before is let end first, so that its tail is not timed as this
+// one: the echo timed is the first to rise after the trigger.
+extern "C" int tpbot_echo_us(void) {
+  Pin &trigger = uBit.io.pin[16];
+  Pin &echo = uBit.io.pin[15];
+  uint64_t start = system_timer_current_time_us();
+  while (echo.getDigitalValue() == 1)
+    if (system_timer_current_time_us() - start > ECHO_LONGEST_US) return -1;
+  trigger.setDigitalValue(1);
+  system_timer_wait_us(10);
+  trigger.setDigitalValue(0);
+  return pulse_width(echo, 25000);
+}
 
 // TPBot 2 (TPBot Edu) frames a command as 255, 249, its code, the number
 // of parameters, then the parameters. Its sonar is the TPBot Classic one.
@@ -1136,9 +1144,11 @@ static void tpbot2_header(uint8_t *data, int code, int count) {
                     return robot_send(L, data, 7);			\
                   })							\
     F(run_distance, {							\
-                    int mm = luaL_checkint(L, 1);			\
-                    if (mm == 0)					\
+                    lua_Number x = luaL_checknumber(L, 1);		\
+                    luaL_argcheck(L, fabs(x) < 65536, 1, "out of range"); \
+                    if (fabs(x) < TPBOT_DISTANCE_MIN)			\
                       return 0;						\
+                    int mm = (int)x;					\
                     int d = abs(mm);					\
                     uint8_t data[7];					\
                     tpbot2_header(data, 65, 3);				\
@@ -1148,9 +1158,11 @@ static void tpbot2_header(uint8_t *data, int code, int count) {
                     return robot_send(L, data, 7);			\
                   })							\
     F(turn, {								\
-                    int deg = luaL_checkint(L, 1);			\
-                    if (deg == 0)					\
+                    lua_Number x = luaL_checknumber(L, 1);		\
+                    luaL_argcheck(L, fabs(x) < 65536, 1, "out of range"); \
+                    if (fabs(x) < TPBOT_ANGLE_MIN)			\
                       return 0;						\
+                    int deg = (int)x;					\
                     int d = abs(deg);					\
                     uint8_t data[9];					\
                     tpbot2_header(data, 66, 5);				\
@@ -1992,10 +2004,6 @@ LUA_RADIO_FUNCTIONS
 LUA_I2C_FUNCTIONS
 #undef F
 
-#define F(name, body) static int l_tpbot_##name(lua_State *L) body
-LUA_TPBOT_FUNCTIONS
-#undef F
-
 #define F(name, body) static int l_tpbot2_##name(lua_State *L) body
 LUA_TPBOT2_FUNCTIONS
 #undef F
@@ -2080,17 +2088,18 @@ static const LuaApi l_i2c[] = {
 };
 #undef F
 
-#define F(name, body) {#name, l_tpbot_##name, 0},
+// The TPBot commands, from source/tpbot.c
+#define X(name, function) {#name, function, 0},
 static const LuaApi l_tpbot[] = {
-    LUA_TPBOT_FUNCTIONS
+    TPBOT_FUNCTIONS
     {NULL, NULL, 0}
 };
-#undef F
+#undef X
 
 #define F(name, body) {#name, l_tpbot2_##name, 0},
 static const LuaApi l_tpbot2[] = {
     LUA_TPBOT2_FUNCTIONS
-    {"get_distance", l_tpbot_get_distance, 0},
+    {"get_distance", tpbot_get_distance, 0},
     {NULL, NULL, 0}
 };
 #undef F
@@ -2225,9 +2234,12 @@ static int ll_module (lua_State *L) {
 // A parent made on the way (microbit, for microbit.audio) is a plain
 // table; requiring it later gives that same table its API.
 
+// A module require() can make: its name, its API, and what else its first
+// require does, if anything.
 typedef struct {
   const char *name;
   const LuaApi *api;
+  void (*open)(lua_State *L);
 } LuaModule;
 
 static const LuaModule lua_modules[] = {
@@ -2244,7 +2256,7 @@ static const LuaModule lua_modules[] = {
   {"microbit.ble.uart",      l_ble_uart},
 #endif
   {"planetx",                l_planetx},
-  {"tpbot",                  l_tpbot},
+  {"tpbot",                  l_tpbot, tpbot_register_globals},
   {"tpbot2",                 l_tpbot2},
   {"nezha2",                 l_nezha2},
   {NULL, NULL}
@@ -2261,6 +2273,8 @@ static int l_require(lua_State *L) {
     return luaL_error(L, "module " LUA_QS " not found", name);
   push_module(L, name);
   lua_set_lazy_index(L, lua_gettop(L), m->api);
+  if (m->open != NULL)
+    m->open(L);
   return 1;
 }
 

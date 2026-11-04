@@ -5,6 +5,8 @@ local audio = require("microbit.audio")
 local display = require("microbit.display")
 local radio = require("microbit.radio")
 local serial = require("microbit.serial")
+-- the robot commands, globals at the prompt
+require("tpbot")
 
 local heart = {
   width = 10,

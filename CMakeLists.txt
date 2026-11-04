@@ -411,6 +411,10 @@ lua_patch(ldump.c ldump-cstack.patch)
 # The message of an error thrown with none, made at the start as the one
 # for running out of memory is.
 lua_patch(lstate.c lstate-errerr.patch)
+# An error in a chunk with no line info, as the host test and the firmware
+# strip a chunk once loaded, names the chunk with no ":0".
+lua_patch(ldebug.c ldebug-no-line.patch)
+lua_patch(lauxlib.c lauxlib-no-line.patch)
 # A smaller string buffer on the C stack, so the check leaves more of it.
 lua_patch(luaconf.h luaconf-buffer.patch)
 lua_patch_apply()

@@ -1,0 +1,14 @@
+--- ldebug.c
++++ ldebug.c
+@@ -610,7 +610,10 @@
+     char buff[LUA_IDSIZE];  /* add file:line information */
+     int line = currentline(L, ci);
+     luaO_chunkid(buff, getstr(getluaproto(ci)->source), LUA_IDSIZE);
+-    luaO_pushfstring(L, "%s:%d: %s", buff, line, msg);
++    if (line > 0)
++      luaO_pushfstring(L, "%s:%d: %s", buff, line, msg);
++    else  /* no line info: the chunk was stripped */
++      luaO_pushfstring(L, "%s: %s", buff, msg);
+   }
+ }
+ 

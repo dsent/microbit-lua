@@ -150,6 +150,40 @@ approximate.
 against the host's printf.
 
 
+## TPBot
+
+`tpbot` and the robot globals `robot_info`, `robot_move`, `turn` and
+`straight` are in C, in `source/tpbot.c`, for the TPBot Edu and the TPBot
+Classic at once; `require("tpbot")` sets the globals, and the firmware's
+script requires it, so the prompt has them.
+
+`straight(l)` drives `l` squares of 145 mm. `tpbot.get_distance()` and
+`tpbot2.get_distance()` answer in mm, the unit `run_distance` takes, or `nil`
+when nothing is within about 4 m to echo back.
+
+A distance under 10 mm and a turn under 5 degrees, either way, do nothing, as 0
+does: a TPBot Edu sent 1 or 2 mm, or 1 degree, drives or spins on and never
+stops. This holds for `tpbot.run_distance` and `tpbot.turn`, for `tpbot2`'s,
+and so for `straight(l)` under about 0.069 (10/145) and `turn(h)` within about
+1/6 of an hour of 12 o'clock, either side; float rounding moves both edges a
+little. A distance or an angle of 65536 or more, not a number and infinity
+included, is refused. A robot command's bus write waits about 5 s for a bus a
+switched-off TPBot Edu holds (`NRF52I2C_TIMEOUT10US` in `codal.json`), not
+14, before it says the robot does not answer.
+
+## Host tests
+
+`bash tests/host-tests.sh` builds this firmware's Lua for the host and runs:
+
+- every TPBot command beside the Lua it replaced (`tests/tpbot-reference.lua`),
+  comparing the bytes each writes to the bus, what it returns and the words of
+  each error;
+- `source/lua-cstack.c`'s limits at four stack sizes;
+- `tests/lua-patch-test.cmake`.
+
+It needs `cc`, `patch`, `cmake`, and the Lua tarball a firmware build leaves
+in `libraries/`, which it patches as the build does.
+
 # Where
 
 The project's home is at
