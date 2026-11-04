@@ -304,11 +304,12 @@ come, unless a late answer has taken its place; so a read of two frames, up to
 52 characters, arrives whole after that pause, or without its second frame, as
 the timing falls, and of a longer one the third frame on is never sent, since
 `tx` stopped at the second. A terminal that
-sends a line in one write, as the Compy's does, meets this on a line over 26
-characters. The same two-sided wait meets a key typed on the calling board while
-the serving board prints over the link: the key arrives late, and of the
-output, what the serving board sent beyond the one frame the calling board
-holds is lost, up to a piece of 64 characters. nagydani/microbit-lua has none of this:
+sends a line and its Enter in one write, as the Compy's does, meets this on a
+line of 26 characters or more. The same two-sided wait meets a key typed on the calling board while
+the serving board prints over the link: the key arrives late, or is lost, and
+nothing says which, and of the output, what the serving board sent meanwhile
+is lost, up to a piece of 64 characters, the one frame the calling board holds
+included when a later frame displaces it. nagydani/microbit-lua has none of this:
 there the radio's event takes the echo while `tx` waits, in a fiber of its own;
 here events wait behind the running call. A `tx` that answered the frames it
 meets while it waits would end it, and is proposed upstream
