@@ -1,0 +1,11 @@
+--- luaconf.h
++++ luaconf.h
+@@ -532,6 +532,8 @@
+ #define LUA_NUMBER_FMT		"%.14g"
+ #define lua_number2str(s,n)	sprintf((s), LUA_NUMBER_FMT, (n))
+ #endif
++/* string.format's %e, %f and %g: this build's sprintf has no floats */
++int luai_numformat (char *s, const char *form, double n);
+ #define LUAI_MAXNUMBER2STR	32 /* 16 digits, sign, point, and \0 */
+ #if defined(LUA_NUMBER_IS_FLOAT) && LUA_NUMBER_IS_FLOAT
+ #define lua_str2number(s,p)	strtof((s), (p))

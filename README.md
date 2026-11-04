@@ -119,6 +119,20 @@ deepest user is the Lua parser (~4 KB) parsing the embedded chunk; see
 `docs/ram-usage.md` for the breakdown and sizing guidance.
 
 
+## Numbers as text
+
+The firmware leaves printf's float support out to save flash, so the C
+library writes nothing for a float. `tostring`, `..` and `print` write
+numbers with `lua_float2str` (`source/lua-number2str.c`), in 7 significant
+digits. `string.format`'s `%e`, `%f` and `%g` go to `source/lua-number.c`
+through `source/lstrlib-number-text.patch`, and follow the format as C does:
+`string.format("%.2f", 2.5)` gives `2.50`. Past 14 significant digits they
+write zeros, and the `#` flag is ignored.
+
+`tests/lua-number-tests.sh` builds `source/lua-number.c` with the host's C
+compiler and checks it against the host's printf.
+
+
 # Where
 
 The project's home is at
