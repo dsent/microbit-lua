@@ -212,6 +212,11 @@ static int l_scroll(lua_State *L) {
 }
 
 // microbit.sleep, as the firmware binds it
+static int l_version(lua_State *L) {
+  lua_pushstring(L, "hosttest");
+  return 1;
+}
+
 static int l_sleep(lua_State *L) {
   uint32_t ms = (uint32_t)luaL_checkinteger(L, 1);
   note("<sleep>");
@@ -233,7 +238,8 @@ static int l_nothing(lua_State *L) {
 // The modules the firmware's script requires, with the stand-ins above;
 // tpbot is the firmware's own
 static const luaL_Reg l_microbit[] = {
-  {"sleep", l_sleep}, {"friendlyName", l_name}, {NULL, NULL}
+  {"sleep", l_sleep}, {"friendlyName", l_name}, {"version", l_version},
+  {NULL, NULL}
 };
 static const struct { const char *name; int value; } constants[] = {
   {"DEVICE_ID_BUTTON_A", ID_BUTTON_A}, {"DEVICE_ID_BUTTON_B", ID_BUTTON_B},
@@ -415,7 +421,7 @@ static void the_repl(void) {
   const char *said;
   fresh();
   boot();
-  expect(strstr(out, "micro:bit\r\nLua 5.1 REPL\r\n> ") == out,
+  expect(strstr(out, "micro:bit\r\nLua 5.1 REPL\r\nfirmware hosttest\r\n> ") == out,
          "the greeting, then the prompt");
   expect(armed, "the port is armed after boot");
   lua_getfield(board_L, LUA_REGISTRYINDEX, "_LOADED");

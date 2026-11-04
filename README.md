@@ -52,6 +52,24 @@ You can update them with `./build.py --update`; it should fail loudly
 if there are any pending changes in your checkouts and/or git pulling
 is not a fast-forward.
 
+### Firmware version
+
+`microbit.version()` returns the version the firmware was built as,
+and the REPL's greeting prints it on its third line, `firmware
+86c8e16`. `build.py` takes it from `git describe --always
+--dirty=-drift`, `-drift` marking a tracked file that differs from the
+commit, and `./build.py --firmware-version` prints it without building.
+Outside git it is `unknown`. A `FIRMWARE_VERSION` in the environment is
+taken as given, for a container where git cannot see the checkout:
+
+```
+podman run --tty --rm --volume "$(pwd)":/workspace --workdir /workspace \
+  -e FIRMWARE_VERSION="$(./build.py --firmware-version)" microbit -c ./build.py
+```
+
+The image holds it after the text `microbit-lua firmware `, ended by a
+zero byte, so a tool can read it out of a `.hex` file.
+
 ## Flashing
 
 The Microbit board exposes a pendrive-like interface. Mount it like
