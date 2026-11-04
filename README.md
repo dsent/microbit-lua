@@ -176,11 +176,11 @@ A mistake in a handler goes to the serial port as `Runtime error: ` and the
 message, on a line of its own, and scrolls by on the display if the display
 is free, while the running call goes on.
 
-On a radio link, a calling board's `tx` takes nothing from the link while it
-waits, since the radio's event waits for the running call: a read of more
-than one frame, 26 characters, as the Compy's terminal sends a long line,
-waits out both boards' tries, a quarter of a second, and may lose what
-follows its first frame.
+On a radio link, the radio's event waits for the running call, so while
+`microbit.radio.tx` waits for the far board to take a frame, it takes what
+the far board sends, up to ten frames, and the next `rx` returns it. A line
+of more than one frame, 26 characters, as the Compy's terminal sends a long
+line, and its echo from the far board then pass each other.
 
 
 ## TPBot

@@ -1190,6 +1190,16 @@ static int radio_put(uint8_t kind, uint8_t link, uint8_t num,
 static uint8_t radio_held[RADIO_FRAME];
 static int radio_held_len = 0;
 
+/* What the far end sends while a tx here waits for its answer.
+ * rx cannot take it then, since events wait for the running
+ * call, and the far end's own tx, an echo for one, would wait
+ * for this end's answer until one of the two gave up. So tx
+ * answers it and keeps it for rx: up to ten pieces, the echo
+ * of the longest read the port holds. A piece that finds no
+ * room is left unanswered and comes again. */
+static uint8_t radio_early[10 * RADIO_BODY];
+static int radio_early_len = 0;
+
 /* Is this frame the one being waited for, and if so, what
  * does it carry? Anything longer than a frame is not ours. */
 static bool radio_wanted(uint8_t *b, int n, uint8_t kind,
@@ -1257,6 +1267,7 @@ static void radio_open(uint8_t link, const char *peer)
     radio_drop();
     radio_link = link;
     radio_held_len = 0;
+    radio_early_len = 0;
     radio_out = 0;
     radio_in = 0;
     memcpy(radio_peer, peer, RADIO_NAME);
@@ -1337,7 +1348,25 @@ static bool radio_called_us(const char *from)
     return true;
 }
 
-/* One frame, repeated until the far end answers it */
+/* A DATA frame of this link, answered: its length, or -1 when
+ * none has come, or when it came before, since the far end did
+ * not hear the first answer; then it is answered again and
+ * dropped. */
+static int radio_data(uint8_t *body)
+{
+    uint8_t num;
+    int len;
+
+    if (!radio_take(RADIO_DATA, radio_link, NULL, &num, body, &len))
+        return -1;
+    radio_put(RADIO_ACK, radio_link, num, NULL, 0);
+    if (num == radio_in) return -1;
+    radio_in = num;
+    return len;
+}
+
+/* One frame, repeated until the far end answers it; what the
+ * far end sends meanwhile is answered and kept */
 static bool radio_one(uint8_t kind, const char *body, int len)
 {
     radio_out++;
@@ -1347,9 +1376,13 @@ static bool radio_one(uint8_t kind, const char *body, int len)
         until = uBit.systemTime() + RADIO_WAIT;
         while (uBit.systemTime() < until) {
             uint8_t num;
+            int got;
             if (radio_take(RADIO_ACK, radio_link, NULL,
                            &num, NULL, NULL)
                 && num == radio_out) return true;
+            if (radio_early_len + RADIO_BODY <= (int)sizeof(radio_early)
+                && (got = radio_data(radio_early + radio_early_len)) > 0)
+                radio_early_len += got;
             uBit.sleep(1);
         }
     }
@@ -1450,14 +1483,19 @@ static bool radio_one(uint8_t kind, const char *body, int len)
                   })							\
 /* rx() -> string, nil, or false once the link is over: the
  * far end has closed it, or, at the calling end, has sent no
- * beacon for too long. One piece, acknowledged. A piece that
- * arrives twice is acknowledged again and dropped: the far
- * end did not hear the first answer. */				\
+ * beacon for too long. All a tx took while it waited, or one
+ * piece, acknowledged. */						\
     F(rx,         { uint8_t body[RADIO_BODY];				\
                     uint8_t num;					\
                     int len;						\
                     if (radio_link == 0) {				\
                       lua_pushnil(L);					\
+                      return 1;						\
+                    }							\
+                    if (radio_early_len > 0) {				\
+                      lua_pushlstring(L, (const char *)radio_early,	\
+                                      radio_early_len);		\
+                      radio_early_len = 0;				\
                       return 1;						\
                     }							\
                     bool bye = radio_take(RADIO_BYE, radio_link, NULL,	\
@@ -1471,17 +1509,11 @@ static bool radio_one(uint8_t kind, const char *body, int len)
                       lua_pushboolean(L, 0);				\
                       return 1;						\
                     }							\
-                    if (!radio_take(RADIO_DATA, radio_link, NULL, &num,	\
-                                    body, &len)) {			\
+                    len = radio_data(body);				\
+                    if (len < 0) {					\
                       lua_pushnil(L);					\
                       return 1;						\
                     }							\
-                    radio_put(RADIO_ACK, radio_link, num, NULL, 0);	\
-                    if (num == radio_in) {				\
-                      lua_pushnil(L);					\
-                      return 1;						\
-                    }							\
-                    radio_in = num;					\
                     lua_pushlstring(L, (const char *)body, len);	\
                     return 1;						\
                   })							\
