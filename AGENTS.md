@@ -23,6 +23,8 @@
   configure applies them to fresh sources from the tarball, under `build/`, and
   stops on a patch that does not apply. `libraries/` keeps only the tarball; a
   `libraries/lua-5.1.5` left by older builds is unused and can be deleted.
+- `bash tests/lua-number-tests.sh` tests `source/lua-number.c` on the host; it
+  needs only `cc`.
 - The build itself needs no host Lua. `tests/hextract-tests.sh` does: `utils/hextract`
   pins its interpreter with `#!/usr/bin/env lua5.1`, and the harness runs the script
   directly, so only the `lua5.1` package is required (no PATH or alternatives setup).
