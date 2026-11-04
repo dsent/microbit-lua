@@ -306,12 +306,13 @@ static int read_into_lua(lua_State *L, Read read) {
                   })							\
     F(show,       { lua_events_before_wait(); int width;		\
                     int height;						\
-                    const uint8_t *pixels =				\
-                      luaL_checkimage(L, 1, &width, &height);		\
                     int x = luaL_optint(L, 2, 0);			\
                     int y = luaL_optint(L, 3, 0);			\
                     int alpha = luaL_optint(L, 4, 0);			\
                     int delay = luaL_optint(L, 5, 0);			\
+                    /* read last: the image's pixels then sit on top */	\
+                    const uint8_t *pixels =				\
+                      luaL_checkimage(L, 1, &width, &height);		\
                     int r = uBit.display.print(				\
                       Image(width, height, pixels), x, y, alpha, delay);\
                     lua_pushboolean(L, r == DEVICE_OK);			\
@@ -319,13 +320,13 @@ static int read_into_lua(lua_State *L, Read read) {
                   })							\
     F(showAsync,  { int width;						\
                     int height;						\
-                    const uint8_t *pixels =				\
-                      luaL_checkimage(L, 1, &width, &height);		\
                     int x = luaL_optint(L, 2, 0);			\
                     int y = luaL_optint(L, 3, 0);			\
                     int alpha = luaL_optint(L, 4, 0);			\
                     int delay = luaL_optint(L, 5,			\
                       DISPLAY_DEFAULT_PRINT_SPEED);			\
+                    const uint8_t *pixels =				\
+                      luaL_checkimage(L, 1, &width, &height);		\
                     int r = uBit.display.printAsync(			\
                       Image(width, height, pixels), x, y, alpha, delay);\
                     lua_pushboolean(L, r == DEVICE_OK);			\
@@ -333,12 +334,12 @@ static int read_into_lua(lua_State *L, Read read) {
                   })							\
     F(pan,        { lua_events_before_wait(); int width;		\
                     int height;						\
-                    const uint8_t *pixels =				\
-                      luaL_checkimage(L, 1, &width, &height);		\
                     int delay = luaL_optint(L, 2,			\
                       DISPLAY_DEFAULT_SCROLL_SPEED);			\
                     int stride = luaL_optint(L, 3,			\
                       DISPLAY_DEFAULT_SCROLL_STRIDE);			\
+                    const uint8_t *pixels =				\
+                      luaL_checkimage(L, 1, &width, &height);		\
                     int r = uBit.display.scroll(			\
                       Image(width, height, pixels), delay, stride);	\
                     lua_pushboolean(L, r == DEVICE_OK);			\
@@ -346,12 +347,12 @@ static int read_into_lua(lua_State *L, Read read) {
                   })							\
     F(panAsync,   { int width;						\
                     int height;						\
-                    const uint8_t *pixels =				\
-                      luaL_checkimage(L, 1, &width, &height);		\
                     int delay = luaL_optint(L, 2,			\
                       DISPLAY_DEFAULT_SCROLL_SPEED);			\
                     int stride = luaL_optint(L, 3,			\
                       DISPLAY_DEFAULT_SCROLL_STRIDE);			\
+                    const uint8_t *pixels =				\
+                      luaL_checkimage(L, 1, &width, &height);		\
                     int r = uBit.display.scrollAsync(			\
                       Image(width, height, pixels), delay, stride);	\
                     lua_pushboolean(L, r == DEVICE_OK);			\
@@ -1938,14 +1939,14 @@ static const int digitalRJ[] = { 8, 12, 14, 16 };
                     return 1;						\
                   })							\
 /* colorRGB() -> red, green, blue and clear light as measured */	\
-   F(colorRGB,    { uint16_t light[4];					\
+   F(colorRGB,    { lua_events_before_wait(); uint16_t light[4];	\
                     color_light(L, light);				\
                     for (int i = 0; i < 4; i++)				\
                       lua_pushinteger(L, light[i]);			\
                     return 4;						\
                   })							\
 /* colorHSV() -> hue in degrees, saturation, value 1 for white */	\
-   F(colorHSV,    { float hsv[3];					\
+   F(colorHSV,    { lua_events_before_wait(); float hsv[3];		\
                     color_hsv(L, hsv);				\
                     for (int i = 0; i < 3; i++)				\
                       lua_pushnumber(L, hsv[i]);			\
@@ -1953,7 +1954,7 @@ static const int digitalRJ[] = { 8, 12, 14, 16 };
                   })							\
 /* color() -> 1 blue, 2 red, 3 magenta, 4 green, 5 cyan, 6 yellow,	\
    7 white, or 0 */							\
-   F(color,       { float hsv[3];					\
+   F(color,       { lua_events_before_wait(); float hsv[3];		\
                     color_hsv(L, hsv);				\
                     lua_pushinteger(L, color_number(hsv));		\
                     return 1;						\

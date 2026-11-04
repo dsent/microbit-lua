@@ -267,7 +267,7 @@ static int l_answered(lua_State *L) {
     snprintf(awaited_name, sizeof awaited_name, "%s", luaL_checkstring(L, 1));
     awaited_last = awaited_name;
   }
-  if (listening == 0) {
+  if (listening == 0 && (!awaited_last || strcmp(awaited_last, "gigat") == 0)) {
     listening = 1;
     link_open = 1;
     lua_pushliteral(L, "gigat");
@@ -1432,7 +1432,7 @@ static void every_drop_counted(void) {
 // it types echoed and edited, and the answer to its line. The session it
 // serves is made then: booted, the firmware's script holds no more Lua
 // heap than this, on the 64-bit host.
-#define BOOTED_HEAP 46000
+#define BOOTED_HEAP 47000
 
 static void serving_a_link(void) {
   const char *said;
@@ -1503,11 +1503,64 @@ static void any_caller(void) {
   boot("");
   caller_types = "1\r";
   line("listen()");
-  expect(awaited_last == NULL
-         || strcmp(awaited_last, "gigat") == 0,
+  expect(awaited_last && strcmp(awaited_last, "gigat") == 0,
          "listen() without a name answers any board, then only the one "
          "that called");
   expect_text(caller_hears, "> 1\r\n=> 1\r\n> ", "... and serves it");
+}
+
+static void another_board_awaited(void) {
+  fresh();
+  boot("");
+  caller_types = "1\r";
+  line("listen('hakka')");
+  expect(strcmp(caller_hears, "") == 0 && closed == 1,
+         "a board waiting for another leaves a caller unanswered");
+}
+
+// A name that is not five letters is refused before anything changes, so
+// the next listen() serves; listen() while connected, and connect() while
+// listening or connected, are refused with the way out
+static void names_and_roles(void) {
+  const char *said;
+  fresh();
+  boot("");
+  said = line("listen('x')");
+  expect(strstr(said, "Runtime error: a board name is five letters\r\n> ")
+         != NULL, "listen() refuses a name that is not five letters");
+  caller_types = "1\r";
+  line("listen('gigat')");
+  expect_text(caller_hears, "> 1\r\n=> 1\r\n> ",
+              "... and the next listen() serves");
+  fresh();
+  boot("");
+  caller_types = "connect('hakka')\r";
+  line("listen('gigat')");
+  expect(strstr(caller_hears, "Runtime error: this micro:bit is listening: "
+                "press Ctrl+C on its own port first\r\n> ") != NULL,
+         "connect() typed over the link is refused");
+  fresh();
+  boot("");
+  said = line("connect('gigat'); listen('hakka')");
+  expect(strstr(said, "Runtime error: this micro:bit is connected to another: "
+                "press Ctrl+D first") != NULL && linked,
+         "listen() while connected is refused, and the link stays");
+  said = line("connect('hakka')");
+  expect(strcmp(far_heard, "connect('hakka')\r") == 0,
+         "... and connect() typed then goes over the link, as any line");
+}
+
+// Ctrl+D, connect() and more in one read: what follows the connect() is
+// the new link's
+static void ctrl_d_then_connect(void) {
+  fresh();
+  boot("");
+  line("connect('gigat')");
+  type_in("\4connect('gigat')\rprint(42)\r");
+  expect(closed == 1 && linked
+         && strcmp(far_heard, "print(42)\r") == 0,
+         "after Ctrl+D and connect() in one read, what follows goes over "
+         "the new link");
 }
 
 // connect() carries the port over: what is typed goes as it is, what
@@ -1990,6 +2043,9 @@ int main(int argc, char **argv) {
   ctrl_c_over_the_link();
   listen_switches_over_the_link();
   any_caller();
+  another_board_awaited();
+  names_and_roles();
+  ctrl_d_then_connect();
   connected();
   the_far_end_closes();
   a_full_c_stack();

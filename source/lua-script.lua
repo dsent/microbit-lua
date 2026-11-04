@@ -337,6 +337,9 @@ local function flush_held()
   end
 end
 
+-- What read_port was given and had not read when connect() took the port
+local left_over = ""
+
 -- What has been typed into the console: the characters given first, then
 -- the port's
 local function read_port(pending)
@@ -360,6 +363,7 @@ local function read_port(pending)
       input()
       -- connect() gave the port to the link: what follows is the link's
       if serial_session.transport.taken then
+        left_over = at < n and sub(pending, at + 1) or ""
         return
       end
     else
@@ -484,6 +488,12 @@ local listening = false
 local awaited   -- the board listen() waits for; nil for any
 
 function listen(name)
+  if name ~= nil and #name ~= 5 then
+    error("a board name is five letters", 0)
+  end
+  if serial_session.transport.taken then
+    error("this micro:bit is connected to another: press Ctrl+D first", 0)
+  end
   awaited = name
   if listening then
     -- typed over the link: the caller is let go, and the loop below goes
@@ -551,9 +561,12 @@ end
 -- armed before it is read: a character that comes after the read raises
 -- the event, and one before it is read now.
 local function port_to_link(value)
-  if value == HEAD_MATCH then
-    arm_port(1)
-    local text = typing()
+  if value ~= HEAD_MATCH then
+    return
+  end
+  arm_port(1)
+  local text = typing()
+  while true do
     local before, after = match(text, "^([^\4]*)\4(.*)")
     if not before then
       if #text > 0 then
@@ -565,11 +578,23 @@ local function port_to_link(value)
       tx(before)
     end
     disconnect()
+    left_over = ""
     serial_session.run(read_port, after)
+    if not serial_session.transport.taken then
+      return
+    end
+    -- connect() came after the Ctrl+D: what followed it is the new link's
+    text = left_over
   end
 end
 
 function connect(name, timeout)
+  if listening then
+    error("this micro:bit is listening: press Ctrl+C on its own port first", 0)
+  end
+  if serial_session.transport.taken then
+    error("this micro:bit is connected already: press Ctrl+D first", 0)
+  end
   radio.enable()
   if not radio.connect(name, timeout) then
     say("Connection timed out.")

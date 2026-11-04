@@ -239,8 +239,8 @@ be read, what is typed while the script at boot runs included, and the REPL
 reads them when it starts.
 
 `robot_move`'s own wait handles nothing: a button pressed while the robot
-drives is handled when the move is over. A radio link is answered all the
-same (see Radio link).
+drives is handled when the move is over, and so is a key that came over a
+radio link, if it is still there (see Radio link).
 
 A mistake in a handler goes to the serial port as `Runtime error: ` and the
 message, unless a program has redirected the port to other pins
@@ -291,12 +291,16 @@ bytes, then up to 26 bytes of body. The link's number is one byte, drawn at
 random by the board that calls; a board takes the pieces and answers that carry
 its link's number, and a board that calls again, reset or not, is taken as it
 comes. `tx(message)` sends the message in pieces, each sent again every 30 ms,
-8 times at most, until the other board takes it, and returns false when one is
-not taken. A board takes a piece only from Lua: the serving board in its
-`listen()` loop, every 5 ms, and the calling board when the radio's event brings
-it. A key typed while the serving board runs a command, driving the robot for
-instance, is not taken in time, and is lost without a word; so is one sent to a
-board that is gone.
+8 times at most, until the other board takes it, and returns false when none of
+the 8 was answered in time. A board takes a piece only from Lua: the serving
+board in its `listen()` loop, every 5 ms, and the calling board when the radio's
+event brings it. A key typed while the serving board runs a command, driving
+the robot for instance, is not answered in time, and the calling board gives it
+up after a quarter of a second without a word; the serving board may still find
+it in its radio's queue of 4 datagrams when the command ends, and type it then,
+or may not, when the queue was full. So what is typed meanwhile may run late,
+or not at all, and nothing says which: wait for the echo before typing on. A
+piece sent to a board that is gone is lost the same way.
 
 A listening board sends a beacon every one to two seconds with its name and the
 name of the board it waits for. `microbit.radio.scan()` listens for three of the
