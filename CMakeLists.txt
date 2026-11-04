@@ -338,48 +338,68 @@ set(LUA_VERSION 5.1.5)
 set(LUA_TARBALL lua-${LUA_VERSION}.tar.gz)
 set(LUA_URL https://www.lua.org/ftp/${LUA_TARBALL})
 
-set(LUA_DIR ${CMAKE_SOURCE_DIR}/${LIB_DEST}/lua-${LUA_VERSION})
-set(LUA_SRC_DIR ${LUA_DIR}/src)
 set(LUA_ARCHIVE ${CMAKE_SOURCE_DIR}/${LIB_DEST}/${LUA_TARBALL})
+# The sources the build compiles, made by lua_patch_apply() below. A
+# libraries/lua-5.1.5 left by older builds is no longer read and can be deleted.
+set(LUA_SRC_DIR ${CMAKE_BINARY_DIR}/lua-${LUA_VERSION}/src)
 
-# download tarball if missing
+# download tarball if missing; libraries/ keeps it across clean builds
 if(NOT EXISTS ${LUA_ARCHIVE})
     message(STATUS "Downloading Lua ${LUA_VERSION}...")
     file(DOWNLOAD
         ${LUA_URL}
         ${LUA_ARCHIVE}
         SHOW_PROGRESS
+        EXPECTED_HASH SHA256=2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333
+        STATUS _lua_download
     )
-endif()
-
-# extract if missing
-if(NOT EXISTS ${LUA_DIR})
-    message(STATUS "Extracting Lua ${LUA_VERSION}...")
-
-    execute_process(
-        COMMAND ${CMAKE_COMMAND} -E tar xzf ${LUA_ARCHIVE}
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/${LIB_DEST}
-    )
-endif()
-
-# Make LUA_NUMBER overridable (LUA_NUMBER_IS_FLOAT) and add float-tuned number
-# formatting/parsing. Applied in place because lua.h includes luaconf.h by
-# quoted include, so a shadow header cannot take precedence. The content guard
-# makes this a no-op once libraries/ has already been patched (it survives a
-# clean build). To be replaced by a commit in the Lua fork.
-set(LUACONF "${LUA_SRC_DIR}/luaconf.h")
-file(READ "${LUACONF}" _luaconf)
-string(FIND "${_luaconf}" "LUA_NUMBER_IS_FLOAT" _luaconf_patched)
-if(_luaconf_patched EQUAL -1)
-    execute_process(
-        COMMAND patch --forward --batch "${LUACONF}"
-                "${CMAKE_SOURCE_DIR}/source/luaconf-float.patch"
-        RESULT_VARIABLE _luaconf_patch_rc
-    )
-    if(NOT _luaconf_patch_rc EQUAL 0)
-        message(FATAL_ERROR "Failed to patch luaconf.h (${_luaconf_patch_rc})")
+    if(NOT _lua_download MATCHES "^0;")
+        # a configure goes on past the download error, which leaves an
+        # empty file; remove it so the next build downloads again
+        file(REMOVE ${LUA_ARCHIVE})
+        message(FATAL_ERROR "Could not download ${LUA_URL}")
     endif()
 endif()
+
+# lua_patch(FILE PATCH) adds source/PATCH, a patch to src/FILE, to the list;
+# lua_patch_apply() applies the list in order to fresh sources in a scratch
+# directory, then copies into LUA_SRC_DIR only the files whose content
+# changed, so a configure with the same patches recompiles nothing. The
+# sources are patched, not shadowed, because lua.h includes luaconf.h by
+# quoted include. To be replaced by commits in the Lua fork.
+macro(lua_patch FILE PATCH)
+    list(APPEND LUA_PATCH_FILES ${FILE})
+    list(APPEND LUA_PATCHES ${CMAKE_SOURCE_DIR}/source/${PATCH})
+endmacro()
+
+function(lua_patch_apply)
+    set(_work ${CMAKE_BINARY_DIR}/lua-patching)
+    file(REMOVE_RECURSE ${_work})
+    file(ARCHIVE_EXTRACT INPUT ${LUA_ARCHIVE} DESTINATION ${_work})
+    set(_src ${_work}/lua-${LUA_VERSION}/src)
+    foreach(_file _patch IN ZIP_LISTS LUA_PATCH_FILES LUA_PATCHES)
+        execute_process(
+            COMMAND patch --forward --batch --quiet ${_src}/${_file} ${_patch}
+            RESULT_VARIABLE _rc
+        )
+        if(NOT _rc EQUAL 0)
+            message(FATAL_ERROR "Lua patch ${_patch} does not apply to ${_file}")
+        endif()
+    endforeach()
+    file(GLOB _files ${_src}/*)
+    file(MAKE_DIRECTORY ${LUA_SRC_DIR})
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_files} ${LUA_SRC_DIR}
+        COMMAND_ERROR_IS_FATAL ANY
+    )
+    # an edited patch reconfigures a plain ninja or make run too
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${LUA_PATCHES})
+endfunction()
+
+# Make LUA_NUMBER overridable (LUA_NUMBER_IS_FLOAT) and add float-tuned number
+# formatting/parsing.
+lua_patch(luaconf.h luaconf-float.patch)
+lua_patch_apply()
 
 set(LUA_CORE_SOURCES
     lapi.c lcode.c ldebug.c ldo.c ldump.c lfunc.c lgc.c llex.c lmem.c

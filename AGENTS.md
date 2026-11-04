@@ -18,6 +18,11 @@
   path (`find_dependency_override`) and `build.py --update`. Update those SHAs to bump.
 - `build.py --clean` only wipes `build/`; `libraries/` is reused as-is. Run
   `./build.py --update` after changing pins (the build warns if a 40-hex pin differs).
+- Patches to the Lua sources live in `source/` and are listed in order with
+  `lua_patch(FILE PATCH)` in `CMakeLists.txt`, before `lua_patch_apply()`. Every
+  configure applies them to fresh sources from the tarball, under `build/`, and
+  stops on a patch that does not apply. `libraries/` keeps only the tarball; a
+  `libraries/lua-5.1.5` left by older builds is unused and can be deleted.
 - The build itself needs no host Lua. `tests/hextract-tests.sh` does: `utils/hextract`
   pins its interpreter with `#!/usr/bin/env lua5.1`, and the harness runs the script
   directly, so only the `lua5.1` package is required (no PATH or alternatives setup).
