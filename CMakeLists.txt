@@ -421,6 +421,21 @@ lua_patch_apply()
 # Application sources build at -O2; this file is 1.3 KB smaller at -Os.
 set_source_files_properties("${CMAKE_SOURCE_DIR}/source/lua-number.c"
     PROPERTIES COMPILE_OPTIONS "-Os")
+# The version microbit.version() reports, which build.py derives from git
+# and hands over in the environment. Only codal-lua.cpp takes it, so a new
+# version rebuilds the application's own few sources, not the CODAL
+# libraries.
+set(FIRMWARE_VERSION "$ENV{FIRMWARE_VERSION}")
+if("${FIRMWARE_VERSION}" STREQUAL "")
+    set(FIRMWARE_VERSION "unknown")
+endif()
+# It becomes a C string through a CMake list, so it keeps to characters
+# neither of them reads specially.
+if(NOT FIRMWARE_VERSION MATCHES "^[A-Za-z0-9._+/-]+$")
+    message(FATAL_ERROR "FIRMWARE_VERSION may hold only letters, digits and . _ + / -")
+endif()
+set_property(SOURCE "${CMAKE_SOURCE_DIR}/source/codal-lua.cpp" APPEND
+    PROPERTY COMPILE_DEFINITIONS "FIRMWARE_VERSION=\"${FIRMWARE_VERSION}\"")
 
 set(LUA_CORE_SOURCES
     lapi.c lcode.c ldebug.c ldo.c ldump.c lfunc.c lgc.c llex.c lmem.c
