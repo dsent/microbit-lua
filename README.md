@@ -152,6 +152,45 @@ write zeros, and the `#` flag is ignored.
 compiler and checks it against the host's printf.
 
 
+## TPBot
+
+`tpbot` and `tpbot2` are in C, in `source/tpbot.c`.
+
+- `tpbot` holds what the TPBot Classic and the TPBot Edu both do:
+  `set_car_light`, `set_motors_speed` and `get_distance`. Each command sends
+  both robots' frames, and each robot ignores the other's, so one program
+  drives either robot. `require("tpbot")` also sets the globals
+  `robot_move(left, right, seconds)` and `robot_info()`.
+- `tpbot2` holds everything the Edu does and sends the Edu's frames only:
+  the three above, `run_distance(mm)` and `turn(degrees)`.
+  `require("tpbot2")` sets `robot_move` and `robot_info` for the Edu, plus
+  `straight(squares)`, in squares of 145 mm, and `turn(hours)`, in hours of
+  a clock face. With `tpbot` alone they are not there, and Lua says
+  `attempt to call global 'straight' (a nil value)`.
+
+`robot_move` stops the robot after the seconds given, from 0 to 3600, and
+refuses a call without them. `get_distance()` answers in mm in both
+modules, the unit `run_distance` takes, or `nil` when nothing is within
+about 4 m to echo back.
+
+A distance under 10 mm and a turn under 5 degrees, either way, do nothing,
+as 0 does: a TPBot Edu sent 1 or 2 mm, or 1 degree, drives or spins on and
+never stops. So `straight(0.06)` and `turn(0.1)` do nothing. A distance or
+an angle of 65536 or more is refused. A robot command waits about 5 s for a
+switched-off TPBot Edu that holds the bus (`NRF52I2C_TIMEOUT10US` in
+`codal.json`), not 14, before it says the robot does not answer.
+
+## Host tests
+
+`bash tests/host-tests.sh` builds this firmware's Lua for the host and runs:
+
+- every TPBot command over a stand-in bus, checking the bytes each writes,
+  what it returns and the words of each error;
+- `source/lua-cstack.c`'s limit at two stack sizes.
+
+It needs `cc`, `patch`, and the Lua tarball a firmware build leaves in
+`libraries/`, which it patches as the build does.
+
 # Where
 
 The project's home is at

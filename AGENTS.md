@@ -27,6 +27,9 @@
   needs only `cc`.
 - `bash tests/cstack-host-tests.sh` tests `source/lua-cstack.c`'s limit; it
   needs `cc` and the Lua tarball a firmware build leaves in `libraries/`.
+- `bash tests/host-tests.sh` checks the frames `source/tpbot.c` writes over
+  a stand-in bus, and runs the C stack test above; it needs `cc`, `patch`
+  and the Lua tarball a firmware build leaves in `libraries/`.
 - The build itself needs no host Lua. `tests/hextract-tests.sh` does: `utils/hextract`
   pins its interpreter with `#!/usr/bin/env lua5.1`, and the harness runs the script
   directly, so only the `lua5.1` package is required (no PATH or alternatives setup).
