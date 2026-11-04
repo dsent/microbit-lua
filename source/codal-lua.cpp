@@ -77,35 +77,43 @@ void lua_createimage(lua_State *L, ImageData *ptr) {
   lua_settable(L, -3);
 }
 
-// check and return a Lua function argument as a C++ Image object
+// check and return a Lua function argument as a C++ Image object. data is
+// a string, a byte a pixel row by row, or a list of numbers, one a pixel;
+// pixels it does not reach stay off. Every Lua call that can raise an
+// error comes before the Image is made: an error jumps past the Image's
+// destructor, and what it holds on the heap is never given back. So a
+// binding reads its other arguments first, too.
+#define IMAGE_PIXELS_MAX 4096
 Image luaL_checkimage(lua_State *L, int narg) {
-  Image r;
-  int width;
-  int height;
-  const char *data;
-  size_t size;
+  int width, height, kind;
   luaL_checktype(L, narg, LUA_TTABLE);
   lua_getfield(L, narg, "width");
   width = (int)lua_tointeger(L, -1);
   lua_getfield(L, narg, "height");
   height = (int)lua_tointeger(L, -1);
-  lua_pop(L, 2);
-  r = Image(width, height);
   lua_getfield(L, narg, "data");
-  data = lua_tolstring(L, -1, &size);
-  for(int y = 0; y < height; y++) {
-    for(int x = 0; x < width; x++) {
-      if(size == 0) {
-        lua_pop(L, 1);
-        return r;
-      }
-      if(r.setPixelValue(x, y, *data) != DEVICE_OK) {
-        luaL_error(L, "image error");
-      }
-      ++data; --size;
+  kind = lua_type(L, -1);
+  // a bigger image than the heap can give stops the board with panic 020
+  luaL_argcheck(L, width * height <= IMAGE_PIXELS_MAX, narg,
+                "an image has at most 4096 pixels, width times height");
+  luaL_argcheck(L, kind == LUA_TSTRING || kind == LUA_TTABLE, narg,
+                "an image's data is a string, or a list of numbers, one "
+                "for each pixel");
+  Image r(width, height);           // empty when a size is below 0
+  uint8_t *pixels = r.getBitmap();
+  size_t count = (size_t)r.getWidth() * r.getHeight();
+  if (kind == LUA_TSTRING) {
+    size_t size;
+    const char *data = lua_tolstring(L, -1, &size);
+    memcpy(pixels, data, size < count ? size : count);
+  } else {
+    for (size_t i = 0; i < count; i++) {
+      lua_rawgeti(L, -1, (int)i + 1);
+      pixels[i] = (uint8_t)lua_tointeger(L, -1);
+      lua_pop(L, 1);
     }
   }
-  lua_pop(L, 1);
+  lua_pop(L, 3);
   return r;
 }
 
@@ -155,9 +163,9 @@ Image luaL_checkimage(lua_State *L, int narg) {
                     lua_pushinteger(L, r);				\
                     return 1;						\
                   })							\
-    F(setSleep,   { NRF52LEDMatrix display = uBit.display;		\
-                    luaL_checkany(L, 1);				\
-                    display.setSleep(lua_toboolean(L, 1) != 0);		\
+    F(setSleep,   { luaL_checkany(L, 1);				\
+                    uBit.display.NRF52LEDMatrix::setSleep(		\
+                      lua_toboolean(L, 1) != 0);			\
                     return 0;						\
                   })							\
     F(stopAnimation, { uBit.display.stopAnimation();			\
@@ -191,13 +199,13 @@ Image luaL_checkimage(lua_State *L, int narg) {
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(animateAsync, { Image image = luaL_checkimage(L, 1);		\
-                    int delay = luaL_checkint(L, 2);			\
+    F(animateAsync, { int delay = luaL_checkint(L, 2);			\
                     int stride = luaL_checkint(L, 3);			\
                     int startingPosition =				\
                       luaL_optint(L, 4, DISPLAY_ANIMATE_DEFAULT_POS);	\
                     int autoClear =					\
                       luaL_optint(L, 5, DISPLAY_DEFAULT_AUTOCLEAR);	\
+                    Image image = luaL_checkimage(L, 1);		\
                     int r = uBit.display.animateAsync(image,		\
                                                       delay,		\
                                                       stride,		\
@@ -206,13 +214,13 @@ Image luaL_checkimage(lua_State *L, int narg) {
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(animate,    { Image image = luaL_checkimage(L, 1);		\
-                    int delay = luaL_checkint(L, 2);			\
+    F(animate,    { int delay = luaL_checkint(L, 2);			\
                     int stride = luaL_checkint(L, 3);			\
                     int startingPosition =				\
                       luaL_optint(L, 4, DISPLAY_ANIMATE_DEFAULT_POS);	\
                     int autoClear =					\
                       luaL_optint(L, 5, DISPLAY_DEFAULT_AUTOCLEAR);	\
+                    Image image = luaL_checkimage(L, 1);		\
                     int r = uBit.display.animate(image,			\
                                                  delay,			\
                                                  stride,		\
@@ -221,41 +229,41 @@ Image luaL_checkimage(lua_State *L, int narg) {
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(show,       { Image image = luaL_checkimage(L, 1);		\
-                    int x = luaL_optint(L, 2, 0);			\
+    F(show,       { int x = luaL_optint(L, 2, 0);			\
                     int y = luaL_optint(L, 3, 0);			\
                     int alpha = luaL_optint(L, 4, 0);			\
                     int delay = luaL_optint(L, 5, 0);			\
+                    Image image = luaL_checkimage(L, 1);		\
                     int r = uBit.display.print(				\
                       image, x, y, alpha, delay);			\
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(showAsync,  { Image image = luaL_checkimage(L, 1);		\
-                    int x = luaL_optint(L, 2, 0);			\
+    F(showAsync,  { int x = luaL_optint(L, 2, 0);			\
                     int y = luaL_optint(L, 3, 0);			\
                     int alpha = luaL_optint(L, 4, 0);			\
                     int delay = luaL_optint(L, 5,			\
                       DISPLAY_DEFAULT_PRINT_SPEED);			\
+                    Image image = luaL_checkimage(L, 1);		\
                     int r = uBit.display.printAsync(			\
                       image, x, y, alpha, delay);			\
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(pan,        { Image image = luaL_checkimage(L, 1);		\
-                    int delay = luaL_optint(L, 2,			\
+    F(pan,        { int delay = luaL_optint(L, 2,			\
                       DISPLAY_DEFAULT_SCROLL_SPEED);			\
                     int stride = luaL_optint(L, 3,			\
                       DISPLAY_DEFAULT_SCROLL_STRIDE);			\
+                    Image image = luaL_checkimage(L, 1);		\
                     int r = uBit.display.scroll(image, delay, stride);	\
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(panAsync,   { Image image = luaL_checkimage(L, 1);		\
-                    int delay = luaL_optint(L, 2,			\
+    F(panAsync,   { int delay = luaL_optint(L, 2,			\
                       DISPLAY_DEFAULT_SCROLL_SPEED);			\
                     int stride = luaL_optint(L, 3,			\
                       DISPLAY_DEFAULT_SCROLL_STRIDE);			\
+                    Image image = luaL_checkimage(L, 1);		\
                     int r = uBit.display.scrollAsync(image, delay,	\
                               stride);					\
                     lua_pushboolean(L, r == DEVICE_OK);			\
@@ -648,6 +656,8 @@ Pin *luaL_checkPin(lua_State *L, int narg) {
                     return 0;						\
                   })							\
     F(getPin,     { int pin = luaL_checkint(L, 1);			\
+                    luaL_argcheck(L, 0 <= pin && pin < uBit.io.pins, 1,	\
+                                  "from 0 to 32");			\
                     lua_pushlightuserdata(L, &uBit.io.pin[pin]);	\
                     return 1;						\
                   })
@@ -711,11 +721,15 @@ ManagedString luaL_checkManagedString(lua_State *L, int narg) {
                     return 1;						\
                   })							\
     F(read,       { int size = luaL_checkint(L, 1);			\
+                    luaL_argcheck(L, 0 <= size && size <= 256, 1,	\
+                                  "0 to 256 bytes");			\
                     lua_pushManagedString(L,				\
                       uBit.serial.read(size, SYNC_SLEEP));		\
                     return 1;						\
                   })							\
     F(readAsync,  { int size = luaL_checkint(L, 1);			\
+                    luaL_argcheck(L, 0 <= size && size <= 256, 1,	\
+                                  "0 to 256 bytes");			\
                     lua_pushManagedString(L,				\
                       uBit.serial.read(size, ASYNC));			\
                     return 1;						\
@@ -860,12 +874,16 @@ extern MicroBitUARTService *uart;
                   })							\
     F(read,       { if(!uart) { lua_pushnil(L); return 1; }		\
                     int size = luaL_checkint(L, 1);			\
+                    luaL_argcheck(L, 0 <= size && size <= 256, 1,	\
+                                  "0 to 256 bytes");			\
                     lua_pushManagedString(L,				\
                       uart->read(size, SYNC_SLEEP));			\
                     return 1;						\
                   })							\
     F(readAsync,  { if(!uart) { lua_pushnil(L); return 1; }		\
                     int size = luaL_checkint(L, 1);			\
+                    luaL_argcheck(L, 0 <= size && size <= 256, 1,	\
+                                  "0 to 256 bytes");			\
                     lua_pushManagedString(L,				\
                       uart->read(size, ASYNC));				\
                     return 1;						\
@@ -924,6 +942,8 @@ extern MicroBitUARTService *uart;
 #define LUA_I2C_FUNCTIONS						\
     F(read,       { int address = luaL_checkint(L, 1);			\
                     int length = luaL_checkint(L, 2);			\
+                    luaL_argcheck(L, 0 <= length && length <= 256, 2,	\
+                                  "0 to 256 bytes");			\
                     char data[length];					\
                     if(i2c.read(address, data, length) == MICROBIT_OK){	\
                       lua_pushlstring(L, data, length);			\
@@ -1754,7 +1774,10 @@ static int color_number(const float hsv[3]) {
 const int digitalRJ[] = { 8, 12, 14, 16 };
 
 #define LUA_PLANETX_FUNCTIONS						\
-   F(getDigitalPin, { int pin = digitalRJ[luaL_checkint(L, 1) - 1];	\
+   F(getDigitalPin, { int port = luaL_checkint(L, 1);			\
+                    luaL_argcheck(L, 1 <= port && port <= 4, 1,	\
+                                  "RJ port 1 to 4");			\
+                    int pin = digitalRJ[port - 1];			\
                     lua_pushlightuserdata(L, &uBit.io.pin[pin]);	\
                     return 1;						\
                   })							\
