@@ -300,9 +300,10 @@ one read goes whole only up to one frame, 26 characters: with more, the serving
 board's echo of the first frame meets the second frame half way, each board's
 `tx` waits out its 8 tries for an answer the other cannot give, a quarter of a
 second, and then each takes the one frame it holds meanwhile, the newest to
-come; a read of two frames, up to 52 characters, arrives whole after that
-pause, and of a longer one the third frame on is never sent, since `tx` stopped
-at the second. A terminal that
+come, unless a late answer has taken its place; so a read of two frames, up to
+52 characters, arrives whole after that pause, or without its second frame, as
+the timing falls, and of a longer one the third frame on is never sent, since
+`tx` stopped at the second. A terminal that
 sends a line in one write, as the Compy's does, meets this on a line over 26
 characters. The same two-sided wait meets a key typed on the calling board while
 the serving board prints over the link: the key arrives late, and of the
@@ -321,9 +322,12 @@ piece sent to a board that is gone is lost the same way.
 
 A listening board sends a beacon every one to two seconds with its name and the
 name of the board it waits for, from its `listen()` loop, so none while a
-command typed over the link runs: a command that runs longer than six seconds,
-`robot_move(40, 40, 10)` for one, ends the link at the calling board, which
-says `<name> disconnected.` and must `connect` again once the command is over. `microbit.radio.scan()` listens for three of the
+command typed over the link runs. The calling board gives the link up six
+seconds after the last beacon it heard, which a command that runs on past that
+moment reaches: one of ten seconds always, `robot_move(40, 40, 10)` for one,
+and one of four or five seconds when it started late in a beacon's gap. The
+calling board then says `<name> disconnected.` and must `connect` again once
+the command is over. `microbit.radio.scan()` listens for three of the
 longest gaps and answers a table of the boards heard, each `true` when it waits
 for this board. A calling board that hears no beacon for itself for that long
 takes the link for lost, and `rx()` answers `false`, as it does once the other
