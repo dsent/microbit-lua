@@ -341,16 +341,32 @@ set(LUA_URL https://www.lua.org/ftp/${LUA_TARBALL})
 set(LUA_DIR ${CMAKE_SOURCE_DIR}/${LIB_DEST}/lua-${LUA_VERSION})
 set(LUA_SRC_DIR ${LUA_DIR}/src)
 set(LUA_ARCHIVE ${CMAKE_SOURCE_DIR}/${LIB_DEST}/${LUA_TARBALL})
+# the SHA256 lua.org lists for it
+set(LUA_ARCHIVE_SHA256
+    2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333)
+include("${CMAKE_SOURCE_DIR}/source/lua-patch.cmake")
 
-# download tarball if missing
+# download tarball if missing: the Lua the patches are checked against
+# (source/lua-patch.cmake), so it must be lua.org's own, by its SHA256; one
+# already here is checked the same way each time the build is configured
 if(NOT EXISTS ${LUA_ARCHIVE})
     message(STATUS "Downloading Lua ${LUA_VERSION}...")
     file(DOWNLOAD
         ${LUA_URL}
         ${LUA_ARCHIVE}
         SHOW_PROGRESS
+        EXPECTED_HASH SHA256=${LUA_ARCHIVE_SHA256}
+        STATUS _lua_download
     )
+    list(GET _lua_download 0 _lua_download_rc)
+    if(NOT _lua_download_rc EQUAL 0)
+        file(REMOVE ${LUA_ARCHIVE})
+        message(FATAL_ERROR "Lua ${LUA_VERSION} could not be downloaded from "
+                "${LUA_URL} (${_lua_download}): check the network, and build "
+                "again.")
+    endif()
 endif()
+lua_archive_check()
 
 # extract if missing
 if(NOT EXISTS ${LUA_DIR})
@@ -362,24 +378,15 @@ if(NOT EXISTS ${LUA_DIR})
     )
 endif()
 
+# Patches to the Lua sources, listed in the order they go in, then applied
+# once each by lua_patch_apply (source/lua-patch.cmake). To be replaced by
+# commits in the Lua fork.
+set(LUA_PATCH_DIR "${CMAKE_SOURCE_DIR}/source")
+
 # Make LUA_NUMBER overridable (LUA_NUMBER_IS_FLOAT) and add float-tuned number
-# formatting/parsing. Applied in place because lua.h includes luaconf.h by
-# quoted include, so a shadow header cannot take precedence. The content guard
-# makes this a no-op once libraries/ has already been patched (it survives a
-# clean build). To be replaced by a commit in the Lua fork.
-set(LUACONF "${LUA_SRC_DIR}/luaconf.h")
-file(READ "${LUACONF}" _luaconf)
-string(FIND "${_luaconf}" "LUA_NUMBER_IS_FLOAT" _luaconf_patched)
-if(_luaconf_patched EQUAL -1)
-    execute_process(
-        COMMAND patch --forward --batch "${LUACONF}"
-                "${CMAKE_SOURCE_DIR}/source/luaconf-float.patch"
-        RESULT_VARIABLE _luaconf_patch_rc
-    )
-    if(NOT _luaconf_patch_rc EQUAL 0)
-        message(FATAL_ERROR "Failed to patch luaconf.h (${_luaconf_patch_rc})")
-    endif()
-endif()
+# formatting/parsing.
+lua_patch(luaconf.h luaconf-float.patch)
+lua_patch_apply()
 
 set(LUA_CORE_SOURCES
     lapi.c lcode.c ldebug.c ldo.c ldump.c lfunc.c lgc.c llex.c lmem.c
