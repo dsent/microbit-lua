@@ -288,10 +288,16 @@ message, on a line of its own, and scrolls by on the display if the display
 is free, while the running call goes on. A mistake whose value is neither a
 string nor a number, such as that of `error()` or `error({})`, is not said.
 
-On a radio link, a calling board's `tx` takes nothing from the link while it
-waits, since the radio's event waits for the running call, and the far
-board's echo waits in turn: of a line longer than one frame, 26 characters
-with its CR, as the Compy's terminal sends it, frames are lost.
+On a radio link, the radio's event waits for the running call, so while
+`microbit.radio.tx` waits for the far board to take a frame, it takes what
+the far board sends while a whole frame's room is left of 260 bytes, and the
+next `rx` returns it in one string. A line longer than one frame, 26
+characters with its CR, as the Compy's terminal sends it, and its echo from
+the far board then pass each other. A stream typed into the link without a
+pause can lose pieces once less than a frame's room is left, since the
+port's handler reads it in one call and `rx` does not run meanwhile, and
+nothing says so; lines sent one at a time, as the Compy's terminal sends
+them, arrive whole.
 
 `tests/runtime-host-tests.sh` boots `source/lua-script.lua` in this
 firmware's Lua built for the host, over a stand-in board, with events
