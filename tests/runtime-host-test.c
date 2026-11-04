@@ -252,6 +252,7 @@ static const char *far_says;
 static int far_closes;
 static int linked, closed;
 static int link_open;   // the caller's link, until closed from here
+static int tx_calls;    // frames sent while connected
 
 static int l_connect(lua_State *L) {
   (void)luaL_checkstring(L, 1);
@@ -292,6 +293,7 @@ static int l_tx(lua_State *L) {
   }
   n = strlen(far_heard);
   snprintf(far_heard + n, sizeof far_heard - n, "%s", text);
+  tx_calls++;
   lua_pushboolean(L, linked);
   if (far_says)
     post(ID_RADIO, 1);
@@ -482,7 +484,7 @@ static void fresh(void) {
   bus_writes = bus_fails_at = bus_starves = 0;
   bus_log[0] = 0;
   lost = 0;
-  linked = closed = 0;
+  linked = closed = tx_calls = 0;
   far_heard[0] = 0;
   far_says = NULL;
   far_closes = 0;
@@ -1432,7 +1434,7 @@ static void every_drop_counted(void) {
 // it types echoed and edited, and the answer to its line. The session it
 // serves is made then: booted, the firmware's script holds no more Lua
 // heap than this, on the 64-bit host.
-#define BOOTED_HEAP 47000
+#define BOOTED_HEAP 48000
 
 static void serving_a_link(void) {
   const char *said;
@@ -1577,18 +1579,49 @@ static void connected(void) {
          "connect() says so, and the console's prompt stays away");
   far_says = "print(1)\r\n1\r\n> ";
   said = line("print(1)");
-  expect(strcmp(far_heard, "print(1)\r") == 0,
-         "what is typed goes over the link as it is, unechoed here");
-  expect_text(said, "print(1)\r\n1\r\n> ",
-              "... and what the other board says comes to the port as it is");
+  expect(strcmp(far_heard, "print(1)\r") == 0 && tx_calls == 2,
+         "what is typed goes over the link as it is, unechoed here, a port "
+         "read at a time");
+  expect_text(said, "<sleep></sleep>print(1)\r\n1\r\n> <sleep></sleep>",
+              "... and what the other board says comes to the port as it is, "
+              "taken after each frame");
   before = strlen(out);
   type_in("1+\4");
   line("1");
   expect(strcmp(far_heard, "print(1)\r1+") == 0 && closed == 1 && !linked,
          "what comes before Ctrl+D still goes over, and the link is closed");
-  expect_text(out + before, "\r\ngigat disconnected.\r\n> 1\r\n=> 1\r\n> ",
+  expect_text(out + before,
+              "<sleep></sleep>\r\ngigat disconnected.\r\n> 1\r\n=> 1\r\n> ",
               "... the console says so, on a line of its own after the "
               "other board's prompt, and takes what follows");
+}
+
+// A line longer than a frame goes a frame at a time, the link drained
+// after each: the echo of the first frame is on the port before the second
+// goes
+static void a_long_line_over_the_link(void) {
+  static const char LINE[] =
+    "robot_move(40, 40, 1) robot_move(-40, -40, 1) print('done')";
+  size_t before;
+  fresh();
+  boot("");
+  line("connect('gigat')");
+  before = strlen(out);
+  far_says = "robot_move(40, 40, 1) robot";
+  line(LINE);
+  expect_text(far_heard, "robot_move(40, 40, 1) robot_move(-40, -40, 1) "
+              "print('done')\r",
+              "a line of 59 characters goes over whole");
+  {
+    char what[64];
+    snprintf(what, sizeof what, "... in three frames and its Enter: %d sends",
+             tx_calls);
+    expect(tx_calls == 4, what);
+  }
+  expect(strncmp(out + before, "<sleep></sleep>robot_move(40, 40, 1) robot",
+                 42) == 0,
+         "... and the echo of the first frame is taken before the second "
+         "goes");
 }
 
 static void the_far_end_closes(void) {
@@ -2047,6 +2080,7 @@ int main(int argc, char **argv) {
   names_and_roles();
   ctrl_d_then_connect();
   connected();
+  a_long_line_over_the_link();
   the_far_end_closes();
   a_full_c_stack();
   deep_coroutines();

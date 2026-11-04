@@ -55,9 +55,10 @@ local active_session
 
 -- Output goes wherever the session being served takes it: the link's
 -- session sends it over the link, any other to the port. Either way it
--- goes in pieces of 64 characters, each a copy on CODAL's heap, "\n" made
--- "\r\n" in the piece: a copy of the whole of s could need as much heap
--- again as s itself, and the link carries what the port would show.
+-- goes in pieces of 64 characters, each a copy on CODAL's heap on the port,
+-- and frames on the C stack over the link, "\n" made "\r\n" in the piece: a
+-- copy of the whole of s could need as much heap again as s itself, and the
+-- link carries what the port would show.
 local function write(s)
   local session = active_session
   local out = session and session.transport.send or serial.send
@@ -458,8 +459,9 @@ uBit.eventFallback(dispatch)
 -- made when listen() is first called: most boards never serve a link
 local radio_session
 
--- the link's, taken when a link opens
-local tx, rx
+-- the link's, taken when a link opens, so that a line over the link that
+-- takes them from the module still reaches the board
+local tx, rx, beacon, close
 
 --- A fresh session for a caller that has just arrived
 local function greet()
@@ -498,11 +500,11 @@ function listen(name)
   if listening then
     -- typed over the link: the caller is let go, and the loop below goes
     -- on waiting for the board now named
-    radio.close()
+    close()
     return
   end
   local answered, pause = radio.answered, uBit.sleep
-  tx, rx = radio.tx, radio.rx
+  tx, rx, beacon, close = radio.tx, radio.rx, radio.beacon, radio.close
   radio_session = radio_session or make_session({ send = tx })
   listening = true
   radio.enable()
@@ -510,7 +512,7 @@ function listen(name)
   -- event only once the line that called listen() is over. Ctrl+C or
   -- Ctrl+D ends the listening; the rest of what is typed is dropped.
   while not find(typing(), "[\3\4]") do
-    radio.beacon(awaited)
+    beacon(awaited)
     local caller = answered(awaited)
     if caller then
       awaited = caller
@@ -523,7 +525,7 @@ function listen(name)
     pause(5)
   end
   listening = false
-  radio.close()
+  close()
 end
 
 local peer       -- the board connect() reached
@@ -531,7 +533,7 @@ local mid_line   -- what it sent last left a line open on the port
 
 --- The link is closed, and the port goes back to the console
 local function disconnect()
-  radio.close()
+  close()
   handler[DEVICE_ID_SERIAL] = port_to_console
   handler[DEVICE_ID_RADIO] = nil
   serial_session.transport.taken = false
@@ -553,13 +555,33 @@ local function link_to_port()
   end
 end
 
--- What is typed goes over the link as it is, and the other board echoes
--- and edits it. tx waits to be answered; what is typed meanwhile waits in
--- the port and goes with the next piece, and a piece the other board does
--- not take, busy with a command of its own, is lost. What comes before a
--- Ctrl+D still goes over; what follows it is the console's. The port is
--- armed before it is read: a character that comes after the read raises
--- the event, and one before it is read now.
+-- A frame carries 26 characters
+local FRAME = 26
+
+-- What is typed goes over the link a frame at a time, and the other board
+-- echoes and edits it. tx waits for each frame to be answered, and while
+-- it waits nothing is taken from the link: so between frames the link is
+-- drained, which answers the echo the other board sends as soon as it has
+-- the frame, before that board's own wait for the answer runs out. A
+-- frame the other board does not take, busy with a command of its own, is
+-- given up after a quarter of a second, and what follows it goes on.
+local function to_link(text)
+  for i = 1, #text, FRAME do
+    tx(sub(text, i, i + FRAME - 1))
+    -- the echo is on its way: let it arrive
+    uBit.sleep(2)
+    link_to_port()
+    if not serial_session.transport.taken then
+      return
+    end
+  end
+end
+
+-- What is typed while connected goes over the link; what is typed
+-- meanwhile waits in the port and goes with the next piece. What comes
+-- before a Ctrl+D still goes over; what follows it is the console's. The
+-- port is armed before it is read: a character that comes after the read
+-- raises the event, and one before it is read now.
 local function port_to_link(value)
   if value ~= HEAD_MATCH then
     return
@@ -569,16 +591,17 @@ local function port_to_link(value)
   while true do
     local before, after = match(text, "^([^\4]*)\4(.*)")
     if not before then
-      if #text > 0 then
-        tx(text)
-      end
+      to_link(text)
       return
     end
-    if #before > 0 then
-      tx(before)
+    to_link(before)
+    if serial_session.transport.taken then
+      disconnect()
     end
-    disconnect()
     left_over = ""
+    -- a command typed after the Ctrl+D is the console's: its sleeps handle
+    -- events, as a command read from the port by the console does
+    event_repl()
     serial_session.run(read_port, after)
     if not serial_session.transport.taken then
       return
@@ -601,7 +624,7 @@ function connect(name, timeout)
     return
   end
   say(name .. " connected.")
-  tx, rx = radio.tx, radio.rx
+  tx, rx, beacon, close = radio.tx, radio.rx, radio.beacon, radio.close
   peer, mid_line = name, false
   handler[DEVICE_ID_SERIAL] = port_to_link
   handler[DEVICE_ID_RADIO] = link_to_port

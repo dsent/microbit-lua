@@ -1,6 +1,9 @@
 # Agent notes for opencode
 
 ## Environment
+- The bullets of this section describe the upstream developer's machine.
+  This fork builds in the podman image `Dockerfile` makes (see the README's
+  Build), where every tool is already there.
 - Passwordless sudo is granted for package management only:
   `/usr/bin/apt-get`, `/usr/bin/apt`, `/usr/bin/dpkg`. Other sudo commands need
   a password. Use it to install build dependencies globally, e.g.
