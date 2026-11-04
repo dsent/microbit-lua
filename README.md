@@ -262,8 +262,8 @@ The REPL keeps `loadstring`, `setfenv`, `pcall`, `string.gsub`, `string.sub`,
 `string.find`, `string.match`, `string.format`, `table.concat`,
 `microbit.serial.eventAfterAsync`, `microbit.serial.getCharAsync` and
 `microbit.eventRepl` of its own for that, and a radio link's `tx`, `rx`,
-`answered`, `notSent`, `typed` and `microbit.sleep` from when it opens, so the
-REPL over a link answers too; a line that takes away another global it uses can
+`answered` and `microbit.sleep` from when it opens, so the REPL over a link
+answers too; a line that takes away another global it uses can
 stop what the REPL shows, and the global can be put back from the prompt. The
 firmware arms the port itself after an `on_event` that fails on the port's
 event, and has what already waits there read.
@@ -271,82 +271,43 @@ event, and has what already waits there read.
 
 ## Radio link
 
-`listen(name)` at the prompt waits for the board named `name` to call, then
-serves it a REPL of its own over the radio. `connect(name, timeout)` on that
-board calls, and from then on what is typed there goes over the link a line at a
-time, and what comes back is printed. Typing shows as at the board's own
-prompt: Backspace takes back a character of the line not yet sent, and Enter
-ends the line on the screen. A line typed while `connect` still calls goes over
-the link once it opens. The link itself is `microbit.radio`'s `connect`,
-`listen`, `answered`, `tx` and `rx`, in `source/radio-link.c`; `notSent` gives
-the words the REPL says when a line did not go, and `typed` what typing makes of
-the line and shows.
+`listen(name)` at the prompt waits for the board named `name` to call, or for
+any board when no name is given, then serves the one that called a REPL of its
+own over the radio. `connect(name, timeout)` on that board calls, and from then
+on every key typed there goes over the link as it comes, and what comes back
+goes to the port as it is: the serving board echoes, erases and enters, with
+the same code as its own console, so the calling board's port shows what the
+serving board's own would. Backspace, Enter and Ctrl+C work over the link as at
+the console. Ctrl+D on the calling board hands its port back to the console,
+which says `<name> disconnected.`; the serving board keeps listening, so the
+link can be made again. Ctrl+C or Ctrl+D on the serving board's own port ends
+`listen()`, which closes the link. `listen(name)` typed over the link lets the
+caller go and waits for the board now named. The link itself is
+`microbit.radio`'s `connect`, `answered`, `tx`, `rx`, `close`, `beacon` and
+`scan`, in `source/codal-lua.cpp`, as nagydani/microbit-lua has them.
 
-A frame carries its kind, the link's number and a piece's number. The link's
-number is one byte, drawn at random by the board that calls. HELLO and WELCOME
-carry both boards' names, the link's version, 5, and the call's number, two
-bytes the calling board draws for each `connect` and sends again with every
-HELLO of that call. A board whose firmware has an older link is not answered,
-and does not answer, so `connect` says `Connection timed out.` A board takes the
-pieces and answers that carry its link's number. A HELLO that repeats the open
-link's call, with its link's number, its caller and its call's number, is
-answered again, and the link keeps what it took; any other call for the board
-opens the link anew.
+A frame carries its kind, the link's number and a piece's number, in three
+bytes, then up to 26 bytes of body. The link's number is one byte, drawn at
+random by the board that calls; a board takes the pieces and answers that carry
+its link's number, and a board that calls again, reset or not, is taken as it
+comes. `tx(message)` sends the message in pieces, each sent again every 30 ms,
+8 times at most, until the other board takes it, and returns false when one is
+not taken. A board takes a piece only from Lua: the serving board in its
+`listen()` loop, every 5 ms, and the calling board when the radio's event brings
+it. A key typed while the serving board runs a command, driving the robot for
+instance, is not taken in time, and is lost without a word; so is one sent to a
+board that is gone.
 
-`tx(message)` sends the message in pieces of 25 bytes, each sent again every 30
-ms, 8 times at most, until the other board takes it, and returns true once every
-piece is taken: the message has arrived, and a line in it may not have run yet.
-A board takes a piece whatever its Lua is doing: the fiber that carries the
-radio's event answers the piece and keeps it in C before it hands the event on,
-and while another Lua call runs, the event only waits for it. A line sent while
-the robot drives is taken at once, waits in the board's inbox, and runs when the
-move is over, after the lines before it; the prompt comes back once it has run.
-The inbox holds 8 pieces, 218 B of the board's heap made when the first link
-opens. A piece that comes again, because the answer to it was lost, is answered
-again and dropped. Pieces are numbered in 16 bits: a new piece is taken for a
-repeat only after 65,535 pieces in a row are lost to a board that took none,
-each a line typed or an answer given.
+A listening board sends a beacon every one to two seconds with its name and the
+name of the board it waits for. `microbit.radio.scan()` listens for three of the
+longest gaps and answers a table of the boards heard, each `true` when it waits
+for this board. A calling board that hears no beacon for itself for that long
+takes the link for lost, and `rx()` answers `false`, as it does once the other
+board has closed the link with a BYE frame; the console then says
+`<name> disconnected.`
 
-A piece that finds the inbox full is not taken, and neither is one sent to a
-board that is gone. The board that called then says `The other micro:bit did not
-answer, so it may not have got:` and the line, and drops what was typed after
-it, what reached the port while it tried included: that is shown, and the line
-it begins is dropped up to its line ending, so the person types that line again.
-It says so when that held anything but line endings, and tells the person what
-to do: wait until the other board has finished, then press the reset button on
-the board that called and connect again. When the other board never finishes,
-running a command that does not end, or connecting says `Connection timed out.`,
-the person resets it too, starts it listening again and connects again; it then
-holds nothing typed before. Then they check what ran, and type again from its
-first line any statement that did not run. The other board may have taken the
-line and only its answers been lost, and may hold a statement not yet finished;
-the new call starts its session over, with that statement and what still waits
-in its inbox gone. The board that called prints what the other board says as it
-comes, and between the lines it sends, so its own inbox does not fill while a
-paste goes out.
-
-The first piece of each message is marked, and `rx()` returns with a piece
-whether it starts a message. The link's REPL is sent whole lines, one to a
-message, so a piece that starts a message drops what follows the last line
-ending: a line whose end never came. A line said to be lost never runs in part,
-the next one runs as it was sent, and the lines of a statement still open at
-`>>` stay.
-
-While a board serves a link, the radio's events do not reach `on_event`:
-`listen()` takes what comes without them, and the link's traffic does not push a
-button press out of the line of events waiting while the robot drives.
-
-Four cases the link does not cover. A line said to be lost has arrived when
-every answer to its last piece was lost on the way: it runs, and typed again, it
-runs twice. A command that runs Lua without ever waiting lets no fiber run, so
-the pieces sent meanwhile wait in the radio's own queue of 4; a copy of one
-taken after the command may finish a line the sending board has already said was
-lost. An answer the board that called does not take is cut short, with nothing
-to say so, and what the other board says next follows it on the same line: when
-the board that called is out of reach, or busy while more than 8 pieces of the
-answer come, in a handler of its own or sending a line that is not taken. And
-once a board has opened a link, its fiber takes every datagram that comes, so a
-program there that reads the radio itself with `recv` gets none.
+The link has no cryptographic protection; a board that hears a link's number
+can send on it.
 
 
 ## TPBot
@@ -377,11 +338,8 @@ included, is refused.
   each error;
 - `source/lua-script.lua` over a stand-in board, with events through
   `source/lua-events.c`: typing at the REPL, buttons pressed while Lua sleeps,
-  the globals the REPL uses taken away, and a radio link through
-  `source/radio-link.c`, both ends of it, with lines sent while the robot
-  drives;
-- `source/radio-link.c` built without Lua's headers, calling nothing of
-  Lua's;
+  the globals the REPL uses taken away, and a radio link whose other board the
+  test plays, serving it and calling it;
 - `source/lua-cstack.c`'s limits at four stack sizes, which they follow, and
   at sizes too small for them, where none wraps round;
 - `tests/wait-audit.sh`: every binding that waits looks for `on_event` first;

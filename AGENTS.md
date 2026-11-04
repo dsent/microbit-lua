@@ -1,5 +1,14 @@
 # Agent notes for opencode
 
+## Environment
+- Passwordless sudo is granted for package management only:
+  `/usr/bin/apt-get`, `/usr/bin/apt`, `/usr/bin/dpkg`. Other sudo commands need
+  a password. Use it to install build dependencies globally, e.g.
+  `sudo apt-get install -y --no-install-recommends <pkgs>`.
+  (Do not pass env vars through sudo; `DEBIAN_FRONTEND=...` is rejected.)
+- Installed build deps: cmake, gcc-arm-none-eabi + binutils + newlib/libstdc++,
+  git, make, patch, diffutils, less, python3, lua5.1-5.4.
+
 ## Build
 - Use `python3 build.py --clean` as the entry point (not cmake directly)
 - Outputs `MICROBIT.hex` and `MICROBIT.bin` in the project root (`build/` holds the ELF + map)
@@ -20,3 +29,6 @@
   replaced, `tests/tpbot-reference.lua`, and runs `source/lua-script.lua` over
   a stand-in board; it needs `cc`, `patch`, `cmake` and the Lua tarball a
   firmware build leaves in `libraries/`.
+- The build itself needs no host Lua. `tests/hextract-tests.sh` does: `utils/hextract`
+  pins its interpreter with `#!/usr/bin/env lua5.1`, and the harness runs the script
+  directly, so only the `lua5.1` package is required (no PATH or alternatives setup).

@@ -3,7 +3,8 @@
 ## Goal
 - Reverse-engineer the micro:bit v2 SoftDevice (`/tmp/opencode/sd.bin`) to map nRF52833 IRQ ownership plus stub/gateway/RAM-vector dispatch and PPI/timer usage, then verify the microbit-lua/codal tree never conflicts with SD-owned peripherals/IRQs/PPI channels.
 - Now extended: investigate the user hypothesis that the CPP sound/audio code has a memory bug (write to wrong address) that only manifests when BLE (the SoftDevice) is enabled.
-- Current phase: root cause found and fixed. The "070" SD asserts were app-priority IRQ work holding PRIMASK (all app IRQs masked) during heap/fiber allocation, which delayed the SD's priority-0 radio-arming IRQs (RTC0/TIMER0/RADIO) past their deadline. Fixes: BASEPRI=1 critical sections in the codal heap + fiber allocators, IMMEDIATE Lua listener, and event filtering. Committed on local branches in the codal dependency repos (below); awaiting board re-test and PR push.
+- Current phase: root cause found and fixed. The "070" SD asserts were app-priority IRQ work holding PRIMASK (all app IRQs masked) during heap/fiber allocation, which delayed the SD's priority-0 radio-arming IRQs (RTC0/TIMER0/RADIO) past their deadline. Fixes: an IRQ-lock HAL that masks only application priorities in the codal heap + fiber allocators, IMMEDIATE Lua listener, and event filtering.
+- **Correction (2026-10-25)**: an earlier attempt used `MSR basepri, 1`, which is a **no-op** on nRF52 (see the IRQ-lock bullet below) and left the heap/fiber sections unprotected. The final design is the shared `target_lock_app_irqs()`/`target_unlock_app_irqs()` HAL — codal-core `e37ff8f` (Vadim co-author), codal-nrf52 `840aef7`. The earlier BASEPRI commits were dropped from codal-core history. The CI-only 070 was a separate build bug: the CMake dependency override ignored fork URLs and silently built pre-fix upstream codal-core (fixed in this repo, `5b5832a`).
 
 ## Constraints & Preferences
 - (none explicitly stated)
@@ -57,32 +58,35 @@
 
 ### Done (this session — 070 root cause found & fixed; upstream commits prepared)
 - **Root-cause chain (4 stages, each A/B-verified or instrumented)**:
-  1. **Boot-time 070**: the Lua compile (`luaL_newstate`/`luaopen_*`/`register_lua_api`/`luaL_loadbuffer`) ran *after* `uBit.init()` began BLE start, causing heavy heap churn while the SD was arming its radio. Fix: compile Lua before `uBit.init()` in `source/main.cpp`.
+  1. **Boot-time 070**: the Lua compile (`luaL_newstate`/`luaopen_*`/`register_lua_api`/`luaL_loadbuffer`) ran *after* `uBit.init()` began BLE start, causing heavy heap churn while the SD was arming its radio. Mitigation at the time: compile Lua before `uBit.init()` in `source/main.cpp`. **Note:** the current tree still initialises Lua after `uBit.init()`, so that ordering change is not in place; revisit only if 070 reappears.
   2. **Idle-phase 070 (tick flood)**: `Event(DEVICE_ID_SCHEDULER, DEVICE_ID_COMPONENT_RUNNING)` and friends fired ~166x/s and each spawned a Lua fiber. Fix: filter `DEVICE_ID_SCHEDULER` (15)/`DEVICE_ID_COMPONENT` (16) in `on_codal_event`.
-  3. **Audio-triggered 070**: `Mixer2` does `ManagedBuffer` allocations inside the PWM1 ISR, under a full PRIMASK window (`target_disable_irq()`), delaying the SD radio-arming IRQs. Fix: BASEPRI heap allocator (below). User-verified "no crash now!" with audio re-enabled.
-  4. **REPL-banner 070 (the last PRIMASK window)**: every serial TX char fires `Event(DEVICE_ID_NOTIFY, CODAL_SERIAL_EVT_TX_EMPTY)` from the UARTE IRQ (Serial.cpp:75); with the IMMEDIATE listener this reached `create_fiber()` in IRQ context, and `getFiberContext()` masked PRIMASK across `new Fiber` + `tcb_allocate` (a malloc). All 4 captured logs died at the same spot — printing `micro:bit` / `Lua 5.1 REPL` (hb=13, rtc≈69000, `+44`=440–2131). Fix: BASEPRI in `getFiberContext` + filter `DEVICE_ID_NOTIFY` (1023)/`DEVICE_ID_NOTIFY_ONE` (1022).
-- **BASEPRI allocator fixes (codal-core)**: `CodalHeapAllocator.cpp` (`device_malloc_in`/`device_create_heap`) and `CodalFiber.cpp` (`getFiberContext`) use inline-asm `MRS basepri`/`MSR basepri,1` critical sections. BASEPRI=1 blocks app-priority IRQs (1–7) but leaves the SD's priority-0 IRQs (RTC0/TIMER0/RADIO) live — nothing below priority 0 touches the heap/fiber queues, so preemption is benign. This eliminates the whole class "any slow heap walk can blow the ~17–36 µs radio arming deadline".
+  3. **Audio-triggered 070**: `Mixer2` does `ManagedBuffer` allocations inside the PWM1 ISR, under a full PRIMASK window (`target_disable_irq()`), delaying the SD radio-arming IRQs. Fix (first attempt): BASEPRI heap allocator (see the IRQ-lock bullet below — the initial version was a no-op). User-verified "no crash now!" with audio re-enabled.
+  4. **REPL-banner 070 (the last PRIMASK window)**: every serial TX char fires `Event(DEVICE_ID_NOTIFY, CODAL_SERIAL_EVT_TX_EMPTY)` from the UARTE IRQ (Serial.cpp:75); with the IMMEDIATE listener this reached `create_fiber()` in IRQ context, and `getFiberContext()` masked PRIMASK across `new Fiber` + `tcb_allocate` (a malloc). All 4 captured logs died at the same spot — printing `micro:bit` / `Lua 5.1 REPL` (hb=13, rtc≈69000, `+44`=440–2131). Fix: shared IRQ-lock HAL in `getFiberContext` (below) + filter `DEVICE_ID_NOTIFY` (1023)/`DEVICE_ID_NOTIFY_ONE` (1022).
+- **IRQ-lock fixes (final: codal-core + codal-nrf52)**:
+  - The first attempt replaced the PRIMASK sections in `device_malloc_in`/`device_create_heap` and `getFiberContext()` with inline `MSR basepri, 1`. That is a **no-op**: BASEPRI holds the threshold in the top `__NVIC_PRIO_BITS` bits (3 on nRF52), the unimplemented low bits read as zero, so writing 1 reads back as 0 and masks nothing. The heap/fiber critical sections were left unprotected (→ panic 030 in `device_free`), while priority 0 stayed live — which is why 070 abated.
+  - Vadim (`vadim.stetskiy@gmail.com`) diagnosed this: the correct threshold is `1 << (8 - __NVIC_PRIO_BITS)` (0x20 on nRF52), and both MSR need a `"memory"` clobber so the compiler cannot move protected accesses across the section.
+  - Final shape: one HAL pair, `target_lock_app_irqs()` / `target_unlock_app_irqs(uint32_t)`, declared in codal-core `inc/core/codal_target_hal.h` and used by both the heap allocator and `getFiberContext()`. The contract: mask NVIC priorities ≥ 1, leave priority 0 (the SD) live; priority 0 must not touch the protected state. codal-nrf52 implements it with BASEPRI; the generic weak fallback in codal-core uses `target_disable_irq()`/`target_enable_irq()` for ports without a reserved priority 0.
+  - Commits: codal-core `e37ff8f` (Vadim co-author), codal-nrf52 `840aef7`. The former heap/fiber BASEPRI commits were dropped from codal-core history.
+  - Verified in the linked image: `movs r3, #32; msr BASEPRI, r3`; the strong symbol comes from codal-nrf52 (weak codal-core default overridden); hextract 18/18.
 - **IMMEDIATE listener is required**: switching to `MESSAGE_BUS_LISTENER_NORMAL`/`QUEUE_IF_BUSY` made serial head-match events never reach Lua (NORMAL listeners drain only via `DEVICE_SCHEDULER_EVT_IDLE` → `MessageBus::idle` → `process()`). Reverted to `MESSAGE_BUS_LISTENER_IMMEDIATE`; safe now that dispatch-path allocations run under BASEPRI.
 - **Panic 030 also observed**: `DEVICE_HEAP_ERROR` (heap corruption; panic sites `RefCounted.cpp:52`, `CodalHeapAllocator.cpp:317/388/395`) occurred at the same REPL-banner point. Distinct class from 070 (SD assert); whether it survives the final build is still open.
 - **Supporting robustness fixes**:
   - codal-nrf52 `NRF52Serial.cpp`: `putc()` TX watchdog (force-STOPTX after ~300 ms if the UARTE IRQ never clears `is_tx_in_progress_`, so a wedged DMA can't hang the system) + polled-path STOPTX-before-reprogram so the polled path is valid at IRQ priority (fault-handler printing).
   - codal-microbit-v2 `MicroBitBLEManager.cpp` fault handler: `target_disable_irq()` + `codal_dmesg_flush()` so the full dump prints, and `DMESGF("SOFTDEVICE: ... pc=%x info=%x")` so the assert site is reported.
 - **Local-only diagnostics** (kept in working trees, NOT in upstream commits): `MicroBit::idleCallback` heartbeat `DMESG("hb=%u txwd=%u rtc=%u")`, `g_nrf52serial_tx_watchdog_count`, the fault handler's raw `rtc:`/`lfc:`/`sd:` register dumps, BLE-init `MICROBIT_DEBUG_DMESGF` "done" traces, the IRQ-priority comment edit, and the codal.json debug flags.
-- **Upstream commits prepared (local branches; nothing pushed yet)**:
-  - codal-core `fix/basepri-allocators` (off 3d485ab): `9022fa9` (heap BASEPRI), `376c251` (fiber BASEPRI).
+- **Upstream commits prepared (historical; superseded where noted)**:
+  - codal-core: the heap/fiber BASEPRI branches were dropped from history; see the IRQ-lock bullet above for the final `e37ff8f` (codal-core) + `840aef7` (codal-nrf52).
   - codal-nrf52 `fix/serial-tx-watchdog` (off 140d1be): `33e0cfd` (polled-path STOPTX fix), `dd23d59` (bounded TX spin-waits / TX watchdog; counter stripped from commits, restored in working tree).
   - codal-microbit-v2 `fix/sd-fault-handler` (off upstream `b907e6a`): `b5170fd` (namespace fix → PR A) + `8765e49` (fault handler pc/info + flush; rtc/lfc/sd dumps + init traces stripped).
   - Main repo: no commits by policy; only the dependency repos carry upstream-bound commits. `python3 build.py --clean` still builds with all local-only diagnostics restored.
 - **Audio-bug hypothesis fully archived**: the sound pipeline was audited clean (no SD hardware/PPI/RAM overlap) and the actual root cause was IRQ-priority/PRIMASK vs the SD radio deadline, not a memory bug.
 
 ### In Progress
-- Final build (BASEPRI fiber + NOTIFY/NOTIFY_ONE filter + IMMEDIATE listener; audio on, startup scroll commented) builds clean but has not yet been flashed/tested on the board.
-- Whether panic 030 (heap corruption) survives the final build is unverified.
-- Pushing/opening the prepared codal PRs (needs a fork remote or direct-push permission on the three repos).
+- Board verification of the final IRQ-lock build (flash `MICROBIT.hex`, loop resets, REPL/Compy input under load) — the builds tested earlier carried the no-op BASEPRI lock.
+- CI rebuild after pushing the two fork commits, then verify the artifact actually contains the fix (last CI artifact was built against pre-fix upstream codal-core).
 
 ### Blocked
-- PR push target: the three codal repos have only `origin` (lancaster-university) remotes; no fork remote configured yet. Branches/commits are ready locally (see Done).
-- Final board re-test of the current build is outstanding (unflashed).
+- Nothing currently; codal-core history was rewritten locally, so publishing needs a force-push.
 
 ## Key Decisions
 - Address-space rule: objdump/`full.asm` = file offsets; flash = file + 0x1000; rizin `-m 0x1000` = flash.
@@ -94,17 +98,17 @@
 - **Pivot (this session, historical)**: primary hypothesis became an **SD-internal boot-time assert** of stock S113 v7.0.1 triggered by app or board state at enable time — not an app memory/audio bug (audio was commented out at that point; 070 = SD assert).
 - Suspects ranked (historical — superseded by the BASEPRI/PRIMASK root cause in the Done section): (1) clock-config/RTC0-state asserts in SD file 0x12214 during enable; (2) LFCLK RC-start race (config uses RC source, CTIV 16/2); (3) `app_timer_init()` on a timer colliding with SD's RTC0 — check `APP_TIMER_V2_RTC0_ENABLED`.
 - Do NOT patch the SD; read the DMESG `pc` to locate the assert site first.
-- **BASEPRI vs PRIMASK**: replace full-PRIMASK critical sections (`target_disable_irq`/`__disable_irq`) around heap + fiber allocation with BASEPRI=1. App IRQs (1–7) stay excluded → heap/queue integrity preserved; SD priority-0 IRQs stay live → radio arming deadline never delayed. Short PRIMASK windows in `queue_fiber`/`dequeue_fiber` are kept (no allocations inside — safe).
+- **BASEPRI vs PRIMASK**: replace full-PRIMASK critical sections (`target_disable_irq`/`__disable_irq`) around heap + fiber allocation with `target_lock_app_irqs()`: BASEPRI threshold `1 << (8 - __NVIC_PRIO_BITS)` (0x20 on nRF52), never a bare 1. App IRQs (1–7) stay excluded → heap/queue integrity preserved; SD priority-0 IRQs stay live → radio arming deadline never delayed. Short PRIMASK windows in `queue_fiber`/`dequeue_fiber` are kept (no allocations inside — safe).
 - **IMMEDIATE listener is mandatory** for the Lua bridge: NORMAL/`QUEUE_IF_BUSY` relied on scheduler-idle-driven draining and lost serial events; IMMEDIATE is safe because dispatch-path allocations are now BASEPRI-guarded.
 - **Event filtering at `on_codal_event`**: block `DEVICE_ID_SCHEDULER`/`DEVICE_ID_COMPONENT` (tick flood) and `DEVICE_ID_NOTIFY`/`DEVICE_ID_NOTIFY_ONE` (per-char TX_EMPTY fiber spawns).
 - **Main repo: no commits.** Upstream-bound changes live only in the codal dependency repos; main-repo changes (codal.json, main.cpp, codal-lua.cpp, lua-script.lua) stay uncommitted.
 - **Sanitize upstream PRs**: strip local-only diagnostics (heartbeat, watchdog counter, raw register dumps, init traces, debug flags) from committed content; restore them in the working trees so local builds keep the diagnostics.
 
 ## Next Steps
-1. **Flash the current `build/MICROBIT.hex`** (BASEPRI fiber + NOTIFY/NOTIFY_ONE filter + IMMEDIATE listener; audio on, scroll commented). Verify REPL banner/echo serial traffic causes no 070, and loop-boot to check for 030.
-2. If 030 (heap corruption) persists: instrument `device_free`/`RefCounted::isReadOnly` and audit `ManagedBuffer`/Mixer2 lifetimes (double-free / overrun).
-3. Push the prepared branches and open the PRs (needs a fork remote on the three codal repos): codal-core `fix/basepri-allocators`, codal-nrf52 `fix/serial-tx-watchdog`, codal-microbit-v2 `b5170fd` + `fix/sd-fault-handler`.
-4. Cleanup: delete `source/main.cpp.lua-bak` and `working-070-panic.patch` (superseded).
+1. **Flash the current `MICROBIT.hex`** (built from codal-core `e37ff8f` + codal-nrf52 `840aef7`). Verify REPL banner/echo and Compy-style input under heap load cause no 070/030, and loop-boot.
+2. **Push** codal-nrf52 `840aef7`, force-push codal-core `e37ff8f` (`--force-with-lease`); re-run CI and check the uploaded artifact contains the fix (`movs r3, #32; msr BASEPRI`).
+3. Refresh/open the upstream PRs (codal-core #196, codal-nrf52 #64, codal-microbit-v2 #526).
+4. Cleanup: remove `/tmp/opencode/codal-core-worktree-backup/` once the pushes are done.
 
 ## Critical Context
 - **Address space**: `sd.bin` file offset = flash − 0x1000; `full.asm` labels = file; rizin with `-m 0x1000` = flash. Blob = flash 0x1000-0x1B400.
@@ -122,7 +126,7 @@
 - **SD enable-time assert candidates**: file 0x1237E (enable/session-start init: LFCLK init 0x9BC2 `svc 255`@0x9BC8 NULL-cfg; clock-config apply 0x12214; CLOCK/LFCLKSRC 0x126AE; PPI cleanup 0x1937C); LFCLK start 0x9A66 `svc 255`@0x9A94 invalid source. Clock cfg: RC, CTIV=16, temp CTIV=2, accuracy=1.
 - **DMESG serial path**: DMESG buffer (DEVICE_DMESG_BUFFER_SIZE=1024 via DMESG_SERIAL_DEBUG=1) flushed by microbit_dmesg_flush() → serial.putc() (UARTE0, usbTx=P0_06, usbRx=P1_08, 115200).
 - **070 vs 030**: 070 = `MICROBIT_PANIC_SD_ASSERT` (SD-internal `svc 255` assert; radio-arming deadline overrun, pc=0x146E4 in all captured logs); 030 = `DEVICE_HEAP_ERROR` (heap corruption; panic sites `RefCounted.cpp:52`, `CodalHeapAllocator.cpp:317/388/395`).
-- **SD IRQ priorities**: RADIO/TIMER0/RTC0 = priority 0 after SD enable; assert margin ≈17–36 µs. Only full PRIMASK could delay them; BASEPRI=1 leaves them live.
+- **SD IRQ priorities**: RADIO/TIMER0/RTC0 = priority 0 after SD enable; assert margin ≈17–36 µs. Only full PRIMASK could delay them; `target_lock_app_irqs()` (BASEPRI = `1 << (8 - __NVIC_PRIO_BITS)`, i.e. 0x20) leaves them live while masking priorities 1–7. A bare BASEPRI=1 reads back as 0 and masks nothing.
 - **Last 070 window**: `getFiberContext()` (CodalFiber.cpp:130-174) masked PRIMASK across `new Fiber` + `tcb_allocate`; per-char `DEVICE_ID_NOTIFY`/`CODAL_SERIAL_EVT_TX_EMPTY` events from the UARTE IRQ spawned fibers in IRQ context during the REPL banner print.
 - **Listener/ID constants**: `DEVICE_ID_SCHEDULER=15`, `DEVICE_ID_COMPONENT=16`, `DEVICE_ID_NOTIFY=1023`, `DEVICE_ID_NOTIFY_ONE=1022`; `EVENT_LISTENER_DEFAULT_FLAGS = MESSAGE_BUS_LISTENER_QUEUE_IF_BUSY`.
 - **Heartbeat (local-only)**: `MicroBit::idleCallback` `DMESG("hb=%u txwd=%u rtc=%u")` — hb=13 at every captured crash.
@@ -143,8 +147,8 @@
 - SD enable path: `/root/microbit-lua/libraries/codal-microbit-nrf5sdk/nRF5SDK/components/softdevice/common/nrf_sdh.c:181-235` (nrf_sdh_enable_request → sd_softdevice_enable); `.../s113/headers/nrf_sdm.h:171-178,287` (NRF_FAULT_ID_SD_ASSERT=1); `sdk_config.h:5044-5083` (NRF_SDH_CLOCK_LF_* defaults); `nRF5SDK_mods/drv_rtc.c:345-352` (RTC0_IRQHandler alias under APP_TIMER_V2_RTC0_ENABLED — unverified)
 - SD disassembly: `/tmp/opencode/full.asm` + `/tmp/opencode/sd.bin` — svc-255 assert sites (547), enable/session-start file 0x1237E, LFCLK init 0x9BC2, LFCLK start 0x9A66, clock-config apply 0x12214, CLOCK setup 0x126AE, fault-handler literal 0x195FC (→0x20000188) / read helper 0x195DC
 - Web: nRF52833 PS PPI fixed-channel table (docs.nordicsemi.com/r/bundle/ps_nrf52833/page/ppi.html)
-- **BASEPRI fixes (codal-core, committed)**: `libraries/codal-core/source/core/CodalHeapAllocator.cpp` (`heap_lock_irq`/`heap_unlock_irq`), `.../CodalFiber.cpp` (`fiber_lock_irq`/`fiber_unlock_irq`, `getFiberContext`) — branches `fix/basepri-allocators` @ 9022fa9/376c251
+- **IRQ-lock fixes (final, committed)**: `libraries/codal-core/inc/core/codal_target_hal.h` (`target_lock_app_irqs`/`target_unlock_app_irqs`), `source/core/codal_default_target_hal.cpp` (weak full-lock fallback), `CodalHeapAllocator.cpp` + `CodalFiber.cpp` (call sites) — codal-core `e37ff8f` (Vadim co-author); BASEPRI implementation in `libraries/codal-nrf52/source/codal_target_hal_base.cpp` — codal-nrf52 `840aef7`
 - **Serial fixes (codal-nrf52, committed)**: `libraries/codal-nrf52/source/NRF52Serial.cpp` — `33e0cfd` polled-path STOPTX + `dd23d59` bounded TX spin-waits/watchdog; `g_nrf52serial_tx_watchdog_count` restored local-only. Branch `fix/serial-tx-watchdog`
 - **Fault-handler fix (codal-v2, committed)**: `libraries/codal-microbit-v2/source/bluetooth/MicroBitBLEManager.cpp` — pc/info + `codal_dmesg_flush()` upstream. Branch `fix/sd-fault-handler` @ 8765e49 (+ `b5170fd` namespace fix, `MicroBitBLETypes.cpp`)
-- **App-side (main repo, uncommitted)**: `source/main.cpp` (compile-before-init), `source/codal-lua.cpp` (`on_codal_event` filters + IMMEDIATE listener), `source/lua-script.lua` (audio on, scroll commented)
+- **App-side (main repo)**: `source/codal-lua.cpp` (`on_codal_event` filters + IMMEDIATE listener), `source/lua-script.lua` (audio on, scroll commented). `source/main.cpp` still creates/loads the Lua state *after* `uBit.init()` (see the boot-time note above).
 - **030 panic sites**: `libraries/codal-core/source/types/RefCounted.cpp:52`, `.../core/CodalHeapAllocator.cpp:317/388/395`

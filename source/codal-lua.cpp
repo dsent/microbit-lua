@@ -18,8 +18,6 @@ extern "C" {
 #include "lua-events.h"
 #include "lua-modules.h"
 #include "board-alloc.h"
-#include "radio-link.h"
-#include "link-words.h"
 
 extern MicroBit uBit;
 
@@ -310,9 +308,70 @@ static int read_into_lua(lua_State *L, Read read) {
                     int height;						\
                     const uint8_t *pixels =				\
                       luaL_checkimage(L, 1, &width, &height);		\
-                    int r = uBit.display.print(Image(width, height, pixels));\
+                    int x = luaL_optint(L, 2, 0);			\
+                    int y = luaL_optint(L, 3, 0);			\
+                    int alpha = luaL_optint(L, 4, 0);			\
+                    int delay = luaL_optint(L, 5, 0);			\
+                    int r = uBit.display.print(				\
+                      Image(width, height, pixels), x, y, alpha, delay);\
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
+                  })							\
+    F(showAsync,  { int width;						\
+                    int height;						\
+                    const uint8_t *pixels =				\
+                      luaL_checkimage(L, 1, &width, &height);		\
+                    int x = luaL_optint(L, 2, 0);			\
+                    int y = luaL_optint(L, 3, 0);			\
+                    int alpha = luaL_optint(L, 4, 0);			\
+                    int delay = luaL_optint(L, 5,			\
+                      DISPLAY_DEFAULT_PRINT_SPEED);			\
+                    int r = uBit.display.printAsync(			\
+                      Image(width, height, pixels), x, y, alpha, delay);\
+                    lua_pushboolean(L, r == DEVICE_OK);			\
+                    return 1;						\
+                  })							\
+    F(pan,        { lua_events_before_wait(); int width;		\
+                    int height;						\
+                    const uint8_t *pixels =				\
+                      luaL_checkimage(L, 1, &width, &height);		\
+                    int delay = luaL_optint(L, 2,			\
+                      DISPLAY_DEFAULT_SCROLL_SPEED);			\
+                    int stride = luaL_optint(L, 3,			\
+                      DISPLAY_DEFAULT_SCROLL_STRIDE);			\
+                    int r = uBit.display.scroll(			\
+                      Image(width, height, pixels), delay, stride);	\
+                    lua_pushboolean(L, r == DEVICE_OK);			\
+                    return 1;						\
+                  })							\
+    F(panAsync,   { int width;						\
+                    int height;						\
+                    const uint8_t *pixels =				\
+                      luaL_checkimage(L, 1, &width, &height);		\
+                    int delay = luaL_optint(L, 2,			\
+                      DISPLAY_DEFAULT_SCROLL_SPEED);			\
+                    int stride = luaL_optint(L, 3,			\
+                      DISPLAY_DEFAULT_SCROLL_STRIDE);			\
+                    int r = uBit.display.scrollAsync(			\
+                      Image(width, height, pixels), delay, stride);	\
+                    lua_pushboolean(L, r == DEVICE_OK);			\
+                    return 1;						\
+                  })							\
+    F(rotateRight,{ uBit.display.rotateTo(				\
+                      MICROBIT_DISPLAY_ROTATION_90);			\
+                    return 0;						\
+                  })							\
+    F(rotateLeft, { uBit.display.rotateTo(				\
+                      MICROBIT_DISPLAY_ROTATION_270);			\
+                    return 0;						\
+                  })							\
+    F(rotateUp,   { uBit.display.rotateTo(				\
+                      MICROBIT_DISPLAY_ROTATION_0);			\
+                    return 0;						\
+                  })							\
+    F(rotateDown, { uBit.display.rotateTo(				\
+                      MICROBIT_DISPLAY_ROTATION_180);			\
+                    return 0;						\
                   })							\
     F(setPixelValue, {							\
                     uint16_t x = (uint16_t)luaL_checkint(L, 1);		\
@@ -1165,6 +1224,17 @@ static int nezha2_send(lua_State *L, int b3, int b4, int b5, int b6, int b7) {
   return robot_send(L, data, 8);
 }
 
+int32_t nezha2_motor_travel(lua_State *L) {
+  uint8_t p[4];
+  nezha2_send(L, 0, 70, 0, 245, 0);
+  uBit.sleep(4);
+  robot_read(L, p, 4);
+  return (int32_t) p[0] |
+         (int32_t) p[1] << 8 |
+         (int32_t) p[2] << 16 |
+         (int32_t) p[3] << 24;
+}
+
 #define LUA_NEZHA2_FUNCTIONS						\
     F(motor_turn, {							\
                     int amount = luaL_checkint(L, 2);			\
@@ -1186,14 +1256,15 @@ static int nezha2_send(lua_State *L, int b3, int b4, int b5, int b6, int b7) {
                     return nezha2_send(L, speed < 0 ? 2 : 1, 96,	\
                       robot_byte(L, 2, abs(speed)), 245, 0);		\
                   })							\
-    F(motor_position, { lua_events_before_wait();							\
-                    uint8_t p[4];					\
-                    nezha2_send(L, 0, 70, 0, 245, 0);			\
-                    uBit.sleep(4);					\
-                    robot_read(L, p, 4);				\
-                    uint32_t v = p[0] | p[1] << 8 | p[2] << 16 |	\
-                      (uint32_t)p[3] << 24;				\
-                    lua_pushnumber(L, (v % 3600) * 0.1f);		\
+    F(motor_travel, { lua_events_before_wait();				\
+                    lua_pushnumber(L,					\
+                      0.1 * (lua_Number)nezha2_motor_travel(L));	\
+                    return 1;						\
+                  })							\
+    F(motor_position, { lua_events_before_wait();			\
+                    int p = nezha2_motor_travel(L) % 3600;		\
+                    lua_pushnumber(L,					\
+                      0.1 * (lua_Number)(p < 0 ? p + 3600 : p));	\
                     return 1;						\
                   })							\
     F(motor_speed, { lua_events_before_wait();							\
@@ -1207,41 +1278,175 @@ static int nezha2_send(lua_State *L, int b3, int b4, int b5, int b6, int b7) {
 
 
 /*
- * A link over radio datagrams, in source/radio-link.c, over this
- * board's radio and clock.
+ * A link over radio datagrams.
+ *
+ * Datagrams are 32 bytes and anyone on the group hears them
+ * all, so a frame says what it is and which link it belongs
+ * to. The link number is drawn by the side that calls
+ * connect; two pairs on one group draw different numbers and
+ * ignore each other's traffic. A name is always the five
+ * letters of a micro:bit's friendly name, so HELLO carries
+ * both ends' names in a fixed ten bytes.
  */
+
+#define RADIO_HEAD     3
+#define RADIO_NAME     5
+/* The radio is documented to carry 32 bytes and the driver
+ * reports as many sent, but past 29 the tail arrives zeroed:
+ * measured between two boards, 28 and 29 come through whole,
+ * 30 loses its last byte and 31 and 32 lose two. So a frame
+ * is 29, and the driver's own limit is never reached. */
+#define RADIO_FRAME    29
+#define RADIO_BODY     (RADIO_FRAME - RADIO_HEAD)
+
+/* Kinds of frame. Other software on the same group starts its
+ * packets with small numbers too (MakeCode's packet types run
+ * from 0 up), so these sit where nothing else puts a first
+ * byte, and a stray packet is not read as one of ours. */
+#define RADIO_HELLO    0xA1
+#define RADIO_WELCOME  0xA2
+#define RADIO_DATA     0xA3
+#define RADIO_ACK      0xA4
+#define RADIO_BYE      0xA5
+#define RADIO_BEACON   0xA6
+
+#define RADIO_TRIES    8
+#define RADIO_WAIT     30
 
 /* How long connect waits when nobody says otherwise */
 #define RADIO_TIMEOUT  5000
 
-static void radio_air_send(RadioLink *, const uint8_t *frame, int len)
+/* A listening board sends a beacon every one to two seconds,
+ * the gap drawn afresh each time, so that two boards do not
+ * keep sending together. A calling board that hears none for
+ * three of the longest gaps takes the link for lost; while it
+ * calls, a radio event comes this often, so that it notices
+ * the silence even when nothing else arrives. */
+#define RADIO_BEACON_GAP 1000
+#define RADIO_SILENCE  (3 * 2 * RADIO_BEACON_GAP)
+#define RADIO_TICK     500
+#define RADIO_EVT_TICK (MICROBIT_RADIO_EVT_DATAGRAM + 1)
+
+static uint8_t radio_link = 0;
+static char radio_peer[RADIO_NAME + 1];
+static uint8_t radio_out = 0;   /* number of the last sent */
+static uint8_t radio_in = 0;    /* number of the last taken */
+static bool radio_calling = false;      /* this end called */
+static uint64_t radio_heard = 0;        /* the far end's last beacon */
+static uint64_t radio_beacon_due = 0;
+
+/* kind, link, number, then body */
+static int radio_put(uint8_t kind, uint8_t link, uint8_t num,
+                     const char *body, int len)
 {
-    uBit.radio.datagram.send((uint8_t *)frame, len);
+    uint8_t f[RADIO_FRAME];
+    if (len > RADIO_BODY) len = RADIO_BODY;
+    f[0] = kind;
+    f[1] = link;
+    f[2] = num;
+    if (len > 0) memcpy(f + RADIO_HEAD, body, len);
+    return uBit.radio.datagram.send(
+        PacketBuffer(f, len + RADIO_HEAD));
 }
 
-static int radio_air_recv(RadioLink *, uint8_t frame[RADIO_AIR_MAX])
+/* A frame taken off the air that the caller did not want.
+ * Reading a datagram removes it, so one asked for DATA while
+ * an ACK is due would throw the ACK away and leave the
+ * sender waiting out its tries. It waits here instead, until
+ * somebody wants it or another unwanted one takes its
+ * place. */
+static uint8_t radio_held[RADIO_FRAME];
+static int radio_held_len = 0;
+
+/* Is this frame the one being waited for, and if so, what
+ * does it carry? Anything longer than a frame is not ours. */
+static bool radio_wanted(uint8_t *b, int n, uint8_t kind,
+                         uint8_t link, uint8_t *from,
+                         uint8_t *num, uint8_t *body,
+                         int *len)
 {
-    int n = uBit.radio.datagram.recv(frame, RADIO_AIR_MAX);
-    return n < 0 ? -1 : n;
+    if (n < RADIO_HEAD || n > RADIO_FRAME) return false;
+    if (b[0] != kind) return false;
+    if (link != 0 && b[1] != link) return false;
+    if (from) *from = b[1];
+    if (num) *num = b[2];
+    if (body) memcpy(body, b + RADIO_HEAD, n - RADIO_HEAD);
+    if (len) *len = n - RADIO_HEAD;
+    return true;
 }
 
-static uint32_t radio_air_now(RadioLink *)
+/* The next frame of this kind for this link, or nothing */
+static bool radio_take(uint8_t kind, uint8_t link,
+                       uint8_t *from, uint8_t *num,
+                       uint8_t *body, int *len)
 {
-    return (uint32_t)uBit.systemTime();
+    if (radio_held_len > 0
+        && radio_wanted(radio_held, radio_held_len, kind,
+                        link, from, num, body, len)) {
+        radio_held_len = 0;
+        return true;
+    }
+    PacketBuffer p = uBit.radio.datagram.recv();
+    if (p == PacketBuffer::EmptyPacket) return false;
+    int n = p.length();
+    if (radio_wanted(p.getBytes(), n, kind, link, from,
+                     num, body, len)) return true;
+    /* Beacons come every second or two and are never held; a
+     * calling board notes the one from the board it called, as
+     * long as that board still waits for this one */
+    if (n > 0 && p.getBytes()[0] == RADIO_BEACON) {
+        const uint8_t *b = p.getBytes() + RADIO_HEAD;
+        if (radio_calling && n == RADIO_HEAD + 2 * RADIO_NAME
+            && memcmp(b, radio_peer, RADIO_NAME) == 0
+            && memcmp(b + RADIO_NAME, microbit_friendly_name(),
+                      RADIO_NAME) == 0)
+            radio_heard = uBit.systemTime();
+        return false;
+    }
+    if (n > 0 && n <= (int)sizeof(radio_held)) {
+        memcpy(radio_held, p.getBytes(), n);
+        radio_held_len = n;
+    }
+    return false;
 }
 
-static void radio_air_pause(RadioLink *, uint32_t ms)
+/* The link is over at this end, and the ticks a call brings
+ * stop with it */
+static void radio_drop()
 {
-    uBit.sleep(ms);
+    system_timer_cancel_event(DEVICE_ID_RADIO, RADIO_EVT_TICK);
+    radio_link = 0;
+    radio_calling = false;
 }
 
-static const RadioAir radio_air = {
-    radio_air_send, radio_air_recv, radio_air_now, radio_air_pause
-};
+/* Both ends start a link the same way, from none */
+static void radio_open(uint8_t link, const char *peer)
+{
+    radio_drop();
+    radio_link = link;
+    radio_held_len = 0;
+    radio_out = 0;
+    radio_in = 0;
+    memcpy(radio_peer, peer, RADIO_NAME);
+    radio_peer[RADIO_NAME] = 0;
+}
 
-static RadioLink radio_link = {
-    &radio_air, 0, 0, 0, false, 0, {0}, {0}, 0, NULL
-};
+/* The answer to a HELLO, if this is it. A WELCOME names both
+ * ends, the one it goes to and the one it comes from, so a
+ * frame that only happens to share a kind and a link number
+ * with it, from some other board on the air, is not taken for
+ * one. hello is the call: the board called, then this one. */
+static bool radio_welcomed(uint8_t link, const char *hello)
+{
+    uint8_t body[RADIO_BODY];
+    int len;
+
+    if (!radio_take(RADIO_WELCOME, link, NULL, NULL, body, &len))
+        return false;
+    return len == RADIO_NAME * 2
+        && memcmp(body, hello + RADIO_NAME, RADIO_NAME) == 0
+        && memcmp(body + RADIO_NAME, hello, RADIO_NAME) == 0;
+}
 
 /* A board's friendly name from a Lua argument. Names are five
  * letters, and the frames carry exactly five, so anything else
@@ -1258,6 +1463,65 @@ static const char *radio_name(lua_State *L, int arg)
 static const char *radio_opt_name(lua_State *L, int arg)
 {
     return lua_isnoneornil(L, arg) ? NULL : radio_name(L, arg);
+}
+
+/* Call once, then wait a moment for the answer */
+static bool radio_called(uint8_t link, const char *hello)
+{
+    uint64_t until;
+    radio_put(RADIO_HELLO, link, 0, hello, RADIO_NAME * 2);
+    until = uBit.systemTime() + RADIO_WAIT;
+    while (uBit.systemTime() < until) {
+        if (radio_welcomed(link, hello)) return true;
+        uBit.sleep(1);
+    }
+    return false;
+}
+
+/* A HELLO addressed to this board, from the board it waits
+ * for, or from any if it waits for none: answer it and take
+ * the link it names. A call from anyone else is left
+ * unanswered, so the caller does not think it got through.
+ * Any link the call replaces is dropped: the other end has
+ * started over, which is how a reset board finds its way
+ * back. */
+static bool radio_called_us(const char *from)
+{
+    const char *us = microbit_friendly_name();
+    uint8_t body[RADIO_BODY];
+    char welcome[RADIO_NAME * 2];
+    uint8_t link;
+    int len;
+
+    if (!radio_take(RADIO_HELLO, 0, &link, NULL, body, &len)
+        || len != RADIO_NAME * 2
+        || memcmp(body, us, RADIO_NAME) != 0) return false;
+    if (from && memcmp(body + RADIO_NAME, from, RADIO_NAME) != 0)
+        return false;
+    radio_open(link, (char *)body + RADIO_NAME);
+    memcpy(welcome, body + RADIO_NAME, RADIO_NAME);
+    memcpy(welcome + RADIO_NAME, us, RADIO_NAME);
+    radio_put(RADIO_WELCOME, link, 0, welcome, RADIO_NAME * 2);
+    return true;
+}
+
+/* One frame, repeated until the far end answers it */
+static bool radio_one(uint8_t kind, const char *body, int len)
+{
+    radio_out++;
+    for (int n = 0; n < RADIO_TRIES; n++) {
+        uint64_t until;
+        radio_put(kind, radio_link, radio_out, body, len);
+        until = uBit.systemTime() + RADIO_WAIT;
+        while (uBit.systemTime() < until) {
+            uint8_t num;
+            if (radio_take(RADIO_ACK, radio_link, NULL,
+                           &num, NULL, NULL)
+                && num == radio_out) return true;
+            uBit.sleep(1);
+        }
+    }
+    return false;
 }
 
 #define LUA_RADIO_FUNCTIONS						\
@@ -1291,21 +1555,13 @@ static const char *radio_opt_name(lua_State *L, int arg)
                     lua_pushinteger(L, r);					\
                     return 1;						\
                   })							\
-    F(recv,       { /* copied out before the push, which can raise */	\
-                    uint8_t packet[MICROBIT_RADIO_MAX_PACKET_SIZE];	\
-                    int n = -1;						\
-                    {							\
-                      PacketBuffer r = uBit.radio.datagram.recv();	\
-                      if (!(r == PacketBuffer::EmptyPacket)		\
-                          && r.length() <= (int)sizeof packet) {	\
-                        n = r.length();					\
-                        memcpy(packet, r.getBytes(), n);		\
-                      }							\
-                    }							\
-                    if (n < 0)						\
+    F(recv,       { PacketBuffer r = uBit.radio.datagram.recv();	\
+                    if(r == PacketBuffer::EmptyPacket) {		\
                       lua_pushnil(L);					\
-                    else						\
-                      lua_pushlstring(L, (const char *)packet, n);	\
+                    } else {						\
+                      lua_pushlstring(L,				\
+                        (const char*)r.getBytes(), r.length());		\
+                    }						 	\
                     return 1;						\
                   })							\
     F(send,       { size_t len;						\
@@ -1316,68 +1572,329 @@ static const char *radio_opt_name(lua_State *L, int arg)
                     return 1;						\
                   })							\
 /* connect(friendlyName, timeout_ms) -> boolean */			\
-    F(connect,    { lua_events_before_wait(); const char *them = radio_name(L, 1);		\
+    F(connect,    { lua_events_before_wait();				\
+                    const char *them = radio_name(L, 1);		\
                     int timeout = luaL_optint(L, 2, RADIO_TIMEOUT);	\
+                    char hello[RADIO_NAME * 2];				\
                     uint8_t link = (uint8_t)(uBit.random(255) + 1);	\
-                    uint16_t call = (uint16_t)uBit.random(0x10000);	\
-                    lua_pushboolean(L, radio_link_call(&radio_link, them,	\
-                      microbit_friendly_name(), link, call,		\
-                      timeout > 0 ? (uint32_t)timeout : 0));		\
-                    return 1;						\
-                  })							\
-/* listen([name]) -> friendlyName of whoever connected; with a
- * name, only that board is answered */				\
-    F(listen,     { lua_events_before_wait(); const char *from = radio_opt_name(L, 1);		\
-                    while (!radio_link_called(&radio_link,		\
-                             microbit_friendly_name(), from))		\
-                      uBit.sleep(1);					\
-                    lua_pushstring(L, radio_link.peer);			\
+                    uint64_t deadline = uBit.systemTime() + timeout;	\
+                    memcpy(hello, them, RADIO_NAME);			\
+                    memcpy(hello + RADIO_NAME,				\
+                      microbit_friendly_name(), RADIO_NAME);		\
+                    while (uBit.systemTime() < deadline) {		\
+                      if (radio_called(link, hello)) {			\
+                        radio_open(link, them);				\
+                        radio_calling = true;				\
+                        radio_heard = uBit.systemTime();		\
+                        system_timer_event_every(RADIO_TICK,		\
+                          DEVICE_ID_RADIO, RADIO_EVT_TICK);		\
+                        lua_pushboolean(L, 1);				\
+                        return 1;					\
+                      }							\
+                    }							\
+                    lua_pushboolean(L, 0);				\
                     return 1;						\
                   })							\
 /* tx(message) -> boolean
  * The message goes piece by piece, each taken before the
- * next one leaves: true once the other board has them all,
- * which it may still have to run. */					\
-    F(tx,         { lua_events_before_wait(); size_t len;						\
+ * next one leaves. */							\
+    F(tx,         { lua_events_before_wait(); size_t len;		\
                     const char *msg = luaL_checklstring(L, 1, &len);	\
-                    lua_pushboolean(L, radio_link_tx(&radio_link, msg, len));	\
+                    size_t sent = 0;					\
+                    if (radio_link == 0) {				\
+                      lua_pushboolean(L, 0);				\
+                      return 1;						\
+                    }							\
+                    do {						\
+                      int piece = (int)(len - sent);			\
+                      if (piece > RADIO_BODY) piece = RADIO_BODY;	\
+                      if (!radio_one(RADIO_DATA, msg + sent, piece)) {		\
+                        lua_pushboolean(L, 0);				\
+                        return 1;					\
+                      }							\
+                      sent += piece;					\
+                    } while (sent < len);				\
+                    lua_pushboolean(L, 1);				\
                     return 1;						\
                   })							\
-/* rx() -> string and whether it starts a message, or nil
- * One piece, the oldest the other board sent. Of a message
- * whose end was lost on the way, nothing more comes: the
- * next piece starts another. */					\
+/* rx() -> string, nil, or false once the link is over: the
+ * far end has closed it, or, at the calling end, has sent no
+ * beacon for too long. One piece, acknowledged. A piece that
+ * arrives twice is acknowledged again and dropped: the far
+ * end did not hear the first answer. */				\
     F(rx,         { uint8_t body[RADIO_BODY];				\
+                    uint8_t num;					\
                     int len;						\
-                    bool starts;					\
-                    if (!radio_link_rx(&radio_link, body, &len, &starts)) {	\
+                    if (radio_link == 0) {				\
                       lua_pushnil(L);					\
                       return 1;						\
                     }							\
+                    bool bye = radio_take(RADIO_BYE, radio_link, NULL,	\
+                                          &num, NULL, NULL);		\
+                    if (bye) {						\
+                      radio_put(RADIO_ACK, radio_link, num, NULL, 0);	\
+                    }							\
+                    if (bye || (radio_calling && uBit.systemTime()	\
+                                - radio_heard > RADIO_SILENCE)) {	\
+                      radio_drop();					\
+                      lua_pushboolean(L, 0);				\
+                      return 1;						\
+                    }							\
+                    if (!radio_take(RADIO_DATA, radio_link, NULL, &num,	\
+                                    body, &len)) {			\
+                      lua_pushnil(L);					\
+                      return 1;						\
+                    }							\
+                    radio_put(RADIO_ACK, radio_link, num, NULL, 0);	\
+                    if (num == radio_in) {				\
+                      lua_pushnil(L);					\
+                      return 1;						\
+                    }							\
+                    radio_in = num;					\
                     lua_pushlstring(L, (const char *)body, len);	\
-                    lua_pushboolean(L, starts);				\
-                    return 2;						\
+                    return 1;						\
+                  })							\
+/* close() -- the far end is told that the link is over, and
+ * this end drops it */							\
+    F(close,      { lua_events_before_wait();				\
+                    if (radio_link != 0) {				\
+                      radio_one(RADIO_BYE, NULL, 0);			\
+                      radio_drop();					\
+                    }							\
+                    return 0;						\
+                  })							\
+/* beacon([name]) -- once one is due, a listening board says
+ * who it is and, with a name, which board it waits for */		\
+    F(beacon,     { const char *awaited = radio_opt_name(L, 1);		\
+                    char b[RADIO_NAME * 2];				\
+                    if (uBit.systemTime() < radio_beacon_due) return 0;	\
+                    memcpy(b, microbit_friendly_name(), RADIO_NAME);	\
+                    if (awaited) memcpy(b + RADIO_NAME, awaited, RADIO_NAME); \
+                    radio_put(RADIO_BEACON, 0, 0, b,			\
+                      awaited ? RADIO_NAME * 2 : RADIO_NAME);		\
+                    radio_beacon_due = uBit.systemTime()		\
+                      + RADIO_BEACON_GAP + uBit.random(RADIO_BEACON_GAP); \
+                    return 0;						\
+                  })							\
+/* scan() -> {friendlyName = boolean}: the boards whose
+ * beacons are heard within three of the longest gaps, each
+ * true if it waits for this board, false if for another */		\
+    F(scan,       { lua_events_before_wait();				\
+                    const char *us = microbit_friendly_name();		\
+                    uint8_t body[RADIO_BODY];				\
+                    int len;						\
+                    uint64_t until = uBit.systemTime() + RADIO_SILENCE;	\
+                    uBit.radio.enable();				\
+                    /* Whatever was queued before the scan is old: those
+                     * boards may have stopped listening since */	\
+                    while (!(uBit.radio.datagram.recv()			\
+                             == PacketBuffer::EmptyPacket)) {		\
+                    }							\
+                    lua_newtable(L);					\
+                    while (uBit.systemTime() < until) {			\
+                      if (!radio_take(RADIO_BEACON, 0, NULL, NULL, body, \
+                                      &len) || len < RADIO_NAME) {	\
+                        uBit.sleep(1);					\
+                        continue;					\
+                      }							\
+                      lua_pushlstring(L, (const char *)body, RADIO_NAME); \
+                      lua_pushboolean(L, len < RADIO_NAME * 2		\
+                        || memcmp(body + RADIO_NAME, us, RADIO_NAME) == 0); \
+                      lua_rawset(L, -3);				\
+                    }							\
+                    return 1;						\
                   })							\
 /* answered([name]) -> friendlyName if somebody, or with a
- * name that board, has just made a new call, or nil; a call
- * repeated for the open link is none */		\
+ * name that board, has just called again, or nil */		\
     F(answered,   { const char *from = radio_opt_name(L, 1);		\
-                    if (radio_link_called(&radio_link,			\
-                          microbit_friendly_name(), from)) {		\
-                      lua_pushstring(L, radio_link.peer);		\
+                    if (radio_called_us(from)) {			\
+                      lua_pushstring(L, radio_peer);			\
                     } else {						\
                       lua_pushnil(L);					\
                     }							\
                     return 1;						\
-                  })							\
-/* notSent(line, typedAfter) -> string
- * What the REPL says when a line over the link did not go */	\
-    F(notSent,    { return link_words_not_sent(L); })		\
-/* typed(sofar, text) -> line, shown
- * Typing over the link, Backspace applied, and what it shows */	\
-    F(typed,      { return link_words_typed(L); })
+                  })
 
 #define LUA_RADIO_COUNT 15
+
+// PlanetX gesture sensor EF05020: a PAJ7620 at I2C address 0x73.
+#define PAJ7620 0xE6
+
+// The chip's settings for bank 0 and then bank 1, in runs of registers
+// that follow each other: the number of bytes in a run, its first
+// register, then the values for that register and the ones after it, as
+// the chip moves on to the next by itself. The run at 0xEE ends on 0xEF,
+// the bank register, and so switches to bank 1; the last run switches
+// back. The settings are those Elecfreaks send.
+static const uint8_t paj7620_setup[] = {
+  10, 0x32, 0x29, 0x01, 0x00, 0x01, 0x00, 0x07, 0x17, 0x06, 0x12,
+  5, 0x3F, 0x00, 0x02, 0xFF, 0x01,
+  14, 0x46, 0x2D, 0x0F, 0x3C, 0x00, 0x1E, 0x00, 0x20, 0x00, 0x1A, 0x14,
+  0x00, 0x10, 0x00,
+  16, 0x5C, 0x02, 0x00, 0x10, 0x3F, 0x27, 0x28, 0x00, 0x03, 0xF7, 0x03,
+  0xD9, 0x03, 0x01, 0xC8, 0x40,
+  10, 0x6D, 0x04, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0xF0, 0x00,
+  45, 0x80, 0x42, 0x44, 0x04, 0x20, 0x20, 0x00, 0x10, 0x00, 0x05, 0x18,
+  0x10, 0x01, 0x37, 0x00, 0xF0, 0x81, 0x06, 0x06, 0x1E, 0x0D, 0x0A, 0x0A,
+  0x0C, 0x05, 0x0A, 0x41, 0x14, 0x0A, 0x3F, 0x33, 0xAE, 0xF9, 0x48, 0x13,
+  0x10, 0x08, 0x30, 0x19, 0x10, 0x08, 0x24, 0x04, 0x1E, 0x1E,
+  8, 0xCC, 0x19, 0x0B, 0x13, 0x64, 0x21, 0x0F, 0x88,
+  11, 0xE0, 0x01, 0x04, 0x41, 0xD6, 0x00, 0x0C, 0x0A, 0x00, 0x00, 0x00,
+  3, 0xEE, 0x07, 0x01,
+  32, 0x00, 0x1E, 0x1E, 0x0F, 0x10, 0x02, 0x00, 0xB0, 0x04, 0x0D, 0x0E,
+  0x9C, 0x04, 0x05, 0x0F, 0x02, 0x12, 0x02, 0x02, 0x00, 0x01, 0x05, 0x07,
+  0x05, 0x07, 0x01, 0x04, 0x05, 0x0C, 0x2A, 0x01, 0x00,
+  4, 0x21, 0x00, 0x00, 0x00,
+  6, 0x25, 0x01, 0x00, 0x39, 0x7F, 0x08,
+  12, 0x30, 0x03, 0x00, 0x1A, 0x1A, 0x07, 0x07, 0x01, 0xFF, 0x36, 0x07,
+  0x00,
+  12, 0x3E, 0xFF, 0x00, 0x77, 0x40, 0x00, 0x30, 0xA0, 0x5C, 0x00, 0x00,
+  0x58,
+  12, 0x4A, 0x1E, 0x1E, 0x00, 0x00, 0xA0, 0x80, 0x00, 0x00, 0x00, 0x00,
+  0x00,
+  2, 0x57, 0x80,
+  10, 0x59, 0x10, 0x08, 0x94, 0xE8, 0x08, 0x3D, 0x99, 0x45, 0x40,
+  14, 0x63, 0x2D, 0x02, 0x96, 0x00, 0x97, 0x01, 0xCD, 0x01, 0xB0, 0x04,
+  0x2C, 0x01, 0x32,
+  8, 0x71, 0x00, 0x01, 0x35, 0x00, 0x33, 0x31, 0x01,
+  4, 0x7C, 0x84, 0x03, 0x01,
+  2, 0xEF, 0x00,
+  0
+};
+
+// Asleep, the chip leaves the first access unanswered, wakes on it and
+// takes settings 400 us later. The I2C hardware takes what it sends by
+// DMA, which reaches RAM only, so the settings go over from a copy.
+// Gesture flags raised before the setup mean nothing and are read away.
+static bool paj7620_init() {
+  uint8_t bank0[] = { 0xEF, 0x00 }, flags[2], setup[sizeof paj7620_setup];
+  i2c.write(PAJ7620, bank0, 2);
+  target_wait_us(400);
+  memcpy(setup, paj7620_setup, sizeof setup);
+  for (uint8_t *run = setup; *run; run += *run + 1)
+    if (i2c.write(PAJ7620, run + 1, *run) != MICROBIT_OK)
+      return false;
+  return i2c.readRegister(PAJ7620, 0x43, flags, 2) == MICROBIT_OK;
+}
+
+// The gesture flags raised since the last read, which clears them, or -1
+// without a sensor: bits 0-7 of register 0x43, then bit 0 of 0x44, for
+// right, left, up, down, forward, backward, clockwise, counter-clockwise
+// and wave, as Elecfreaks name them, seen facing the window with the
+// socket to the left. A sensor not answering, at first or plugged in
+// again, is set up anew and has no flags yet.
+static int gesture_flags() {
+  static bool ready = false;
+  uint8_t flags[2];
+  if (ready && i2c.readRegister(PAJ7620, 0x43, flags, 2) == MICROBIT_OK)
+    return flags[0] | (flags[1] & 1) << 8;
+  ready = paj7620_init();
+  return ready ? 0 : -1;
+}
+
+// PlanetX color sensor EF05006 comes in two kinds, set up and read much
+// as Elecfreaks do. The newer, at I2C address 0x43, takes an integration
+// time at 0x81 and power at 0x80, and gives red, green, blue and clear
+// light from 0xA0 on. The older, an APDS9960 at 0x39, takes an
+// integration time at 0x81, gain at 0x8F and power at 0x80, and gives
+// clear, red, green and blue light from 0x94 on, read together and the
+// clear moved last. Its gain is a quarter of theirs, as with theirs a
+// white brick comes near the most it can count. Each value is two bytes,
+// low byte first as in memory here.
+#define COLOR_NEW 0x86
+#define COLOR_OLD 0x72
+
+// The kind of sensor found, or 0 before one is.
+static uint8_t color_sensor;
+
+static bool color_write(uint8_t sensor, uint8_t reg, uint8_t value) {
+  uint8_t data[] = { reg, value };
+  return i2c.write(sensor, data, 2) == MICROBIT_OK;
+}
+
+// Red, green, blue and clear light from the sensor found.
+static bool color_read(uint16_t light[4]) {
+  if (color_sensor == COLOR_NEW)
+    return i2c.readRegister(COLOR_NEW, 0xA0, (uint8_t *)light, 8)
+      == MICROBIT_OK;
+  if (i2c.readRegister(COLOR_OLD, 0x94, (uint8_t *)light, 8)
+      != MICROBIT_OK)
+    return false;
+  uint16_t clear = light[0];
+  memmove(light, light + 1, 3 * sizeof *light);
+  light[3] = clear;
+  return true;
+}
+
+// The kind that answers, set up and given the 150 ms Elecfreaks wait for
+// a first measurement, or 0 without a sensor.
+static uint8_t color_init() {
+  uint8_t sensor;
+  if (color_write(COLOR_NEW, 0x81, 0xCA)) {
+    color_write(COLOR_NEW, 0x80, 0x17);
+    sensor = COLOR_NEW;
+  } else if (color_write(COLOR_OLD, 0x81, 0xFC)) {
+    color_write(COLOR_OLD, 0x8F, 0x02);
+    color_write(COLOR_OLD, 0x80, 0x03);
+    sensor = COLOR_OLD;
+  } else {
+    return 0;
+  }
+  uBit.sleep(150);
+  return sensor;
+}
+
+// The light of the four channels, or an error without a sensor. One not
+// answering, at first or plugged in again, is looked for anew.
+static void color_light(lua_State *L, uint16_t light[4]) {
+  if (color_sensor && color_read(light))
+    return;
+  color_sensor = color_init();
+  if (!color_sensor || !color_read(light))
+    luaL_error(L, "no color sensor");
+}
+
+// Hue in degrees, saturation and value of the light, its channels taken
+// relative to what the sensor found gives for a white LEGO brick 1 to
+// 2 cm away, so that such a brick has value 1.
+static void color_hsv(lua_State *L, float hsv[3]) {
+  static const float new_white[] = { 4443, 10312, 11104 },
+    old_white[] = { 414, 792, 948 };
+  uint16_t light[4];
+  float c[3], max, min, d;
+  color_light(L, light);
+  const float *white = color_sensor == COLOR_NEW ? new_white : old_white;
+  for (int i = 0; i < 3; i++)
+    c[i] = light[i] / white[i];
+  max = fmaxf(c[0], fmaxf(c[1], c[2]));
+  min = fminf(c[0], fminf(c[1], c[2]));
+  d = max - min;
+  hsv[0] = d == 0 ? 0
+    : max == c[0] ? fmodf(60 * (c[1] - c[2]) / d + 360, 360)
+    : max == c[1] ? 60 * (c[2] - c[0]) / d + 120
+    : 60 * (c[0] - c[1]) / d + 240;
+  hsv[1] = d == 0 ? 0 : d / max;
+  hsv[2] = max;
+}
+
+// The color numbered as bits of blue, red and green: 1 blue, 2 red,
+// 3 magenta, 4 green, 5 cyan, 6 yellow, 7 white, or 0 when too dark.
+// The hues dividing them are those LEGO bricks were seen to sit between
+// by each kind of sensor; the older sees blue nearer to cyan.
+static int color_number(const float hsv[3]) {
+  static const uint16_t new_bound[] = { 25, 80, 180, 222, 270, 345 },
+    old_bound[] = { 16, 80, 180, 207, 270, 345 };
+  static const uint8_t number[] = { 2, 6, 4, 5, 1, 3, 2 };
+  const uint16_t *bound = color_sensor == COLOR_NEW ? new_bound : old_bound;
+  int i = 0;
+  if (hsv[2] < 0.05f)
+    return 0;
+  if (hsv[1] < 0.25f)
+    return 7;
+  while (i < 6 && hsv[0] >= bound[i])
+    i++;
+  return number[i];
+}
 
 static const int digitalRJ[] = { 8, 12, 14, 16 };
 
@@ -1405,15 +1922,51 @@ static const int digitalRJ[] = { 8, 12, 14, 16 };
                       luaL_checklstring(L, 2, &length);			\
                     codal::neopixel_send_buffer(*pin, str, length);	\
                     return 0;						\
+                  })							\
+/* gesture() -> 1 right, 2 left, 3 up, 4 down, 5 forward, 6 backward,	\
+   7 clockwise, 8 counter-clockwise, 9 wave, or 0. A gesture counts	\
+   only if its flag is the only one raised, as with Elecfreaks, but a	\
+   wave also with those of the swipes it is made of. */			\
+   F(gesture,     { int flags = gesture_flags();			\
+                    if (flags < 0)					\
+                      return luaL_error(L, "no gesture sensor");	\
+                    if (flags > 0x100)					\
+                      flags = 0x100;					\
+                    flags = flags == 0 || flags & (flags - 1) ? 0	\
+                      : __builtin_ctz(flags) + 1;			\
+                    lua_pushinteger(L, flags);				\
+                    return 1;						\
+                  })							\
+/* colorRGB() -> red, green, blue and clear light as measured */	\
+   F(colorRGB,    { uint16_t light[4];					\
+                    color_light(L, light);				\
+                    for (int i = 0; i < 4; i++)				\
+                      lua_pushinteger(L, light[i]);			\
+                    return 4;						\
+                  })							\
+/* colorHSV() -> hue in degrees, saturation, value 1 for white */	\
+   F(colorHSV,    { float hsv[3];					\
+                    color_hsv(L, hsv);				\
+                    for (int i = 0; i < 3; i++)				\
+                      lua_pushnumber(L, hsv[i]);			\
+                    return 3;						\
+                  })							\
+/* color() -> 1 blue, 2 red, 3 magenta, 4 green, 5 cyan, 6 yellow,	\
+   7 white, or 0 */							\
+   F(color,       { float hsv[3];					\
+                    color_hsv(L, hsv);				\
+                    lua_pushinteger(L, color_number(hsv));		\
+                    return 1;						\
                   })
 
-#define LUA_PLANETX_COUNT 3
+#define LUA_PLANETX_COUNT 7
 
 #define LUA_CODAL_CONSTANTS \
     C(MICROBIT_ID_LOGO) \
     C(DEVICE_ID_BUTTON_A) \
     C(DEVICE_ID_BUTTON_B) \
     C(DEVICE_ID_BUTTON_AB) \
+    C(DEVICE_ID_DISPLAY) \
     C(DEVICE_ID_SERIAL) \
     C(DEVICE_ID_ACCELEROMETER) \
     C(DEVICE_ID_COMPASS) \
@@ -1438,6 +1991,9 @@ static const int digitalRJ[] = { 8, 12, 14, 16 };
     C(COMPASS_EVT_CONFIG_NEEDED) \
     C(COMPASS_EVT_CALIBRATE) \
     C(COMPASS_EVT_CALIBRATION_NEEDED) \
+    C(DISPLAY_EVT_ANIMATION_COMPLETE) \
+    C(DISPLAY_EVT_FREE) \
+    C(LED_MATRIX_EVT_LIGHT_SENSE) \
     C(DEVICE_BUTTON_EVT_DOWN) \
     C(DEVICE_BUTTON_EVT_UP) \
     C(DEVICE_BUTTON_EVT_CLICK) \
@@ -1682,10 +2238,6 @@ static void lua_event_handler_fiber(void *arg) {
   codal::Event *event = (codal::Event *)arg;
   LuaEvent e = { event->source, event->value, (uint32_t)event->timestamp };
   delete event;
-  // the far end of a link is answered whatever Lua is doing
-  if (e.source == DEVICE_ID_RADIO && e.value == MICROBIT_RADIO_EVT_DATAGRAM
-      && !radio_link_heard(&radio_link))
-    return;
   lua_event_arrived(e);
 }
 

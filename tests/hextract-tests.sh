@@ -40,7 +40,7 @@ section() {
 generate_data() {
   local size=$1
   local output=$2
-  lua -e "
+  lua5.1 -e "
     math.randomseed(42)
     local f = io.open('$output', 'wb')
     for i = 1, $size do
@@ -69,13 +69,13 @@ generate_data 2048 "$TMPDIR/medium.dat"
 generate_data 10240 "$TMPDIR/large.dat"
 
 # Extract original script for comparison
-lua "$HEXTRACT" extract "$FIRMWARE" "$TMPDIR/original.dat"
+"$HEXTRACT" extract "$FIRMWARE" "$TMPDIR/original.dat"
 ORIGINAL_SIZE=$(wc -c < "$TMPDIR/original.dat")
 
 section "Structure Command"
 
 # Test 1: Structure parses metadata
-OUTPUT=$(lua "$HEXTRACT" structure "$FIRMWARE" 2>&1)
+OUTPUT=$("$HEXTRACT" structure "$FIRMWARE" 2>&1)
 if echo "$OUTPUT" | grep -q "LUA METADATA"; then
   pass "structure detects metadata"
 else
@@ -106,7 +106,7 @@ else
 fi
 
 # Test 5: Extract to stdout matches file output
-STDOUT_EXTRACT=$(lua "$HEXTRACT" extract "$FIRMWARE" - 2>/dev/null)
+STDOUT_EXTRACT=$("$HEXTRACT" extract "$FIRMWARE" - 2>/dev/null)
 FILE_EXTRACT=$(cat "$TMPDIR/original.dat")
 if [ "$STDOUT_EXTRACT" = "$FILE_EXTRACT" ]; then
   pass "extract to stdout matches file output"
@@ -118,9 +118,9 @@ section "Embed Command"
 
 # Test 6: Embed same script (idempotent)
 cp "$FIRMWARE" "$TMPDIR/fw-idem.hex"
-lua "$HEXTRACT" embed "$TMPDIR/fw-idem.hex" "$TMPDIR/original.dat" --overwrite
+"$HEXTRACT" embed "$TMPDIR/fw-idem.hex" "$TMPDIR/original.dat" --overwrite
 cp "$TMPDIR/fw-idem.hex" "$TMPDIR/fw-idem-2.hex"
-lua "$HEXTRACT" embed "$TMPDIR/fw-idem-2.hex" "$TMPDIR/original.dat" --overwrite
+"$HEXTRACT" embed "$TMPDIR/fw-idem-2.hex" "$TMPDIR/original.dat" --overwrite
 if cmp -s "$TMPDIR/fw-idem.hex" "$TMPDIR/fw-idem-2.hex"; then
   pass "embed idempotent (same data twice)"
 else
@@ -129,8 +129,8 @@ fi
 
 # Test 7: Embed smaller data
 cp "$FIRMWARE" "$TMPDIR/fw-small.hex"
-lua "$HEXTRACT" embed "$TMPDIR/fw-small.hex" "$TMPDIR/tiny.dat" --overwrite
-OUTPUT=$(lua "$HEXTRACT" structure "$TMPDIR/fw-small.hex" 2>&1)
+"$HEXTRACT" embed "$TMPDIR/fw-small.hex" "$TMPDIR/tiny.dat" --overwrite
+OUTPUT=$("$HEXTRACT" structure "$TMPDIR/fw-small.hex" 2>&1)
 if echo "$OUTPUT" | grep -q "Size:"; then
   pass "embed smaller data updates metadata"
 else
@@ -138,7 +138,7 @@ else
 fi
 
 # Test 8: Extract after smaller embed matches source
-lua "$HEXTRACT" extract "$TMPDIR/fw-small.hex" "$TMPDIR/extracted-tiny.dat"
+"$HEXTRACT" extract "$TMPDIR/fw-small.hex" "$TMPDIR/extracted-tiny.dat"
 if cmp -s "$TMPDIR/tiny.dat" "$TMPDIR/extracted-tiny.dat"; then
   pass "extract after smaller embed matches source"
 else
@@ -147,8 +147,8 @@ fi
 
 # Test 9: Embed larger data
 cp "$FIRMWARE" "$TMPDIR/fw-large.hex"
-lua "$HEXTRACT" embed "$TMPDIR/fw-large.hex" "$TMPDIR/large.dat" --overwrite
-lua "$HEXTRACT" extract "$TMPDIR/fw-large.hex" "$TMPDIR/extracted-large.dat"
+"$HEXTRACT" embed "$TMPDIR/fw-large.hex" "$TMPDIR/large.dat" --overwrite
+"$HEXTRACT" extract "$TMPDIR/fw-large.hex" "$TMPDIR/extracted-large.dat"
 if cmp -s "$TMPDIR/large.dat" "$TMPDIR/extracted-large.dat"; then
   pass "embed larger data round-trip"
 else
@@ -157,14 +157,14 @@ fi
 
 # Test 10: Embed too large data (should fail)
 generate_data 400000 "$TMPDIR/huge.dat"
-if ! lua "$HEXTRACT" embed "$FIRMWARE" "$TMPDIR/huge.dat" "$TMPDIR/fw-huge.hex" 2>/dev/null; then
+if ! "$HEXTRACT" embed "$FIRMWARE" "$TMPDIR/huge.dat" "$TMPDIR/fw-huge.hex" 2>/dev/null; then
   pass "embed rejects data too large"
 else
   fail "embed rejects data too large" "should have failed"
 fi
 
 # Test 11: All checksums valid after embed
-OUTPUT=$(lua "$HEXTRACT" structure "$TMPDIR/fw-large.hex" 2>&1)
+OUTPUT=$("$HEXTRACT" structure "$TMPDIR/fw-large.hex" 2>&1)
 if echo "$OUTPUT" | grep -q "Checksums: [0-9]*/[0-9]* valid"; then
   CKSUM_LINE=$(echo "$OUTPUT" | grep "Checksums:")
   TOTAL_CK=$(echo "$CKSUM_LINE" | grep -o '[0-9]*/[0-9]*')
@@ -181,10 +181,10 @@ fi
 
 # Test 12: Sequential embeds (shrink -> grow -> shrink)
 cp "$FIRMWARE" "$TMPDIR/fw-seq.hex"
-lua "$HEXTRACT" embed "$TMPDIR/fw-seq.hex" "$TMPDIR/tiny.dat" --overwrite
-lua "$HEXTRACT" embed "$TMPDIR/fw-seq.hex" "$TMPDIR/large.dat" --overwrite
-lua "$HEXTRACT" embed "$TMPDIR/fw-seq.hex" "$TMPDIR/small.dat" --overwrite
-lua "$HEXTRACT" extract "$TMPDIR/fw-seq.hex" "$TMPDIR/extracted-seq.dat"
+"$HEXTRACT" embed "$TMPDIR/fw-seq.hex" "$TMPDIR/tiny.dat" --overwrite
+"$HEXTRACT" embed "$TMPDIR/fw-seq.hex" "$TMPDIR/large.dat" --overwrite
+"$HEXTRACT" embed "$TMPDIR/fw-seq.hex" "$TMPDIR/small.dat" --overwrite
+"$HEXTRACT" extract "$TMPDIR/fw-seq.hex" "$TMPDIR/extracted-seq.dat"
 if cmp -s "$TMPDIR/small.dat" "$TMPDIR/extracted-seq.dat"; then
   pass "sequential embeds (shrink->grow->shrink)"
 else
@@ -193,8 +193,8 @@ fi
 
 # Test 13: Round-trip integrity
 cp "$FIRMWARE" "$TMPDIR/fw-rt.hex"
-lua "$HEXTRACT" embed "$TMPDIR/fw-rt.hex" "$TMPDIR/medium.dat" --overwrite
-lua "$HEXTRACT" extract "$TMPDIR/fw-rt.hex" "$TMPDIR/rt-extracted.dat"
+"$HEXTRACT" embed "$TMPDIR/fw-rt.hex" "$TMPDIR/medium.dat" --overwrite
+"$HEXTRACT" extract "$TMPDIR/fw-rt.hex" "$TMPDIR/rt-extracted.dat"
 if cmp -s "$TMPDIR/medium.dat" "$TMPDIR/rt-extracted.dat"; then
   pass "round-trip integrity (embed->extract)"
 else
@@ -203,7 +203,7 @@ fi
 
 # Test 14: --overwrite flag works silently
 cp "$FIRMWARE" "$TMPDIR/fw-ow.hex"
-OUTPUT=$(lua "$HEXTRACT" embed "$TMPDIR/fw-ow.hex" "$TMPDIR/tiny.dat" --overwrite 2>&1)
+OUTPUT=$("$HEXTRACT" embed "$TMPDIR/fw-ow.hex" "$TMPDIR/tiny.dat" --overwrite 2>&1)
 if echo "$OUTPUT" | grep -q "Embedded"; then
   pass "--overwrite flag works silently"
 else
@@ -213,7 +213,7 @@ fi
 # Test 15: Output to different file preserves original
 cp "$FIRMWARE" "$TMPDIR/fw-orig.hex"
 cp "$FIRMWARE" "$TMPDIR/fw-copy.hex"
-lua "$HEXTRACT" embed "$TMPDIR/fw-orig.hex" "$TMPDIR/small.dat" "$TMPDIR/fw-out.hex" --overwrite
+"$HEXTRACT" embed "$TMPDIR/fw-orig.hex" "$TMPDIR/small.dat" "$TMPDIR/fw-out.hex" --overwrite
 if cmp -s "$TMPDIR/fw-orig.hex" "$TMPDIR/fw-copy.hex"; then
   pass "output to different file preserves original"
 else
@@ -229,9 +229,9 @@ fi
 
 # Test 17: Metadata start address unchanged after embed
 cp "$FIRMWARE" "$TMPDIR/fw-meta.hex"
-lua "$HEXTRACT" embed "$TMPDIR/fw-meta.hex" "$TMPDIR/small.dat" --overwrite
-ORIG_META=$(lua "$HEXTRACT" structure "$FIRMWARE" 2>&1 | grep "Start:" | head -1)
-NEW_META=$(lua "$HEXTRACT" structure "$TMPDIR/fw-meta.hex" 2>&1 | grep "Start:" | head -1)
+"$HEXTRACT" embed "$TMPDIR/fw-meta.hex" "$TMPDIR/small.dat" --overwrite
+ORIG_META=$("$HEXTRACT" structure "$FIRMWARE" 2>&1 | grep "Start:" | head -1)
+NEW_META=$("$HEXTRACT" structure "$TMPDIR/fw-meta.hex" 2>&1 | grep "Start:" | head -1)
 if [ "$ORIG_META" = "$NEW_META" ]; then
   pass "metadata start address unchanged after embed"
 else
@@ -240,8 +240,8 @@ fi
 
 # Test 18: Round-trip produces identical hex file
 cp "$FIRMWARE" "$TMPDIR/fw-rt-hex.hex"
-lua "$HEXTRACT" extract "$FIRMWARE" "$TMPDIR/rt-script.dat"
-lua "$HEXTRACT" embed "$TMPDIR/fw-rt-hex.hex" "$TMPDIR/rt-script.dat" "$TMPDIR/fw-rt-out.hex" --overwrite
+"$HEXTRACT" extract "$FIRMWARE" "$TMPDIR/rt-script.dat"
+"$HEXTRACT" embed "$TMPDIR/fw-rt-hex.hex" "$TMPDIR/rt-script.dat" "$TMPDIR/fw-rt-out.hex" --overwrite
 if diff -wq "$FIRMWARE" "$TMPDIR/fw-rt-out.hex" > /dev/null 2>&1; then
   pass "round-trip produces identical hex file"
 else

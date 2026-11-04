@@ -24,12 +24,12 @@ local find, match, format = string.find, string.match, string.format
 -- and the port's own: arming it for its next event, and marking the
 -- command read from it as the REPL's
 local arm_port, event_repl = serial.eventAfterAsync, uBit.eventRepl
--- The radio link's the same way: a line over the link that takes one of
--- them away is answered, and the line that puts it back reaches the board.
--- Its radio functions are taken when a link opens.
+-- The radio link's session is the same way; the link's own tx and rx
+-- are taken when a link opens.
 local get_char = serial.getCharAsync
 local HEAD_MATCH = uBit.CODAL_SERIAL_EVT_HEAD_MATCH
 local DEVICE_ID_SERIAL = uBit.DEVICE_ID_SERIAL
+local DEVICE_ID_RADIO = uBit.DEVICE_ID_RADIO
 local CLICK = uBit.DEVICE_BUTTON_EVT_CLICK
 local LONG_CLICK = uBit.DEVICE_BUTTON_EVT_LONG_CLICK
 
@@ -53,18 +53,16 @@ uBit.display.scrollAsync(uBit.friendlyName())
 -- The session being served, if any
 local active_session
 
--- Output goes wherever the session being served takes it.
--- The serial session names no other way out, so it falls to
--- the port.
+-- Output goes wherever the session being served takes it: the link's
+-- session sends it over the link, any other to the port. Either way it
+-- goes in pieces of 64 characters, each a copy on CODAL's heap, "\n" made
+-- "\r\n" in the piece: a copy of the whole of s could need as much heap
+-- again as s itself, and the link carries what the port would show.
 local function write(s)
   local session = active_session
-  local out = session and session.transport.send
-  if out then return out(s) end
-  -- one send for each 64 characters, each a copy on CODAL's heap, "\n"
-  -- made "\r\n" in the piece: a copy of the whole of s could need as
-  -- much heap again as s itself
+  local out = session and session.transport.send or serial.send
   for i = 1, #s, 64 do
-    serial.send((gsub(sub(s, i, i + 63), "\n", "\r\n")))
+    out((gsub(sub(s, i, i + 63), "\n", "\r\n")))
   end
 end
 
@@ -199,7 +197,7 @@ local function say_error(err)
 end
 
 -- A REPL session: a buffer plus the compile-driven submit loop. The
--- same engine is used for the serial console and the BLE UART service.
+-- same engine is used for the serial console and the radio link.
 -- Each function stands at most one level inside another: the parser's
 -- frame for a function nested deeper costs over half a kilobyte of stack
 -- while the script is read at boot.
@@ -215,9 +213,7 @@ local function make_session(transport)
   end
   function s.submit(text)
     s.buffer = s.buffer .. text .. "\n"
-    if s.transport.crlf_before_result then
-      write("\r\n")
-    end
+    write("\n")
     local chunk, err, incomplete = compile(s.buffer)
     if not incomplete then
       if chunk then
@@ -252,18 +248,50 @@ local function make_session(transport)
     end
     active_session = saved
   end
+  -- Keys as they come over the link, as the port's come to the console:
+  -- a run of plain characters goes into the line and is echoed, Backspace
+  -- takes one back, Enter ends the line, and Ctrl+C drops the line begun
+  -- and starts afresh.
+  function s.keys(text)
+    local at = find(text, "\3[^\3]*$")
+    if at then
+      s.buffer = ""
+      write("\n")
+      s.prompt()
+      text = sub(text, at + 1)
+    end
+    at = find(text, "[\r\n\b\127]")
+    while at do
+      local plain, key = sub(text, 1, at - 1), sub(text, at, at)
+      if #plain > 0 then
+        s.buffer = s.buffer .. plain
+        write(plain)
+      end
+      if key == "\r" or key == "\n" then
+        s.submit("")
+      elseif #s.buffer > 0 then
+        s.buffer = sub(s.buffer, 1, -2)
+        write("\b \b")
+      end
+      text = sub(text, at + 1)
+      at = find(text, "[\r\n\b\127]")
+    end
+    if #text > 0 then
+      s.buffer = s.buffer .. text
+      write(text)
+    end
+  end
   return s
 end
 
 local serial_session = make_session({
-  crlf_before_result = true,
   getChar = serial.getCharAsync,
   arm = function() arm_port(1) end
 })
 
 local handler = { }
 
-microbit.handler = handler
+uBit.handler = handler
 
 local function enter()
   serial_session.submit("")
@@ -276,14 +304,20 @@ local function backspace()
   end
 end
 
+-- Ctrl+C: the line begun is dropped, and a new one starts
+local function afresh()
+  serial_session.buffer = ""
+  write("\n")
+  serial_session.prompt()
+end
+
 local keypress = {
   ["\r"] = enter,
   ["\n"] = enter,
   ["\b"] = backspace,
-  ["\127"] = backspace
+  ["\127"] = backspace,
+  ["\3"] = afresh
 }
-
-local typed_here = ""
 
 -- The characters typed since the last key the REPL acts on, held to be
 -- added to the line, and echoed, in one piece: 64 at most, and a table
@@ -303,12 +337,23 @@ local function flush_held()
   end
 end
 
--- What has been typed, from c on, into the console
-local function read_port(c)
+-- What has been typed into the console: the characters given first, then
+-- the port's
+local function read_port(pending)
   -- what a read cut short by a mistake held goes, as the line does
   held_count = 0
-  c = c or serial_session.transport.getChar()
-  while c do
+  local at, n = 0, pending and #pending or 0
+  while true do
+    local c
+    at = at + 1
+    if at <= n then
+      c = sub(pending, at, at)
+    else
+      c = serial_session.transport.getChar()
+    end
+    if not c then
+      break
+    end
     local input = keypress[c]
     if input then
       flush_held()
@@ -324,7 +369,6 @@ local function read_port(c)
         flush_held()
       end
     end
-    c = serial_session.transport.getChar()
   end
   flush_held()
 end
@@ -385,44 +429,33 @@ uBit.eventFallback(dispatch)
 
 -- A REPL over a radio link, and the other end of it.
 --
--- Both turn the radio on themselves; the group is the one
--- every micro:bit starts in. A board that calls again — one
--- that was reset, or lost the link — is taken as it comes,
--- and the session starts over for it.
+-- Both turn the radio on themselves; the group is the one every micro:bit
+-- starts in. A board that calls again, one that was reset or lost the
+-- link, is taken as it comes, and the session starts over for it.
 --
--- listen(name) waits for that board to call, then serves it:
--- what arrives over the link is typed into a session of its
--- own, and what the session says goes back the same way.
+-- listen(name) waits for that board to call, or for any board if no name
+-- is given, and from then on serves only the one that called: the keys
+-- that arrive over the link are typed into a session of its own, as the
+-- port's keys are into the console, and what the session says goes back
+-- the same way. All the while it sends beacons, which say who it is and
+-- whom it waits for; microbit.radio.scan() elsewhere lists them. listen()
+-- typed over the link changes whom it waits for, and lets go of the board
+-- that typed it. Ctrl+C or Ctrl+D on this board's own port ends it: the
+-- link is closed, and both boards are back at their consoles.
 --
--- connect(name, timeout) calls, then carries the port over:
--- what is typed here goes out, what comes back is printed.
+-- connect(name, timeout) calls, then carries the port over: what is typed
+-- here goes out as it is, the other board echoes and edits it, and what
+-- comes back goes on the port as it is, so the port shows what that
+-- board's own would. Ctrl+D hands the port back to the console; the other
+-- board keeps listening, so the link can be made again. A link the other
+-- board has closed, or has sent no beacon over for a while, is over too,
+-- and the console says so.
 
 -- made when listen() is first called: most boards never serve a link
 local radio_session
 
--- the link's, taken by listen() and connect()
-local tx, rx, not_sent_words, line_typed
-
-
--- A piece of the link, as much or as little as arrived: what
--- stands before a line ending is entered, what follows it
--- waits for the rest to come. Each message is whole lines, so
--- one that starts drops what follows the last line ending, a
--- line whose end was lost on the way, which the other board
--- said; the lines of a statement still open stay.
-local function typed(piece, starts)
-  if starts then
-    radio_session.buffer = match(radio_session.buffer, "^.*\n") or ""
-  end
-  local at = find(piece, "[\r\n]")
-  while at do
-    radio_session.buffer = radio_session.buffer .. sub(piece, 1, at - 1)
-    radio_session.submit("")
-    piece = sub(piece, at + 1)
-    at = find(piece, "[\r\n]")
-  end
-  radio_session.buffer = radio_session.buffer .. piece
-end
+-- the link's, taken when a link opens
+local tx, rx
 
 --- A fresh session for a caller that has just arrived
 local function greet()
@@ -430,30 +463,15 @@ local function greet()
   radio_session.run(radio_session.prompt)
 end
 
-function listen(name)
-  local answered, pause = radio.answered, uBit.sleep
-  tx, rx = radio.tx, radio.rx
-  radio_session = radio_session or make_session({
-    crlf_before_result = false,
-    send = tx
-  })
-  radio.enable()
-  radio.listen(name)
-  greet()
-  while true do
-    if answered(name) then greet() end
-    local piece, starts = rx()
-    if piece then
-      radio_session.run(typed, piece, starts)
-    end
-    pause(5)
-  end
-end
-
--- Whatever has been typed since the last look
+-- Whatever has been typed since the last look: nothing, mostly, and
+-- then no table is made for it
 local function typing()
-  local chars, n = { }, 0
   local c = get_char()
+  if not c then
+    return ""
+  end
+  local chars, n = { c }, 1
+  c = get_char()
   while c do
     n = n + 1
     chars[n] = c
@@ -462,68 +480,94 @@ local function typing()
   return concat(chars)
 end
 
---- What the link says goes to the port, all that has come
+local listening = false
+local awaited   -- the board listen() waits for; nil for any
+
+function listen(name)
+  awaited = name
+  if listening then
+    -- typed over the link: the caller is let go, and the loop below goes
+    -- on waiting for the board now named
+    radio.close()
+    return
+  end
+  local answered, pause = radio.answered, uBit.sleep
+  tx, rx = radio.tx, radio.rx
+  radio_session = radio_session or make_session({ send = tx })
+  listening = true
+  radio.enable()
+  -- The port is read here: the console's handler arms it for its next
+  -- event only once the line that called listen() is over. Ctrl+C or
+  -- Ctrl+D ends the listening; the rest of what is typed is dropped.
+  while not find(typing(), "[\3\4]") do
+    radio.beacon(awaited)
+    local caller = answered(awaited)
+    if caller then
+      awaited = caller
+      greet()
+    end
+    local piece = rx()
+    if piece then
+      radio_session.run(radio_session.keys, piece)
+    end
+    pause(5)
+  end
+  listening = false
+  radio.close()
+end
+
+local peer       -- the board connect() reached
+local mid_line   -- what it sent last left a line open on the port
+
+--- The link is closed, and the port goes back to the console
+local function disconnect()
+  radio.close()
+  handler[DEVICE_ID_SERIAL] = port_to_console
+  handler[DEVICE_ID_RADIO] = nil
+  serial_session.transport.taken = false
+  write((mid_line and "\n" or "") .. peer .. " disconnected.\n")
+  serial_session.prompt()
+end
+
+--- What the link says goes to the port as it comes, all that has come;
+--- false is the other board closing the link, or its silence
 local function link_to_port()
   local piece = rx()
   while piece do
-    write(piece)
+    serial.send(piece)
+    mid_line = sub(piece, -1) ~= "\n"
     piece = rx()
+  end
+  if piece == false then
+    disconnect()
   end
 end
 
--- After a line that did not go, what is typed up to the next
--- line ending finishes a line that goes with it
-local dropping = false
-
--- Whoever has the port serves it: the console's own session
--- to start with, the link once connect() has opened one.
--- connect puts the other one in place; nothing asks which.
--- A line at a time goes over the link: tx waits to be
--- answered, and a character each would spend that wait while
--- the next ones pile up in the port. So the typing is echoed
--- as it comes, Backspace taken as the console takes it, and
--- held until its line is whole. The port is
--- armed before it is read: a character that comes after the
--- read raises the event, and one before it is read now.
+-- What is typed goes over the link as it is, and the other board echoes
+-- and edits it. tx waits to be answered; what is typed meanwhile waits in
+-- the port and goes with the next piece, and a piece the other board does
+-- not take, busy with a command of its own, is lost. What comes before a
+-- Ctrl+D still goes over; what follows it is the console's. The port is
+-- armed before it is read: a character that comes after the read raises
+-- the event, and one before it is read now.
 local function port_to_link(value)
   if value == HEAD_MATCH then
     arm_port(1)
-    local shown
-    typed_here, shown = line_typed(typed_here, typing())
-    write(shown)
-    if dropping then
-      local ends = find(typed_here, "[\r\n]")
-      dropping = not ends
-      typed_here = ends and sub(typed_here, ends + 1) or typed_here
-    end
-    local at = find(typed_here, "[\r\n]")
-    while at do
-      local line = sub(typed_here, 1, at)
-      typed_here = sub(typed_here, at + 1)
-      if not tx(line) then
-        -- tx has tried for a quarter of a second; what was typed after
-        -- the line would arrive without it, and goes too, what came into
-        -- the port meanwhile with it, shown, and the rest of a line
-        -- begun then
-        local rest, shown = line_typed(typed_here, typing())
-        write(shown)
-        -- the line begun, held as it shows, for Backspace, until it ends
-        typed_here = match(rest, "[^\r\n]*$")
-        dropping = typed_here ~= ""
-        -- the other board may have the line all the same, when only its
-        -- answers were lost, and may hold a statement not yet finished:
-        -- a new call starts it over
-        write(not_sent_words(sub(line, 1, -2), find(rest, "[^\r\n]") ~= nil))
-        return
+    local text = typing()
+    local before, after = match(text, "^([^\4]*)\4(.*)")
+    if not before then
+      if #text > 0 then
+        tx(text)
       end
-      -- what the other board said meanwhile, before its inbox here fills
-      link_to_port()
-      at = find(typed_here, "[\r\n]")
+      return
     end
+    if #before > 0 then
+      tx(before)
+    end
+    disconnect()
+    serial_session.run(read_port, after)
   end
 end
-
-local DEVICE_ID_RADIO = uBit.DEVICE_ID_RADIO
 
 function connect(name, timeout)
   radio.enable()
@@ -532,10 +576,8 @@ function connect(name, timeout)
     return
   end
   say(name .. " connected.")
-  tx, rx, not_sent_words, line_typed = radio.tx, radio.rx, radio.notSent,
-    radio.typed
-  typed_here = ""
-  dropping = false
+  tx, rx = radio.tx, radio.rx
+  peer, mid_line = name, false
   handler[DEVICE_ID_SERIAL] = port_to_link
   handler[DEVICE_ID_RADIO] = link_to_port
   -- what is typed from here on goes over the link, what waits in the
