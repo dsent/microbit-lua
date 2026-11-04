@@ -127,6 +127,16 @@ at each level of the parser, and with more than 5,888 bytes in use it stops
 with "C stack overflow", an error a `pcall` catches. The limit is the region's
 size less a margin (`source/lua-cstack.c`).
 
+A Lua function calling a Lua function uses no C stack: it takes a call frame
+on the heap, in an array that doubles as the calls deepen. Measured from a
+fresh boot, 500 nested calls run and the 501st panics the board with 020,
+out of memory, as the array doubles to 1024 frames; with 8 KB of data on the
+heap the edge is 428. So `LUAI_MAXCALLS` is 200 (`source/luaconf-maxcalls.patch`),
+and a recursion without a base case ends with "stack overflow" and the prompt
+back: at about 115 levels the first time after a boot, when the list of 128
+frames would double, and at about 190 after that, since Lua then keeps the
+list at 200 frames.
+
 
 ## Numbers as text
 

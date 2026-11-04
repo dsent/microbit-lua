@@ -1,0 +1,16 @@
+--- luaconf.h
++++ luaconf.h
+@@ -430,7 +430,11 @@
+ ** CHANGE it if you need really deep recursive calls. This limit is
+ ** arbitrary; its only purpose is to stop infinite recursion before
+ ** exhausting memory.
++** On the micro:bit the heap is 48 KB, and the array of call frames doubles
++** as the calls deepen: at 500 nested Lua calls the doubling to 1024 frames
++** fails and the board panics. With 200, the doubling to 256 frames trips
++** this limit and still fits.
+ */
+-#define LUAI_MAXCALLS	20000
++#define LUAI_MAXCALLS	200
+ 
+ 
+ /*

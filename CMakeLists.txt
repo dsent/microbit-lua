@@ -410,6 +410,9 @@ lua_patch(ldo.c ldo-cstack.patch)
 lua_patch(lparser.c lparser-cstack.patch)
 # A smaller string buffer on the C stack, so the check leaves more of it.
 lua_patch(luaconf.h luaconf-buffer.patch)
+# Nested Lua calls stop at 128 with "stack overflow": the heap holds about
+# 500 frames, and the array that holds them doubles as they deepen.
+lua_patch(luaconf.h luaconf-maxcalls.patch)
 lua_patch_apply()
 # Application sources build at -O2; this file is 1.3 KB smaller at -Os.
 set_source_files_properties("${CMAKE_SOURCE_DIR}/source/lua-number.c"
