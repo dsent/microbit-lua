@@ -44,11 +44,12 @@ local function find_meta_addr(blocks)
                 local script_end   = u32_le(block.bytes, i + 8)
                 local script_size  = u32_le(block.bytes, i + 12)
                 local space        = u32_le(block.bytes, i + 16)
-                -- Validate: start < end, size matches, space is reasonable
+                -- Validate: start < end, size matches, space is reasonable;
+                -- a script may fill its space exactly, as embed allows
                 if script_start < script_end
                    and script_size == script_end - script_start
                    and script_size > 0
-                   and script_size < space
+                   and script_size <= space
                    and space < 512 * 1024 then
                     return block.start_addr + i - 1
                 end
