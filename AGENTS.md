@@ -1,6 +1,9 @@
 # Agent notes for opencode
 
 ## Environment
+- The bullets of this section describe the upstream developer's machine.
+  This fork builds in the podman image `Dockerfile` makes (see the README's
+  Build), where every tool is already there.
 - Passwordless sudo is granted for package management only:
   `/usr/bin/apt-get`, `/usr/bin/apt`, `/usr/bin/dpkg`. Other sudo commands need
   a password. Use it to install build dependencies globally, e.g.
@@ -23,16 +26,12 @@
   `libraries/lua-5.1.5` takes a patch added after a file's last one on the next
   build. Anything else, a patch inserted before others of its file, dropped or
   edited, stops the build and says to delete `libraries/lua-5.1.5`.
-  `cmake -DROOT=$PWD -DWORK=<empty dir> -P tests/lua-patch-test.cmake` checks
-  it; it needs `patch` and the Lua tarball a build leaves in `libraries/`.
 - `bash tests/lua-number-tests.sh` tests `source/lua-number.c` on the host; it
   needs only `cc`.
-- `bash tests/cstack-host-tests.sh` tests `source/lua-cstack.c`'s limits at
-  four stack sizes; it needs `cc` and the unpacked Lua in `libraries/`.
 - `bash tests/host-tests.sh` compares `source/tpbot.c` with the Lua it
-  replaced, `tests/tpbot-reference.lua`, and runs the tests above; it needs
-  `cc`, `patch`, `cmake` and the Lua tarball a firmware build leaves in
-  `libraries/`.
+  replaced, `tests/tpbot-reference.lua`, and runs `source/lua-script.lua` over
+  a stand-in board; it needs `cc`, `patch`, `cmake` and the Lua tarball a
+  firmware build leaves in `libraries/`.
 - The build itself needs no host Lua. `tests/hextract-tests.sh` does: `utils/hextract`
   pins its interpreter with `#!/usr/bin/env lua5.1`, and the harness runs the script
   directly, so only the `lua5.1` package is required (no PATH or alternatives setup).

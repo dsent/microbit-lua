@@ -1,12 +1,37 @@
 local uBit = require("microbit")
-require("microbit.accelerometer")
-require("microbit.io")
-local audio = require("microbit.audio")
-local display = require("microbit.display")
+require("microbit.audio")
+require("microbit.display")
 local radio = require("microbit.radio")
 local serial = require("microbit.serial")
--- the robot commands, globals at the prompt
+-- at the prompt as before require came, for the lessons that use them
+require("microbit.accelerometer")
+require("microbit.compass")
+require("microbit.io")
+require("microbit.i2c")
 require("tpbot")
+
+-- What the REPL cannot do without, taken here so that the prompt comes
+-- back even after a line takes away the global, and answers the line
+-- that puts it back: a line is compiled by loadstring, given its
+-- environment by setfenv and run under pcall; what it says goes out
+-- through gsub and sub, and a line is put together with concat.
+local pcall = pcall
+local loadstring, setfenv = loadstring, setfenv
+local gsub, sub, concat = string.gsub, string.sub, table.concat
+-- and what tells an unfinished line and shows a result: find, match and
+-- format
+local find, match, format = string.find, string.match, string.format
+-- and the port's own: arming it for its next event, and marking the
+-- command read from it as the REPL's
+local arm_port, event_repl = serial.eventAfterAsync, uBit.eventRepl
+-- The radio link's session is the same way; the link's own tx and rx
+-- are taken when a link opens.
+local get_char = serial.getCharAsync
+local HEAD_MATCH = uBit.CODAL_SERIAL_EVT_HEAD_MATCH
+local DEVICE_ID_SERIAL = uBit.DEVICE_ID_SERIAL
+local DEVICE_ID_RADIO = uBit.DEVICE_ID_RADIO
+local CLICK = uBit.DEVICE_BUTTON_EVT_CLICK
+local LONG_CLICK = uBit.DEVICE_BUTTON_EVT_LONG_CLICK
 
 local heart = {
   width = 10,
@@ -20,75 +45,69 @@ local heart = {
   )
 }
 
-audio.express("giggle")
-display.animate(heart, 1000, 5)
-display.scrollAsync(uBit.friendlyName())
+uBit.audio.setVolume(20)
+uBit.audio.express("giggle")
+uBit.display.animate(heart, 1000, 5)
+uBit.display.scrollAsync(uBit.friendlyName())
 
--- Output goes wherever the session being served takes it, a
--- line ending in CR LF as on the port. The serial session
--- names no other way out, so it falls to the port.
+-- The session being served, if any
+local active_session
+
+-- Output goes wherever the session being served takes it: the link's
+-- session sends it over the link, any other to the port. Either way it
+-- goes in pieces of 64 characters, each a copy on CODAL's heap on the port,
+-- and frames on the C stack over the link, "\n" made "\r\n" in the piece: a
+-- copy of the whole of s could need as much heap again as s itself, and the
+-- link carries what the port would show.
 local function write(s)
   local session = active_session
-  local out = session and session.send or serial.send
-  out((string.gsub(s, "\n", "\r\n")))
+  local out = session and session.transport.send or serial.send
+  for i = 1, #s, 64 do
+    out((gsub(sub(s, i, i + 63), "\n", "\r\n")))
+  end
 end
 
 io = {
   write = write
 }
 
-local unpack = unpack or table.unpack
-
 local function is_identifier(str)
   return type(str) == "string"
-    and str:match("^[%a_][%w_]*$")
+    and match(str, "^[%a_][%w_]*$")
 end
 
-local prettyprint = { }
-
-local function serialize(value, visited)
-  visited = visited or {}
-  local pp = prettyprint[type(value)]
-  if pp then
-    return pp(value, visited)
-  end
-  return tostring(value)
-end
-
-function prettyprint.string(value)
-  return string.format("%q", value)
-end
+local serialize
 
 local function key(k, visited)
   if is_identifier(k) then
     return k
-  else
-    return "[" .. serialize(k, visited) .. "]"
   end
+  return "[" .. serialize(k, visited) .. "]"
 end
 
-local function table_tokens(value, visited)
-  local out = {"{"}
-  local first = true
-  for k, v in pairs(value) do
-    if not first then
-       table.insert(out, ", ")
-    end
-    first = false
-    table.insert(out, key(k, visited) .. " = " .. serialize(v, visited))
+-- A value as a line of Lua: a string quoted, a table with its
+-- keys and values, a table inside itself as <cycle>
+function serialize(value, visited)
+  local t = type(value)
+  if t == "string" then
+    return format("%q", value)
+  elseif t ~= "table" then
+    return tostring(value)
   end
-  table.insert(out, "}")
-  return out
-end
-
-function prettyprint.table(value, visited)
+  visited = visited or { }
   if visited[value] then
     return "<cycle>"
   end
   visited[value] = true
-  local out = table_tokens(value, visited)
+  local out, n = { "{" }, 1
+  for k, v in pairs(value) do
+    n = n + 1
+    out[n] = (n > 2 and ", " or "") .. key(k, visited) .. " = "
+      .. serialize(v, visited)
+  end
+  out[n + 1] = "}"
   visited[value] = nil
-  return table.concat(out)
+  return concat(out)
 end
 
 local function print_values(serialize, ...)
@@ -98,9 +117,9 @@ local function print_values(serialize, ...)
   end
   local out = { }
   for i = 1, n do
-    table.insert(out, serialize(select(i, ...)))
+    out[i] = serialize(select(i, ...))
   end
-  write(table.concat(out, "\t") .. "\n")
+  write(concat(out, "\t") .. "\n")
 end
 
 local env = { }
@@ -117,7 +136,7 @@ local function load_with_env(code, chunkname)
 end
 
 local function is_incomplete(err)
-  return err and err:find("near '<eof>'", 1, true) ~= nil
+  return err and find(err, "near '<eof>'", 1, true) ~= nil
 end
 
 local function compile_try(code)
@@ -131,35 +150,32 @@ local function compile_try(code)
 end
 
 local function compile(code)
+  local e_chunk, e_err, e_incomp = compile_try("return " .. code)
+  if e_chunk then
+    return e_chunk
+  end
   local chunk, err, incomp = compile_try(code)
-  if incomp then
-    local e_chunk, e_err = compile_try("return " .. code)
-    if e_chunk then
-      return e_chunk, e_err
-    end
-    return chunk, err, true
+  if chunk or incomp then
+    return chunk, err, incomp
   end
-  if chunk then
-    local e_chunk, e_err = compile_try("return " .. code)
-    if e_chunk then
-      return e_chunk, e_err
-    end
-    return chunk
-  end
-  local e_chunk, e_err, e_incomp =
-    compile_try("return " .. code)
-  if e_chunk or e_incomp then
-    return e_chunk, e_err, e_incomp
+  if e_incomp then
+    return nil, e_err, true
   end
   return nil, err or e_err, false
 end
 
-function print(...)
-  print_values(tostring, ...)  
+-- The REPL's own output. print is the same, for programs, and a
+-- program may put its own in its place.
+local function say(...)
+  print_values(tostring, ...)
 end
 
+print = say
+
 collectgarbage("setpause", 100)
-print("micro:bit\nLua 5.1 REPL")
+-- "unknown" where the firmware gives no version
+local version = uBit.version and uBit.version() or "unknown"
+say("micro:bit\nLua 5.1 REPL\nfirmware " .. version)
 
 local function execute(chunk)
   local results = { pcall(chunk) }
@@ -167,237 +183,285 @@ local function execute(chunk)
     if #results > 1 then
       local out = { }
       for i = 2, #results do
-        table.insert(out, serialize(results[i]))
+        out[i - 1] = serialize(results[i])
       end
-      print("=> " .. table.concat(out, "\t"))
+      say("=> " .. concat(out, "\t"))
     end
   else
-    print("Runtime error: " .. tostring(results[2]))
+    say("Runtime error: " .. tostring(results[2]))
   end
 end
 
--- A REPL session: a buffer plus the compile-driven submit loop.
--- The serial console and the radio link each have one; send is
--- where its output goes, the port when there is none.
-local function make_session(send)
+-- A mistake on the way from a line to its result, said
+local function say_error(err)
+  say("Runtime error: " .. tostring(err))
+end
+
+-- A REPL session: a buffer plus the compile-driven submit loop. The
+-- same engine is used for the serial console and the radio link.
+-- Each function stands at most one level inside another: the parser's
+-- frame for a function nested deeper costs over half a kilobyte of stack
+-- while the script is read at boot.
+local function make_session(transport)
   local s = {
-    send = send,
+    transport = transport,
     buffer = "",
   }
   function s.prompt()
-    write(s.buffer == "" and "> " or ">> ")
+    if not s.transport.taken then
+      write(s.buffer == "" and "> " or ">> ")
+    end
   end
-  function s.submit()
-    s.buffer = s.buffer .. "\n"
+  function s.submit(text)
+    s.buffer = s.buffer .. text .. "\n"
     write("\n")
     local chunk, err, incomplete = compile(s.buffer)
     if not incomplete then
       if chunk then
         execute(chunk)
       else
-        print("Compile error: " .. tostring(err))
+        say("Compile error: " .. tostring(err))
       end
       s.buffer = ""
     end
-    collectgarbage("collect")
+    pcall(collectgarbage, "collect")
     s.prompt()
   end
-  function s.backspace()
-    if #s.buffer > 0 then
-      s.buffer = s.buffer:sub(1, -2)
-      write("\b \b")
+  -- f, with what it says going to this session. Whatever goes wrong in
+  -- it, even showing a result that cannot be shown, or running out of
+  -- memory where Lua's allocator can refuse (on the board CODAL stops
+  -- with 020 first), the line is over, the mistake is said if it can be,
+  -- and the prompt comes back. One pcall here covers the reading of the port,
+  -- the line and its result: each pcall more on the way to a command
+  -- would cost the C stack about 440 bytes.
+  function s.run(f, ...)
+    local saved = active_session
+    active_session = s
+    local ran, err = pcall(f, ...)
+    if not ran then
+      s.buffer = ""
+      pcall(collectgarbage, "collect")
+      if not pcall(say_error, err) then
+        pcall(say, "Runtime error: the result cannot be shown")
+      end
+      pcall(collectgarbage, "collect")
+      pcall(s.prompt)
     end
+    active_session = saved
   end
-  --- What was typed: a run of plain characters goes into the
-  --- line and is echoed; the key after it erases or enters.
-  --- Ctrl+C drops all that came before it and starts afresh.
+  -- Keys as they come over the link, as the port's come to the console:
+  -- a run of plain characters goes into the line and is echoed, Backspace
+  -- takes one back, Enter ends the line, and Ctrl+C drops the line begun
+  -- and starts afresh.
   function s.keys(text)
-    local rest = text:match(".*\3(.*)")
-    if rest then
+    local at = find(text, "\3[^\3]*$")
+    if at then
       s.buffer = ""
       write("\n")
       s.prompt()
-      text = rest
+      text = sub(text, at + 1)
     end
-    for plain, key in string.gmatch(text, "([^\r\n\b\127]*)(.?)") do
+    at = find(text, "[\r\n\b\127]")
+    while at do
+      local plain, key = sub(text, 1, at - 1), sub(text, at, at)
       if #plain > 0 then
         s.buffer = s.buffer .. plain
         write(plain)
       end
-      if key == "\b" or key == "\127" then
-        s.backspace()
-      elseif #key > 0 then
-        s.submit()
+      if key == "\r" or key == "\n" then
+        s.submit("")
+      elseif #s.buffer > 0 then
+        s.buffer = sub(s.buffer, 1, -2)
+        write("\b \b")
       end
+      text = sub(text, at + 1)
+      at = find(text, "[\r\n\b\127]")
     end
-  end
-  function s.run(f)
-    local saved = active_session
-    active_session = s
-    f()
-    active_session = saved
+    if #text > 0 then
+      s.buffer = s.buffer .. text
+      write(text)
+    end
   end
   return s
 end
 
-local serial_session = make_session()
+local serial_session = make_session({
+  getChar = serial.getCharAsync,
+  arm = function() arm_port(1) end
+})
 
 local handler = { }
 
 uBit.handler = handler
 
--- Whatever has been typed since the last look
-local function typing()
-  local chars = { }
-  local c = serial.getCharAsync()
-  while c do
-    chars[#chars + 1] = c
-    c = serial.getCharAsync()
+local function enter()
+  serial_session.submit("")
+end
+
+local function backspace()
+  if #serial_session.buffer > 0 then
+    serial_session.buffer = sub(serial_session.buffer, 1, -2)
+    write("\b \b")
   end
-  return table.concat(chars)
 end
 
-local function to_console(text)
-  serial_session.run(function() serial_session.keys(text) end)
+-- Ctrl+C: the line begun is dropped, and a new one starts
+local function afresh()
+  serial_session.buffer = ""
+  write("\n")
+  serial_session.prompt()
 end
 
--- Where what is typed goes: the console's own session, or the
--- link while connect() has one open. The port is watched again
--- only once it is empty: a piece is dealt with before the next
--- one is taken.
-local typed_to = to_console
+local keypress = {
+  ["\r"] = enter,
+  ["\n"] = enter,
+  ["\b"] = backspace,
+  ["\127"] = backspace,
+  ["\3"] = afresh
+}
 
-handler[uBit.DEVICE_ID_SERIAL] = function(value)
-  if value == uBit.CODAL_SERIAL_EVT_HEAD_MATCH then
-    local text = typing()
-    while #text > 0 do
-      typed_to(text)
-      text = typing()
+-- The characters typed since the last key the REPL acts on, held to be
+-- added to the line, and echoed, in one piece: 64 at most, and a table
+-- that held more than 16 is let go, so that a paste leaves no table of
+-- its size behind
+local held, held_count = { }, 0
+
+local function flush_held()
+  if held_count > 0 then
+    local text = concat(held, "", 1, held_count)
+    if held_count > 16 then
+      held = { }
     end
-    serial.eventAfterAsync(1)
+    held_count = 0
+    serial_session.buffer = serial_session.buffer .. text
+    write(text)
   end
 end
 
-local smiley = {
-  height = 5,
-  width = 5,
-  data = string.char(
-      0, 255,   0, 255,   0,
-      0, 255,   0, 255,   0,
-      0,   0,   0,   0,   0,
-    255,   0,   0,   0, 255,
-      0, 255, 255, 255,   0
-  )
-}
+-- What read_port was given and had not read when connect() took the port
+local left_over = ""
 
-local wink_A = {
-  height = 2,
-  width = 5,
-  data = string.char(
-      0,   0,   0, 255,   0,
-    255, 255,   0, 255,   0
-  )
-}
+-- What has been typed into the console: the characters given first, then
+-- the port's
+local function read_port(pending)
+  -- what a read cut short by a mistake held goes, as the line does
+  held_count = 0
+  local at, n = 0, pending and #pending or 0
+  while true do
+    local c
+    at = at + 1
+    if at <= n then
+      c = sub(pending, at, at)
+    else
+      c = serial_session.transport.getChar()
+    end
+    if not c then
+      break
+    end
+    local input = keypress[c]
+    if input then
+      flush_held()
+      input()
+      -- connect() gave the port to the link: what follows is the link's
+      if serial_session.transport.taken then
+        left_over = at < n and sub(pending, at + 1) or ""
+        return
+      end
+    else
+      held_count = held_count + 1
+      held[held_count] = c
+      if held_count == 64 then
+        flush_held()
+      end
+    end
+  end
+  flush_held()
+end
 
-local wink_B = {
-  height = 2,
-  width = 5,
-  data = string.char(
-      0, 255,   0,   0,   0,
-      0, 255,   0, 255, 255
-  )
-}
-
-local squint = {
-  height = 2,
-  width = 5,
-  data = string.char(
-      0,   0,   0,   0,   0,
-    255, 255,   0, 255, 255
-  )
-}
-
-local function button(value, wink)
-  if value == uBit.DEVICE_BUTTON_EVT_DOWN then
-    display.show(wink)
-  elseif value == uBit.DEVICE_BUTTON_EVT_UP then
-    display.show(smiley)
+-- The port is armed however the reading ends, and then looked at once
+-- more: a character that came before it was armed raises no event.
+local function port_to_console(value)
+  if value == HEAD_MATCH then
+    -- a command's sleeps handle events, whichever on_event passed the
+    -- port's event on to here
+    event_repl()
+    local c
+    repeat
+      serial_session.run(read_port, c)
+      if serial_session.transport.taken then
+        return handler[DEVICE_ID_SERIAL](value)
+      end
+      serial_session.transport.arm()
+      c = serial_session.transport.getChar()
+    until not c
   end
 end
 
-gesture = {
-  [uBit.ACCELEROMETER_EVT_TILT_UP] = display.rotateUp,
-  [uBit.ACCELEROMETER_EVT_FACE_UP] = display.rotateUp,
-  [uBit.ACCELEROMETER_EVT_TILT_DOWN] = display.rotateDown,
-  [uBit.ACCELEROMETER_EVT_TILT_LEFT] = display.rotateLeft,
-  [uBit.ACCELEROMETER_EVT_TILT_RIGHT] = display.rotateRight,
-  [uBit.ACCELEROMETER_EVT_SHAKE] = function()
-    audio.express("hello")
-  end
-}
+handler[DEVICE_ID_SERIAL] = port_to_console
 
-handler[uBit.DEVICE_ID_BUTTON_A] = function(value)
-  button(value, wink_A)
-end
-
-handler[uBit.DEVICE_ID_BUTTON_B] = function(value)
-  button(value, wink_B)
-end
-
-handler[uBit.MICROBIT_ID_LOGO] = function(value)
-  button(value, squint)
-end
-
-handler[uBit.DEVICE_ID_DISPLAY] = function(value)
-  if value == uBit.DISPLAY_EVT_ANIMATION_COMPLETE then
-    display.show(smiley)
+local function button(value, btn)
+  if value == CLICK then
+      uBit.display.scroll(btn)
+   elseif value == LONG_CLICK then
+      uBit.display.scroll(btn .. "!")
   end
 end
 
-handler[uBit.DEVICE_ID_GESTURE] = function(value)
-  local sensed = gesture[value]
-  if sensed then
-    sensed()
-  end
+handler[microbit.DEVICE_ID_BUTTON_A] = function(value)
+  button(value, "A")
 end
 
-function on_event(source, value, timestamp)
+handler[microbit.DEVICE_ID_BUTTON_B] = function(value)
+  button(value, "B")
+end
+
+handler[microbit.DEVICE_ID_BUTTON_AB] = function(value)
+  button(value, "AB")
+end
+
+local function dispatch(source, value, timestamp)
   local handle = handler[source]
   if handle then
     handle(value, timestamp)
   end
 end
 
--- Gesture sensing requires accelerometer initialization
-uBit.accelerometer.getSample()
+-- A program may put its own on_event in place of this one. When
+-- on_event is not a function, events come here all the same.
+on_event = dispatch
+uBit.eventFallback(dispatch)
+
 
 -- A REPL over a radio link, and the other end of it.
 --
--- Both turn the radio on themselves; the group is the one
--- every micro:bit starts in. A board that calls again — one
--- that was reset, or lost the link — is taken as it comes,
--- and the session starts over for it.
+-- Both turn the radio on themselves; the group is the one every micro:bit
+-- starts in. A board that calls again, one that was reset or lost the
+-- link, is taken as it comes, and the session starts over for it.
 --
--- listen(name) waits for that board to call, or for any board
--- if no name is given, and from then on serves only the one
--- that called: what arrives over the link is typed into a
--- session of its own, and what the session says goes back the
--- same way. All the while it sends beacons, which say who it
--- is and whom it waits for; scan() elsewhere lists them.
--- listen() typed over the link changes whom it waits for, and
--- lets go of the board that typed it.
--- Ctrl+C or Ctrl+D on this board's own port ends it: the link
--- is closed, and both boards are back at their consoles.
+-- listen(name) waits for that board to call, or for any board if no name
+-- is given, and from then on serves only the one that called: the keys
+-- that arrive over the link are typed into a session of its own, as the
+-- port's keys are into the console, and what the session says goes back
+-- the same way. All the while it sends beacons, which say who it is and
+-- whom it waits for; microbit.radio.scan() elsewhere lists them. listen()
+-- typed over the link changes whom it waits for, and lets go of the board
+-- that typed it. Ctrl+C or Ctrl+D on this board's own port ends it: the
+-- link is closed, and both boards are back at their consoles.
 --
--- connect(name, timeout) calls, then carries the port over:
--- what is typed here goes out, what comes back goes on the
--- port as it is, and the console here says no more. Ctrl+D
--- hands the port back to the console; the far end keeps
--- listening, so the link can be made again. A link whose far
--- end has gone quiet, with no beacon for a while, is over too.
+-- connect(name, timeout) calls, then carries the port over: what is typed
+-- here goes out as it is, the other board echoes and edits it, and what
+-- comes back goes on the port as it is, so the port shows what that
+-- board's own would. Ctrl+D hands the port back to the console; the other
+-- board keeps listening, so the link can be made again. A link the other
+-- board has closed, or has sent no beacon over for a while, is over too,
+-- and the console says so.
 
-local radio_session = make_session(radio.tx)
+-- made when listen() is first called: most boards never serve a link
+local radio_session
 
+-- the link's, taken when a link opens, so that a line over the link that
+-- takes them from the module still reaches the board
+local tx, rx, beacon, close
 
 --- A fresh session for a caller that has just arrived
 local function greet()
@@ -405,99 +469,162 @@ local function greet()
   radio_session.run(radio_session.prompt)
 end
 
+-- Whatever has been typed since the last look: nothing, mostly, and
+-- then no table is made for it
+local function typing()
+  local c = get_char()
+  if not c then
+    return ""
+  end
+  local chars, n = { c }, 1
+  c = get_char()
+  while c do
+    n = n + 1
+    chars[n] = c
+    c = get_char()
+  end
+  return concat(chars)
+end
+
 local listening = false
 local awaited   -- the board listen() waits for; nil for any
 
 function listen(name)
+  if name ~= nil and (type(name) ~= "string" or #name ~= 5) then
+    error("a board name is five letters", 0)
+  end
+  if serial_session.transport.taken then
+    error("this micro:bit is connected to another: press Ctrl+D first", 0)
+  end
   awaited = name
   if listening then
-    radio.close()
+    -- typed over the link: the caller is let go, and the loop below goes
+    -- on waiting for the board now named
+    close()
     return
   end
+  local answered, pause = radio.answered, uBit.sleep
+  tx, rx, beacon, close = radio.tx, radio.rx, radio.beacon, radio.close
+  radio_session = radio_session or make_session({ send = tx })
   listening = true
   radio.enable()
-  while not typing():find("[\3\4]") do
-    radio.beacon(awaited)
-    local caller = radio.answered(awaited)
+  -- The port is read here: the console's handler arms it for its next
+  -- event only once the line that called listen() is over. Ctrl+C or
+  -- Ctrl+D ends the listening; the rest of what is typed is dropped.
+  while not find(typing(), "[\3\4]") do
+    beacon(awaited)
+    local caller = answered(awaited)
     if caller then
       awaited = caller
       greet()
     end
-    local piece = radio.rx()
+    local piece = rx()
     if piece then
-      radio_session.run(function() radio_session.keys(piece) end)
+      radio_session.run(radio_session.keys, piece)
     end
-    uBit.sleep(5)
+    pause(5)
   end
   listening = false
-  radio.close()
+  close()
 end
 
 local peer       -- the board connect() reached
 local mid_line   -- what it sent last left a line open on the port
 
---- The link is closed, and the port and the console's voice
---- go back to the console
+--- The link is closed, and the port goes back to the console
 local function disconnect()
-  radio.close()
-  typed_to = to_console
-  handler[uBit.DEVICE_ID_RADIO] = nil
-  serial_session.send = nil
+  close()
+  handler[DEVICE_ID_SERIAL] = port_to_console
+  handler[DEVICE_ID_RADIO] = nil
+  serial_session.transport.taken = false
   write((mid_line and "\n" or "") .. peer .. " disconnected.\n")
   serial_session.prompt()
 end
 
--- What is typed goes over as it is, and the far end echoes and
--- edits it, as a session does with what comes from its port.
--- tx waits to be answered; what is typed meanwhile waits in
--- the port and goes with the next piece. What comes before a
--- Ctrl+D still goes over; what follows it is for the console.
-local function to_link(text)
-  local before, after = text:match("^([^\4]*)\4(.*)")
-  if not before then
-    radio.tx(text)
-    return
-  end
-  if #before > 0 then
-    radio.tx(before)
-  end
-  disconnect()
-  to_console(after)
-end
-
---- What the link says goes to the port; false is the far end
---- closing it
+--- What the link says goes to the port as it comes, all that has come;
+--- false is the other board closing the link, or its silence
 local function link_to_port()
-  local piece = radio.rx()
-  if piece then
+  local piece = rx()
+  while piece do
     serial.send(piece)
-    mid_line = piece:sub(-1) ~= "\n"
-  elseif piece == false then
+    mid_line = sub(piece, -1) ~= "\n"
+    piece = rx()
+  end
+  if piece == false then
     disconnect()
   end
 end
 
-function connect(name, timeout)
-  radio.enable()
-  if not radio.connect(name, timeout) then
-    print("Connection timed out.")
+-- What is typed while connected goes over the link as it is, and the
+-- other board echoes and edits it; what is typed meanwhile waits in the
+-- port and goes with the next piece. tx sends it a frame of 26 characters
+-- at a time, each answered before the next goes, and stops at a frame
+-- that is not answered in a quarter of a second; while it waits, nothing
+-- is taken from the link. So a read of more than one frame meets the
+-- other board's echo of the first frame half way, and both wait out their
+-- tries (see the README's Radio link). What comes before a Ctrl+D still
+-- goes over; what follows it is the console's. The port is armed before
+-- it is read: a character that comes after the read raises the event, and
+-- one before it is read now.
+local function port_to_link(value)
+  if value ~= HEAD_MATCH then
     return
   end
-  print(name .. " connected.")
-  peer = name
-  mid_line = false
-  typed_to = to_link
-  handler[uBit.DEVICE_ID_RADIO] = link_to_port
-  serial_session.send = function() end
+  arm_port(1)
+  local text = typing()
+  while true do
+    local before, after = match(text, "^([^\4]*)\4(.*)")
+    if not before then
+      if #text > 0 then
+        tx(text)
+      end
+      return
+    end
+    if #before > 0 then
+      tx(before)
+    end
+    disconnect()
+    left_over = ""
+    -- a command typed after the Ctrl+D is the console's: its sleeps handle
+    -- events, as a command read from the port by the console does
+    event_repl()
+    serial_session.run(read_port, after)
+    if not serial_session.transport.taken then
+      return
+    end
+    -- connect() came after the Ctrl+D: what followed it is the new link's
+    text = left_over
+  end
+end
+
+function connect(name, timeout)
+  if listening then
+    error("this micro:bit is listening: press Ctrl+C on its own port first", 0)
+  end
+  if serial_session.transport.taken then
+    error("this micro:bit is connected already: press Ctrl+D first", 0)
+  end
+  radio.enable()
+  if not radio.connect(name, timeout) then
+    say("Connection timed out.")
+    return
+  end
+  say(name .. " connected.")
+  tx, rx, beacon, close = radio.tx, radio.rx, radio.beacon, radio.close
+  peer, mid_line = name, false
+  handler[DEVICE_ID_SERIAL] = port_to_link
+  handler[DEVICE_ID_RADIO] = link_to_port
+  -- what is typed from here on goes over the link, what waits in the
+  -- port included
+  serial_session.transport.taken = true
 end
 
 -- Script-level setup (runs once before the main fiber
 -- is released):
--- show prompt, initialise the serial RX buffer, and arm
--- the first per-char head-match event on both transports.
--- After this returns, release_fiber() in main() hands
--- control to the scheduler; on_event() handles all events 
--- from the bus.
+-- show the prompt, then take what was typed while the
+-- script ran, which also arms the port's per-char
+-- head-match event. After this returns, release_fiber() in
+-- main() hands control to the scheduler; on_event() handles
+-- all events from the bus.
 serial_session.prompt()
-serial.getCharAsync()
-serial.eventAfterAsync(1)
+port_to_console(HEAD_MATCH)

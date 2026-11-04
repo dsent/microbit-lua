@@ -4,8 +4,13 @@
 # CMakeLists.txt applies to it:
 # - tpbot-host-test: source/tpbot.c beside the Lua it replaced
 #   (tests/tpbot-reference.lua), call by call;
+# - runtime-host-test: source/lua-script.lua, and programs in its place,
+#   over a stand-in board, with events through source/lua-events.c,
+#   modules through source/lua-modules.c, and a radio link whose other
+#   board the test plays;
 # - cstack-host-test: source/lua-cstack.c, whose limits follow the stack
 #   region's size;
+# - wait-audit.sh: every binding that waits looks for on_event first;
 # - lua-patch-test.cmake: the build's Lua patches, on Lua sources in each
 #   state libraries/ can hold.
 set -euo pipefail
@@ -37,10 +42,16 @@ FLAGS=(-std=gnu99 -O2 -DLUA_NUMBER_IS_FLOAT=1 -I"$LUA" -I"$ROOT/source")
 STRICT=("${FLAGS[@]}" -I"$ROOT/tests" -Wall -Wextra -Werror)
 cc "${STRICT[@]}" -o "$DIR/tpbot" "$ROOT/tests/tpbot-host-test.c" \
   "$ROOT/tests/host-cstack.c" "$ROOT/source/tpbot.c" "$DIR"/*.o -lm
+cc "${STRICT[@]}" -o "$DIR/runtime" "$ROOT/tests/runtime-host-test.c" \
+  "$ROOT/tests/host-cstack.c" \
+  "$ROOT/source/tpbot.c" "$ROOT/source/lua-events.c" \
+  "$ROOT/source/lua-modules.c" "$DIR"/*.o -lm
 "$DIR/tpbot" "$ROOT/tests/tpbot-reference.lua"
+"$DIR/runtime" "$ROOT/source/lua-script.lua"
 cc "${STRICT[@]}" -o "$DIR/cstack" "$ROOT/tests/cstack-host-test.c" \
   "$ROOT/source/lua-cstack.c"
 "$DIR/cstack"
+bash "$ROOT/tests/wait-audit.sh"
 mkdir "$DIR/patch-test"
 cmake -DROOT="$ROOT" -DWORK="$DIR/patch-test" \
   -P "$ROOT/tests/lua-patch-test.cmake" | grep -v "^patching file"

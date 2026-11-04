@@ -15,6 +15,9 @@ extern "C" {
 #include "neopixel.h"
 #include "stack-probe.h"
 #include "tpbot.h"
+#include "lua-events.h"
+#include "lua-modules.h"
+#include "board-alloc.h"
 
 extern MicroBit uBit;
 
@@ -23,12 +26,22 @@ extern MicroBit uBit;
 // lives.
 I2C &i2c = uBit.i2c;
 
+// The version build.py derives from git: the commit, "-drift" when the tree
+// differed from it, "unknown" outside git. It sits in the image after a fixed
+// mark, so a tool reading a hex file can find which firmware the file holds.
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "unknown"
+#endif
+#define FIRMWARE_VERSION_MARK "microbit-lua firmware "
+extern "C" __attribute__((used))
+const char firmware_version_mark[] = FIRMWARE_VERSION_MARK FIRMWARE_VERSION;
+
 #define LUA_MICROBIT_FUNCTIONS						\
     F(reset,      { uBit.reset();					\
                     return 0;						\
                   })							\
     F(sleep,      { uint32_t ms = (uint32_t)luaL_checkinteger(L, 1);	\
-                    uBit.sleep(ms);					\
+                    lua_events_sleep(ms);				\
                     return 0;						\
                   })							\
     F(seedRandom, { uint32_t seed = (uint32_t)luaL_optinteger(L, 1, 0);	\
@@ -52,6 +65,10 @@ I2C &i2c = uBit.i2c;
     F(friendlyName, { lua_pushstring(L, microbit_friendly_name());	\
                     return 1;						\
                   })							\
+    F(version,    { lua_pushstring(L, firmware_version_mark		\
+                                   + sizeof FIRMWARE_VERSION_MARK - 1);	\
+                    return 1;						\
+                  })							\
     F(stackUsage, { lua_pushinteger(L, (lua_Integer)stack_probe_peak());	\
                     return 1;						\
                   })							\
@@ -61,6 +78,10 @@ I2C &i2c = uBit.i2c;
     F(stackCurrent, { lua_pushinteger(L, (lua_Integer)stack_probe_current()); \
                     return 1;						\
                   })							\
+    F(eventsDropped, { return lua_events_dropped(L); })		\
+    F(eventFallback, { return lua_events_fallback(L); })		\
+    F(eventLine,  { return lua_events_line(L); })			\
+    F(eventRepl,  { return lua_events_repl(L); })			\
     F(panic,      { int statusCode = (int)luaL_checkinteger(L, 1);      \
                     microbit_panic(statusCode);				\
                     return 0;						\
@@ -154,7 +175,8 @@ static const uint8_t *luaL_checkimage(lua_State *L, int narg,
 #define READ_RANGE "from 0 to 4096"
 
 // read(n) of a port: up to n bytes, read into a buffer on Lua's heap and
-// returned as a string. CODAL's read(n) puts n bytes on the C stack.
+// returned as a string. CODAL's read(n) puts n bytes on the C stack, below
+// any check (source/lua-cstack.c).
 template <typename Read>
 static int read_into_lua(lua_State *L, Read read) {
   int size = luaL_checkint(L, 1);
@@ -202,7 +224,9 @@ static int read_into_lua(lua_State *L, Read read) {
     F(clear,      { uBit.display.clear();				\
                     return 0;						\
                   })							\
-    F(readLightLevel, { int r = uBit.display.readLightLevel();		\
+    F(readLightLevel, { lua_events_before_wait();			\
+                    /* the first reading sleeps while the LEDs measure */ \
+                    int r = uBit.display.readLightLevel();		\
                     lua_pushinteger(L, r);				\
                     return 1;						\
                   })							\
@@ -221,7 +245,7 @@ static int read_into_lua(lua_State *L, Read read) {
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(print,      { const char *s = luaL_checkstring(L, 1);		\
+    F(print,      { lua_events_before_wait(); const char *s = luaL_checkstring(L, 1);		\
                     int delay = luaL_optint(L, 2,			\
                       DISPLAY_DEFAULT_PRINT_SPEED);			\
                     int r = uBit.display.print(s, delay);		\
@@ -235,7 +259,7 @@ static int read_into_lua(lua_State *L, Read read) {
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(scroll,     { const char *s = luaL_checkstring(L, 1);		\
+    F(scroll,     { lua_events_before_wait(); const char *s = luaL_checkstring(L, 1);		\
                     int delay = luaL_optint(L, 2,			\
                       DISPLAY_DEFAULT_SCROLL_SPEED);			\
                     int r = uBit.display.scroll(s, delay);		\
@@ -261,7 +285,7 @@ static int read_into_lua(lua_State *L, Read read) {
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(animate,    { int width;						\
+    F(animate,    { lua_events_before_wait(); int width;		\
                     int height;						\
                     int delay = luaL_checkint(L, 2);			\
                     int stride = luaL_checkint(L, 3);			\
@@ -280,7 +304,7 @@ static int read_into_lua(lua_State *L, Read read) {
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(show,       { int width;						\
+    F(show,       { lua_events_before_wait(); int width;		\
                     int height;						\
                     int x = luaL_optint(L, 2, 0);			\
                     int y = luaL_optint(L, 3, 0);			\
@@ -308,7 +332,7 @@ static int read_into_lua(lua_State *L, Read read) {
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(pan,        { int width;						\
+    F(pan,        { lua_events_before_wait(); int width;		\
                     int height;						\
                     int delay = luaL_optint(L, 2,			\
                       DISPLAY_DEFAULT_SCROLL_SPEED);			\
@@ -657,7 +681,7 @@ Pin *luaL_checkPin(lua_State *L, int narg) {
                     }							\
                     return 1;						\
                   })							\
-    F(getPulseUs, { Pin *pin = luaL_checkPin(L, 1);			\
+    F(getPulseUs, { lua_events_before_wait(); Pin *pin = luaL_checkPin(L, 1);			\
                     int timeout = luaL_checkint(L, 2);			\
                     int r = pin->getPulseUs(timeout);			\
                     if(r != DEVICE_CANCELLED) {				\
@@ -764,7 +788,7 @@ ManagedString luaL_checkManagedString(lua_State *L, int narg) {
 }
 
 #define LUA_SERIAL_FUNCTIONS						\
-    F(send,       { ManagedString s = luaL_checkManagedString(L, 1);	\
+    F(send,       { lua_events_before_wait(); ManagedString s = luaL_checkManagedString(L, 1);	\
                     int r = uBit.serial.send(s, SYNC_SLEEP);		\
                     if(r != DEVICE_SERIAL_IN_USE &&			\
                        r != DEVICE_INVALID_PARAMETER) {			\
@@ -784,7 +808,7 @@ ManagedString luaL_checkManagedString(lua_State *L, int narg) {
                     }							\
                     return 1;						\
                   })							\
-    F(getByte,    { int r = uBit.serial.getChar(SYNC_SLEEP);		\
+    F(getByte,    { lua_events_before_wait(); int r = uBit.serial.getChar(SYNC_SLEEP);		\
                     lua_pushinteger(L, r);				\
                     return 1;						\
                   })							\
@@ -797,7 +821,7 @@ ManagedString luaL_checkManagedString(lua_State *L, int narg) {
                     }							\
                     return 1;						\
                   })							\
-    F(getChar,    { char r = (char)uBit.serial.getChar(SYNC_SLEEP);	\
+    F(getChar,    { lua_events_before_wait(); char r = (char)uBit.serial.getChar(SYNC_SLEEP);	\
                     lua_pushlstring(L, &r, 1);				\
                     return 1;						\
                   })							\
@@ -811,13 +835,15 @@ ManagedString luaL_checkManagedString(lua_State *L, int narg) {
                     }							\
                     return 1;						\
                   })							\
-    F(read,       { return read_into_lua(L, [](uint8_t *b, int n) {	\
+    F(read,       { lua_events_before_wait();				\
+                    return read_into_lua(L, [](uint8_t *b, int n) {	\
                       return uBit.serial.read(b, n, SYNC_SLEEP); });	\
                   })							\
     F(readAsync,  { return read_into_lua(L, [](uint8_t *b, int n) {	\
                       return uBit.serial.read(b, n, ASYNC); });		\
                   })							\
-    F(readUntil,  { size_t n;						\
+    F(readUntil,  { lua_events_before_wait();				\
+                    size_t n;						\
                     const char *d = luaL_checklstring(L, 1, &n);	\
                     return push_codal_text(L, [&]() {			\
                       return uBit.serial.readUntil(ManagedString(d, n),	\
@@ -831,10 +857,13 @@ ManagedString luaL_checkManagedString(lua_State *L, int narg) {
     F(redirect,   { Pin *tx = luaL_checkPin(L, 1);			\
                     Pin *rx = luaL_checkPin(L, 2);			\
                     int r = uBit.serial.redirect(*tx, *rx);		\
+                    if (r == DEVICE_OK)					\
+                      port_is_console = tx == &uBit.io.usbTx		\
+                                        && rx == &uBit.io.usbRx;	\
                     lua_pushboolean(L, r == DEVICE_OK);			\
                     return 1;						\
                   })							\
-    F(eventAfter, { uBit.serial.eventAfter(luaL_checkint(L, 1),		\
+    F(eventAfter, { lua_events_before_wait(); uBit.serial.eventAfter(luaL_checkint(L, 1),		\
                                            SYNC_SLEEP);			\
                     return 0;						\
                   })							\
@@ -843,7 +872,7 @@ ManagedString luaL_checkManagedString(lua_State *L, int narg) {
                                            ASYNC);			\
                     return 0;						\
                   })							\
-    F(eventOn,    { uBit.serial.eventOn(luaL_checkManagedString(L, 1),	\
+    F(eventOn,    { lua_events_before_wait(); uBit.serial.eventOn(luaL_checkManagedString(L, 1),	\
                                            SYNC_SLEEP);			\
                     return 0;						\
                   })							\
@@ -918,6 +947,7 @@ extern MicroBitUARTService *uart;
 
 #define LUA_BLE_FUNCTIONS						\
     F(send,       { if(!uart) { lua_pushnil(L); return 1; }		\
+                    lua_events_before_wait();				\
                     ManagedString s = luaL_checkManagedString(L, 1);	\
                     int r = uart->send(s, SYNC_SLEEP);			\
                     if(r != DEVICE_SERIAL_IN_USE &&			\
@@ -940,6 +970,7 @@ extern MicroBitUARTService *uart;
                     return 1;						\
                   })							\
     F(getChar,    { if(!uart) { lua_pushnil(L); return 1; }		\
+                    lua_events_before_wait();				\
                     char r = (char)uart->getc(SYNC_SLEEP);		\
                     lua_pushlstring(L, &r, 1);				\
                     return 1;						\
@@ -956,6 +987,7 @@ extern MicroBitUARTService *uart;
                     return 1;						\
                   })							\
     F(read,       { if(!uart) { lua_pushnil(L); return 1; }		\
+                    lua_events_before_wait();				\
                     return read_into_lua(L, [](uint8_t *b, int n) {	\
                       return uart->read(b, n, SYNC_SLEEP); });		\
                   })							\
@@ -964,6 +996,7 @@ extern MicroBitUARTService *uart;
                       return uart->read(b, n, ASYNC); });		\
                   })							\
     F(readUntil,  { if(!uart) { lua_pushnil(L); return 1; }		\
+                    lua_events_before_wait();				\
                     size_t n;						\
                     const char *d = luaL_checklstring(L, 1, &n);	\
                     return push_codal_text(L, [&]() {			\
@@ -971,6 +1004,7 @@ extern MicroBitUARTService *uart;
                                              SYNC_SLEEP); });		\
                   })							\
     F(eventOn,    { if(!uart) { return 0; }				\
+                    lua_events_before_wait();				\
                     uart->eventOn(luaL_checkManagedString(L, 1),	\
                                            SYNC_SLEEP);			\
                     return 0;						\
@@ -982,6 +1016,7 @@ extern MicroBitUARTService *uart;
                     return 0;						\
                   })							\
     F(eventAfter, { if(!uart) { return 0; }				\
+                    lua_events_before_wait();				\
                     uart->eventAfter(luaL_checkint(L, 1),		\
                                            SYNC_SLEEP);			\
                     return 0;						\
@@ -1097,6 +1132,7 @@ extern "C" int tpbot_i2c_write(int address, const char *data, size_t length) {
 }
 
 extern "C" void tpbot_sleep(uint32_t ms) {
+  lua_events_before_wait();
   uBit.sleep(ms);
 }
 
@@ -1221,18 +1257,18 @@ int32_t nezha2_motor_travel(lua_State *L) {
                     return nezha2_send(L, speed < 0 ? 2 : 1, 96,	\
                       robot_byte(L, 2, abs(speed)), 245, 0);		\
                   })							\
-    F(motor_travel, {							\
+    F(motor_travel, { lua_events_before_wait();				\
                     lua_pushnumber(L,					\
                       0.1 * (lua_Number)nezha2_motor_travel(L));	\
                     return 1;						\
                   })							\
-    F(motor_position, {							\
+    F(motor_position, { lua_events_before_wait();			\
                     int p = nezha2_motor_travel(L) % 3600;		\
                     lua_pushnumber(L,					\
                       0.1 * (lua_Number)(p < 0 ? p + 3600 : p));	\
                     return 1;						\
                   })							\
-    F(motor_speed, {							\
+    F(motor_speed, { lua_events_before_wait();							\
                     uint8_t s[2];					\
                     nezha2_send(L, 0, 71, 0, 245, 0);			\
                     uBit.sleep(3);					\
@@ -1537,7 +1573,8 @@ static bool radio_one(uint8_t kind, const char *body, int len)
                     return 1;						\
                   })							\
 /* connect(friendlyName, timeout_ms) -> boolean */			\
-    F(connect,    { const char *them = radio_name(L, 1);		\
+    F(connect,    { lua_events_before_wait();				\
+                    const char *them = radio_name(L, 1);		\
                     int timeout = luaL_optint(L, 2, RADIO_TIMEOUT);	\
                     char hello[RADIO_NAME * 2];				\
                     uint8_t link = (uint8_t)(uBit.random(255) + 1);	\
@@ -1562,7 +1599,7 @@ static bool radio_one(uint8_t kind, const char *body, int len)
 /* tx(message) -> boolean
  * The message goes piece by piece, each taken before the
  * next one leaves. */							\
-    F(tx,         { size_t len;						\
+    F(tx,         { lua_events_before_wait(); size_t len;		\
                     const char *msg = luaL_checklstring(L, 1, &len);	\
                     size_t sent = 0;					\
                     if (radio_link == 0) {				\
@@ -1620,7 +1657,8 @@ static bool radio_one(uint8_t kind, const char *body, int len)
                   })							\
 /* close() -- the far end is told that the link is over, and
  * this end drops it */							\
-    F(close,      { if (radio_link != 0) {				\
+    F(close,      { lua_events_before_wait();				\
+                    if (radio_link != 0) {				\
                       radio_one(RADIO_BYE, NULL, 0);			\
                       radio_drop();					\
                     }							\
@@ -1642,7 +1680,8 @@ static bool radio_one(uint8_t kind, const char *body, int len)
 /* scan() -> {friendlyName = boolean}: the boards whose
  * beacons are heard within three of the longest gaps, each
  * true if it waits for this board, false if for another */		\
-    F(scan,       { const char *us = microbit_friendly_name();		\
+    F(scan,       { lua_events_before_wait();				\
+                    const char *us = microbit_friendly_name();		\
                     uint8_t body[RADIO_BODY];				\
                     int len;						\
                     uint64_t until = uBit.systemTime() + RADIO_SILENCE;	\
@@ -1900,14 +1939,14 @@ static const int digitalRJ[] = { 8, 12, 14, 16 };
                     return 1;						\
                   })							\
 /* colorRGB() -> red, green, blue and clear light as measured */	\
-   F(colorRGB,    { uint16_t light[4];					\
+   F(colorRGB,    { lua_events_before_wait(); uint16_t light[4];	\
                     color_light(L, light);				\
                     for (int i = 0; i < 4; i++)				\
                       lua_pushinteger(L, light[i]);			\
                     return 4;						\
                   })							\
 /* colorHSV() -> hue in degrees, saturation, value 1 for white */	\
-   F(colorHSV,    { float hsv[3];					\
+   F(colorHSV,    { lua_events_before_wait(); float hsv[3];		\
                     color_hsv(L, hsv);				\
                     for (int i = 0; i < 3; i++)				\
                       lua_pushnumber(L, hsv[i]);			\
@@ -1915,7 +1954,7 @@ static const int digitalRJ[] = { 8, 12, 14, 16 };
                   })							\
 /* color() -> 1 blue, 2 red, 3 magenta, 4 green, 5 cyan, 6 yellow,	\
    7 white, or 0 */							\
-   F(color,       { float hsv[3];					\
+   F(color,       { lua_events_before_wait(); float hsv[3];		\
                     color_hsv(L, hsv);				\
                     lua_pushinteger(L, color_number(hsv));		\
                     return 1;						\
@@ -2011,15 +2050,6 @@ LUA_TPBOT2_FUNCTIONS
 #define F(name, body) static int l_nezha2_##name(lua_State *L) body
 LUA_NEZHA2_FUNCTIONS
 #undef F
-
-// One entry per public name of an API namespace: a method (func set) or an
-// event constant (func NULL, value set). Kept in flash; the namespace tables
-// reference these arrays and materialise entries on first access.
-typedef struct {
-  const char *name;
-  lua_CFunction func;
-  lua_Integer value;
-} LuaApi;
 
 #define F(name, body) {#name, l_##name, 0},
 #define C(n)          {#n, NULL, (lua_Integer)(n)},
@@ -2117,204 +2147,99 @@ static const LuaApi l_nezha2[] = {
 };
 #undef F
 
-// Resolve a missing field on an API namespace table. Upvalue 1 is the
-// namespace's LuaApi array. The first matching entry is materialised (a C
-// closure for a method, an integer for a constant) and cached in the table, so
-// only names that are actually used ever allocate.
-static int l_lazy_index(lua_State *L) {
-  const char *key = (lua_type(L, 2) == LUA_TSTRING) ? lua_tostring(L, 2) : NULL;
-  if (key != NULL) {
-    const LuaApi *e = (const LuaApi *)lua_touserdata(L, lua_upvalueindex(1));
-    for (; e->name != NULL; e++) {
-      if (strcmp(e->name, key) == 0) {
-        if (e->func != NULL)
-          lua_pushcfunction(L, e->func);
-        else
-          lua_pushinteger(L, e->value);
-        lua_pushvalue(L, 2);    // key
-        lua_pushvalue(L, -2);   // value
-        lua_rawset(L, 1);       // table[key] = value (cache it)
-        return 1;
-      }
-    }
-  }
-  return 0;
-}
-
-// Give the table at absolute index idx the lazy __index over api.
-static void lua_set_lazy_index(lua_State *L, int idx, const LuaApi *api) {
-  lua_newtable(L);
-  lua_pushlightuserdata(L, (void *)api);
-  lua_pushcclosure(L, l_lazy_index, 1);
-  lua_setfield(L, -2, "__index");
-  lua_setmetatable(L, idx);
-}
-
-
-// module(), from lua-5.1.5/src/loadlib.c
-
-static void setfenv (lua_State *L) {
-  lua_Debug ar;
-  if (lua_getstack(L, 1, &ar) == 0 ||
-      lua_getinfo(L, "f", &ar) == 0 ||  /* get calling function */
-      lua_iscfunction(L, -1))
-    luaL_error(L, LUA_QL("module") " not called from a Lua function");
-  lua_pushvalue(L, -2);
-  lua_setfenv(L, -2);
-  lua_pop(L, 1);
-}
-
-
-static void dooptions (lua_State *L, int n) {
-  int i;
-  for (i = 2; i <= n; i++) {
-    lua_pushvalue(L, i);  /* get option (a function) */
-    lua_pushvalue(L, -2);  /* module */
-    lua_call(L, 1, 0);
-  }
-}
-
-
-static void modinit (lua_State *L, const char *modname) {
-  const char *dot;
-  lua_pushvalue(L, -1);
-  lua_setfield(L, -2, "_M");  /* module._M = module */
-  lua_pushstring(L, modname);
-  lua_setfield(L, -2, "_NAME");
-  dot = strrchr(modname, '.');  /* look for last dot in module name */
-  if (dot == NULL) dot = modname;
-  else dot++;
-  /* set _PACKAGE as package name (full module name minus last part) */
-  lua_pushlstring(L, modname, dot - modname);
-  lua_setfield(L, -2, "_PACKAGE");
-}
-
-
-/* push the module's table, creating it (and _LOADED[modname]) if needed */
-static void push_module (lua_State *L, const char *modname) {
-  lua_getfield(L, LUA_REGISTRYINDEX, "_LOADED");
-  lua_getfield(L, -1, modname);  /* get _LOADED[modname] */
-  if (!lua_istable(L, -1)) {  /* not found? */
-    lua_pop(L, 1);  /* remove previous result */
-    /* try global variable (and create one if it does not exist) */
-    if (luaL_findtable(L, LUA_GLOBALSINDEX, modname, 1) != NULL)
-      luaL_error(L, "name conflict for module " LUA_QS, modname);
-    lua_pushvalue(L, -1);
-    lua_setfield(L, -3, modname);  /* _LOADED[modname] = new table */
-  }
-  lua_remove(L, -2);  /* remove _LOADED */
-  /* check whether table already has a _NAME field */
-  lua_getfield(L, -1, "_NAME");
-  if (!lua_isnil(L, -1))  /* is table an initialized module? */
-    lua_pop(L, 1);
-  else {  /* no; initialize it */
-    lua_pop(L, 1);
-    modinit(L, modname);
-  }
-}
-
-
-static int ll_module (lua_State *L) {
-  const char *modname = luaL_checkstring(L, 1);
-  int n = lua_gettop(L);  /* number of arguments */
-  push_module(L, modname);
-  lua_pushvalue(L, -1);
-  setfenv(L);
-  dooptions(L, n);
-  return 0;
-}
-
-
-// Modules
-//
-// Nothing is loaded before the embedded script runs. require(name)
-// makes a module from the list below the first time it is asked for:
-// its table is made as module() makes it, so microbit.audio lands in
-// microbit.audio, and gets the lazy __index over the module's API.
-// A parent made on the way (microbit, for microbit.audio) is a plain
-// table; requiring it later gives that same table its API.
-
-// A module require() can make: its name, its API, and what else its first
-// require does, if anything.
-typedef struct {
-  const char *name;
-  const LuaApi *api;
-  void (*open)(lua_State *L);
-} LuaModule;
-
+// The modules require() makes (source/lua-modules.c). tpbot's first
+// require also sets the robot commands that are globals (source/tpbot.c).
 static const LuaModule lua_modules[] = {
-  {"microbit",               l_microbit},
-  {"microbit.display",       l_display},
-  {"microbit.accelerometer", l_accelerometer},
-  {"microbit.compass",       l_compass},
-  {"microbit.audio",         l_audio},
-  {"microbit.io",            l_io},
-  {"microbit.serial",        l_serial},
-  {"microbit.i2c",           l_i2c},
-  {"microbit.radio",         l_radio},
+  {"microbit",               l_microbit,      NULL},
+  {"microbit.display",       l_display,       NULL},
+  {"microbit.accelerometer", l_accelerometer, NULL},
+  {"microbit.compass",       l_compass,       NULL},
+  {"microbit.audio",         l_audio,         NULL},
+  {"microbit.io",            l_io,            NULL},
+  {"microbit.serial",        l_serial,        NULL},
+  {"microbit.i2c",           l_i2c,           NULL},
+  {"microbit.radio",         l_radio,         NULL},
 #if CONFIG_ENABLED(DEVICE_BLE)
-  {"microbit.ble.uart",      l_ble_uart},
+  {"microbit.ble.uart",      l_ble_uart,      NULL},
 #endif
-  {"planetx",                l_planetx},
-  {"tpbot",                  l_tpbot, tpbot_register_globals},
-  {"tpbot2",                 l_tpbot2},
-  {"nezha2",                 l_nezha2},
-  {NULL, NULL}
+  {"planetx",                l_planetx,       NULL},
+  {"tpbot",                  l_tpbot,         tpbot_register_globals},
+  {"tpbot2",                 l_tpbot2,        NULL},
+  {"nezha2",                 l_nezha2,        NULL},
+  {NULL, NULL, NULL}
 };
 
-static int l_require(lua_State *L) {
-  const char *name = luaL_checkstring(L, 1);
-  lua_getfield(L, LUA_REGISTRYINDEX, "_LOADED");
-  lua_getfield(L, -1, name);
-  if (lua_toboolean(L, -1)) return 1;
-  const LuaModule *m = lua_modules;
-  while (m->name != NULL && strcmp(m->name, name) != 0) m++;
-  if (m->name == NULL)
-    return luaL_error(L, "module " LUA_QS " not found", name);
-  push_module(L, name);
-  lua_set_lazy_index(L, lua_gettop(L), m->api);
-  if (m->open != NULL)
-    m->open(L);
-  return 1;
-}
-
-
-// package, module and require: all there is before the script runs.
-// package.loaded is the registry's _LOADED, which module() relies on.
 void register_lua_modules(lua_State *L) {
   lua_pushcfunction(L, push_text);
   push_text_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-  lua_newtable(L);                                    // package
-  lua_getfield(L, LUA_REGISTRYINDEX, "_LOADED");
-  lua_setfield(L, -2, "loaded");
-  lua_setglobal(L, "package");
-  lua_register(L, "module", ll_module);
-  lua_register(L, "require", l_require);
+  lua_modules_open(L, lua_modules);
 }
 
-static lua_State *lua_state;
+// The board's heap, for what the firmware makes when first needed
+extern "C" void *board_alloc(size_t size) {
+  return malloc(size);
+}
+
+extern "C" void board_free(void *p) {
+  free(p);
+}
+
+// What source/lua-events.c needs of the board
+extern "C" void lua_events_show_error(const char *message, bool wait) {
+  if (wait)
+    uBit.display.scroll(message);
+  else
+    uBit.display.scrollAsync(message);
+}
+
+// Whether the serial port is the USB one, the Compy's console: a program
+// may redirect it to pins of its own, to drive another device
+bool port_is_console = true;
+
+void port_mistake(const char *what, const char *message) {
+  static const char NEWLINE[] = "\r\n";
+  uBit.serial.send((uint8_t *)NEWLINE, sizeof NEWLINE - 1, SYNC_SLEEP);
+  uBit.serial.send((uint8_t *)what, strlen(what), SYNC_SLEEP);
+  uBit.serial.send((uint8_t *)message, strlen(message), SYNC_SLEEP);
+  uBit.serial.send((uint8_t *)NEWLINE, sizeof NEWLINE - 1, SYNC_SLEEP);
+}
+
+// A handler's mistake goes to the console, and never into the stream of a
+// device a program has put on the port
+extern "C" void lua_events_port_error(const char *what,
+                                      const char *message) {
+  if (port_is_console)
+    port_mistake(what, message);
+}
+
+extern "C" bool lua_events_arm_port(void) {
+  uBit.serial.eventAfter(1, ASYNC);
+  return uBit.serial.isReadable() == 1;
+}
+
+extern "C" uint32_t lua_events_stack_used(void) {
+  return stack_probe_current();
+}
+
+extern "C" uint32_t lua_events_stack_region(void) {
+  return stack_probe_region();
+}
+
+extern "C" uint32_t lua_events_now(void) {
+  return (uint32_t)uBit.systemTime();
+}
+
+extern "C" void lua_events_pause(uint32_t ms) {
+  uBit.sleep(ms);
+}
 
 // Runs in a dedicated fiber (spawned by on_codal_event).  Has a full
 // fiber stack so lua_pcall won't overflow the idle or interrupt stacks.
 static void lua_event_handler_fiber(void *arg) {
-  codal::Event e = *(codal::Event *)arg;
-  delete (codal::Event *)arg;
-
-  lua_getglobal(lua_state, "on_event");
-  if (!lua_isfunction(lua_state, -1)) {
-    lua_pop(lua_state, 1);
-    return;
-  }
-  lua_pushinteger(lua_state, e.source);
-  lua_pushinteger(lua_state, e.value);
-  lua_pushinteger(lua_state, e.timestamp);
-  if (lua_pcall(lua_state, 3, 0, 0) != LUA_OK) {
-    const char *err = lua_tostring(lua_state, -1);
-    if (err) {
-      uBit.display.scroll(err);
-    }
-    lua_pop(lua_state, 1);
-  }
+  codal::Event *event = (codal::Event *)arg;
+  LuaEvent e = { event->source, event->value, (uint32_t)event->timestamp };
+  delete event;
+  lua_event_arrived(e);
 }
 
 // Called by the MessageBus for every event matching DEVICE_ID_ANY /
@@ -2342,17 +2267,54 @@ static void lua_event_handler_fiber(void *arg) {
 // internal noise — no Lua script ever handles them — but every one would
 // otherwise spawn a Lua fiber (two heap allocations plus a lua_pcall).
 // Filtering removes ~99% of the per-tick/per-char fiber traffic.
+//
+// The scheduler's tick is also the time to try again with the port's
+// event, when it found no fiber while Lua was free: the port is armed for
+// one event at a time, so nothing else would bring the REPL what was typed.
+static void hand_on(codal::Event e) {
+  codal::Event *copy = new codal::Event(e);
+  if (create_fiber(lua_event_handler_fiber, copy) == NULL) {
+    LuaEvent missed = { e.source, e.value, (uint32_t)e.timestamp };
+    delete copy;
+    // the port is armed for one event at a time: this one is not lost
+    lua_events_missed(missed);
+  }
+}
+
 static void on_codal_event(codal::Event e, void *arg) {
   (void)arg;
+  if (e.source == DEVICE_ID_SCHEDULER && e.value == DEVICE_SCHEDULER_EVT_TICK
+      && lua_events_take_stranded_port()) {
+    hand_on(codal::Event(DEVICE_ID_SERIAL, CODAL_SERIAL_EVT_HEAD_MATCH,
+                         codal::CREATE_ONLY));
+    return;
+  }
   if (e.source == DEVICE_ID_SCHEDULER || e.source == DEVICE_ID_COMPONENT ||
       e.source == DEVICE_ID_NOTIFY || e.source == DEVICE_ID_NOTIFY_ONE)
     return;
-  codal::Event *copy = new codal::Event(e);
-  create_fiber(lua_event_handler_fiber, copy);
+  if (lua_event_is_noise(e.source, e.value))
+    return;
+  hand_on(e);
 }
 
+// Events that only fill the waiting line: the port saying it has data
+// after every character, or that it is full, and a scroll that has ended.
+// Nothing in the firmware's script reads them.
+static const LuaEventId lua_noise_events[] = {
+  { DEVICE_ID_SERIAL, CODAL_SERIAL_EVT_DATA_RECEIVED },
+  { DEVICE_ID_SERIAL, CODAL_SERIAL_EVT_RX_FULL },
+  { DEVICE_ID_DISPLAY, DISPLAY_EVT_ANIMATION_COMPLETE },
+};
+
+// The port's event that the REPL waits for, and the noise
+static const LuaEventsConfig lua_events_config = {
+  { DEVICE_ID_SERIAL, CODAL_SERIAL_EVT_HEAD_MATCH },
+  lua_noise_events,
+  sizeof lua_noise_events / sizeof lua_noise_events[0]
+};
+
 void register_lua_event_listener(lua_State *L) {
-  lua_state = L;
+  lua_events_open(L, &lua_events_config);
   uBit.messageBus.listen(DEVICE_ID_ANY, DEVICE_EVT_ANY,
                          on_codal_event, NULL,
                          MESSAGE_BUS_LISTENER_IMMEDIATE);

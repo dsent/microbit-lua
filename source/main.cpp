@@ -27,6 +27,7 @@ extern const LuaMeta __lua_meta;
 #include "MicroBitUARTService.h"
 #endif
 #include "codal-lua.h"
+#include "lua-events.h"
 #include "stack-probe.h"
 
 // Stack high-water reporting (see stack-probe.c). The probe is always active;
@@ -64,6 +65,13 @@ static void lua_mem_report(lua_State *L, const char *tag) {
 #endif
 
 MicroBit uBit;
+
+// The memory reports between loading the script at boot and running it
+static void boot_stage(lua_State *L, const char *name) {
+    (void)L;
+    LUA_MEM_REPORT(L, name);
+    report_stack(name);
+}
 
 #if CONFIG_ENABLED(DEVICE_BLE)
 // UART service (Nordic UART over BLE)
@@ -117,7 +125,14 @@ int main() {
 
     // Enlarge the serial RX ring (default 20) so pasted lines don't overflow
     // before the REPL drain fiber catches up. 254 is the uint8_t API maximum.
-    uBit.serial.setRxBufferSize(254);
+    // It holds what is typed while the script at boot runs, too.
+    if (uBit.serial.setRxBufferSize(254) != DEVICE_OK)
+        DMESG("serial RX ring left at its default size");
+
+    // The first byte out of the port after a reset can be lost or garbled
+    // on its way to the computer. A line break of its own takes that byte,
+    // so the greeting arrives whole.
+    uBit.serial.send("\r\n");
 
 #if CONFIG_ENABLED(DEVICE_BLE)
     setup_ble_uart_service();
@@ -164,33 +179,8 @@ int main() {
 
     LUA_MEM_REPORT(L, "api");
 
-    if (luaL_loadbuffer(L, (const char*)__lua_meta.start,
-                        __lua_meta.size, "embedded") == LUA_OK)
-    {
-        LUA_MEM_REPORT(L, "loaded");
-        report_stack("loaded");
-
-        // Release the parsed chunk's debug arrays before running it.
-        lua_strip_debug(L);
-        LUA_MEM_REPORT(L, "stripped");
-
-        if (lua_pcall(L, 0, LUA_MULTRET, 0) != LUA_OK)
-        {
-            const char *err = lua_tostring(L, -1);
-            uBit.display.scroll("Lua error!");
-            if (err) {
-                uBit.display.scroll(err);
-            }
-        }
-    }
-    else
-    {
-        const char* err = lua_tostring(L, -1);
-        uBit.display.scroll("Compile error: ");
-        if (err) {
-            uBit.display.scroll(err);
-        }
-    }
+    lua_events_boot_program(L, (const char*)__lua_meta.start,
+                            __lua_meta.size, boot_stage);
 
     LUA_MEM_REPORT(L, "ran");
     report_stack("ran");
