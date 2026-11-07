@@ -337,27 +337,40 @@ set(CMAKE_EXE_EXPORTS_CXX_FLAG "")
 set(LUA_VERSION 5.1.5)
 set(LUA_TARBALL lua-${LUA_VERSION}.tar.gz)
 set(LUA_URL https://www.lua.org/ftp/${LUA_TARBALL})
+# lua.org is at times slow to accept connections; a download that fails or
+# takes over a minute falls back at once to this byte-identical copy
+set(LUA_MIRROR_URL https://github.com/dsent/microbit-lua/releases/download/mirror-lua-${LUA_VERSION}/${LUA_TARBALL})
+set(LUA_SHA256 2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333)
 
 set(LUA_ARCHIVE ${CMAKE_SOURCE_DIR}/${LIB_DEST}/${LUA_TARBALL})
 # The sources the build compiles, made by lua_patch_apply() below. A
 # libraries/lua-5.1.5 left by older builds is no longer read and can be deleted.
 set(LUA_SRC_DIR ${CMAKE_BINARY_DIR}/lua-${LUA_VERSION}/src)
 
-# download tarball if missing; libraries/ keeps it across clean builds
+# download tarball if missing; libraries/ keeps it across clean builds. The
+# hash is checked here rather than with EXPECTED_HASH, which reports a failed
+# download as a configure error even when the next URL succeeds.
 if(NOT EXISTS ${LUA_ARCHIVE})
-    message(STATUS "Downloading Lua ${LUA_VERSION}...")
-    file(DOWNLOAD
-        ${LUA_URL}
-        ${LUA_ARCHIVE}
-        SHOW_PROGRESS
-        EXPECTED_HASH SHA256=2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333
-        STATUS _lua_download
-    )
-    if(NOT _lua_download MATCHES "^0;")
-        # a configure goes on past the download error, which leaves an
-        # empty file; remove it so the next build downloads again
-        file(REMOVE ${LUA_ARCHIVE})
-        message(FATAL_ERROR "Could not download ${LUA_URL}")
+    foreach(_lua_url ${LUA_URL} ${LUA_MIRROR_URL})
+        message(STATUS "Downloading Lua ${LUA_VERSION} from ${_lua_url}")
+        file(DOWNLOAD ${_lua_url} ${LUA_ARCHIVE}.part
+            SHOW_PROGRESS
+            TIMEOUT 60
+            STATUS _lua_download
+        )
+        if(_lua_download MATCHES "^0;")
+            file(SHA256 ${LUA_ARCHIVE}.part _lua_sha256)
+            if(_lua_sha256 STREQUAL LUA_SHA256)
+                file(RENAME ${LUA_ARCHIVE}.part ${LUA_ARCHIVE})
+                break()
+            endif()
+            set(_lua_download "SHA-256 ${_lua_sha256}, expected ${LUA_SHA256}")
+        endif()
+        file(REMOVE ${LUA_ARCHIVE}.part)
+        message(STATUS "Could not download ${_lua_url}: ${_lua_download}")
+    endforeach()
+    if(NOT EXISTS ${LUA_ARCHIVE})
+        message(FATAL_ERROR "Could not download Lua ${LUA_VERSION}")
     endif()
 endif()
 
