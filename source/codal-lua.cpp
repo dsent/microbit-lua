@@ -14,6 +14,7 @@ extern "C" {
 #include "Event.h"
 #include "I2C.h"
 #include "neopixel.h"
+#include "nrfx.h"
 #include "stack-probe.h"
 #include "compass-track.h"
 #include "robot-hold.h"
@@ -35,6 +36,23 @@ I2C &i2c = uBit.i2c;
 #define FIRMWARE_VERSION_MARK "microbit-lua firmware "
 extern "C" __attribute__((used))
 const char firmware_version_mark[] = FIRMWARE_VERSION_MARK FIRMWARE_VERSION;
+
+// The I2C hardware sends by DMA, which reaches RAM only. nrfx's own I2C
+// driver refuses data elsewhere; CODAL's does not check, and sends whatever
+// the DMA reads there while it reports success. So every write the
+// firmware makes with bytes of its own goes through here, and data outside
+// RAM, a constant table or a string literal in flash, goes over from a copy
+// on the stack. CODAL's own writes, the register number readRegister sends
+// and the onboard sensors' drivers, come from buffers of theirs in RAM.
+// Kept out of line: inlined into each caller, it took 328 bytes more flash.
+static __attribute__((noinline))
+int i2c_write(int address, const void *data, int length) {
+  if (nrfx_is_in_ram(data))
+    return i2c.write(address, (uint8_t *)data, length);
+  uint8_t copy[length + 1];  // + 1: an empty write has a buffer too
+  memcpy(copy, data, length);
+  return i2c.write(address, copy, length);
+}
 
 // Some arguments are as a rule constants in a program: an image's size and
 // data, a pin or port number, a byte count to read. luaL_constcheck checks
@@ -1173,7 +1191,7 @@ extern MicroBitUARTService *uart;
                     size_t length;					\
                     char *data =					\
                       (char *)luaL_checklstring(L, 2, &length);		\
-                    if(i2c.write(address, data, length)			\
+                    if(i2c_write(address, data, length)			\
                       == MICROBIT_OK){					\
                       return 0;						\
                     } else {						\
@@ -1192,7 +1210,7 @@ static uint8_t robot_byte(lua_State *L, int narg, int value) {
 }
 
 static int robot_send(lua_State *L, uint8_t *data, int length) {
-  if (i2c.write(32, data, length) != MICROBIT_OK)
+  if (i2c_write(32, data, length) != MICROBIT_OK)
     return luaL_error(L, "i2c write error");
   return 0;
 }
@@ -1855,16 +1873,14 @@ static const uint8_t paj7620_setup[] = {
 };
 
 // Asleep, the chip leaves the first access unanswered, wakes on it and
-// takes settings 400 us later. The I2C hardware takes what it sends by
-// DMA, which reaches RAM only, so the settings go over from a copy.
-// Gesture flags raised before the setup mean nothing and are read away.
+// takes settings 400 us later. Gesture flags raised before the setup mean
+// nothing and are read away.
 static bool paj7620_init() {
-  uint8_t bank0[] = { 0xEF, 0x00 }, flags[2], setup[sizeof paj7620_setup];
-  i2c.write(PAJ7620, bank0, 2);
+  uint8_t bank0[] = { 0xEF, 0x00 }, flags[2];
+  i2c_write(PAJ7620, bank0, 2);
   target_wait_us(400);
-  memcpy(setup, paj7620_setup, sizeof setup);
-  for (uint8_t *run = setup; *run; run += *run + 1)
-    if (i2c.write(PAJ7620, run + 1, *run) != MICROBIT_OK)
+  for (const uint8_t *run = paj7620_setup; *run; run += *run + 1)
+    if (i2c_write(PAJ7620, run + 1, *run) != MICROBIT_OK)
       return false;
   return i2c.readRegister(PAJ7620, 0x43, flags, 2) == MICROBIT_OK;
 }
@@ -1901,7 +1917,7 @@ static uint8_t color_sensor;
 
 static bool color_write(uint8_t sensor, uint8_t reg, uint8_t value) {
   uint8_t data[] = { reg, value };
-  return i2c.write(sensor, data, 2) == MICROBIT_OK;
+  return i2c_write(sensor, data, 2) == MICROBIT_OK;
 }
 
 // Red, green, blue and clear light from the sensor found.
