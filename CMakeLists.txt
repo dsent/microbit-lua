@@ -429,9 +429,11 @@ lua_patch(luaconf.h luaconf-float.patch)
 lua_patch(luaconf.h luaconf-number-text.patch)
 lua_patch(lstrlib.c lstrlib-number-text.patch)
 lua_patch_apply()
-# Application sources build at -O2; the number files are smaller at -Os.
+# Application sources build at -O2; the number files and the TPBot driver,
+# which waits on the I2C bus, are smaller at -Os.
 set_source_files_properties("${CMAKE_SOURCE_DIR}/source/lua-format.c"
     "${CMAKE_SOURCE_DIR}/source/lua-number2str.c"
+    "${CMAKE_SOURCE_DIR}/source/tpbot.c"
     PROPERTIES COMPILE_OPTIONS "-Os")
 # The version microbit.version() reports, which build.py hands over in the
 # environment. Only codal-lua.cpp takes it, so a new version rebuilds the

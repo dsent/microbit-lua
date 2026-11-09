@@ -185,6 +185,44 @@ ignored.
 `tests/lua-format-tests.sh` checks it with the host's C compiler.
 
 
+## TPBot
+
+`require("tpbot")` drives a TPBot Classic and `require("tpbot2")` a TPBot
+Edu (`source/tpbot.c`). Each command sends its robot's I2C frame and
+returns.
+
+- `tpbot`: `set_car_light(r, g, b)`, `set_motors_speed(left, right)`,
+  `info()` and `get_distance()`.
+- `tpbot2`: `set_car_light(r, g, b)`, `set_motors_speed(left, right)`,
+  `run_distance(mm)`, `turn(degrees)`, `done()`, `info()` and
+  `get_distance()`.
+
+- Speeds go from -255 to 255 and light values from 0 to 255; a fraction is
+  dropped. `set_motors_speed` runs the motors until the next motor command.
+- `run_distance` and `turn` return once the frame is sent, and the Edu
+  drives or turns on; a distance or a turn sent before it is done cuts it
+  short. A negative distance drives backward, and a positive angle turns
+  left. A distance or an angle of 65536 or more is refused, and one under 1
+  does nothing. An Edu sent 1 or 2 mm drives on, and sent 1 degree spins on,
+  without stopping by itself, until `set_motors_speed(0, 0)` stops it; a
+  turn under 5 degrees happens only some of the time.
+- `done()` is true once the Edu's last distance or turn is over, or a motor
+  command has stopped it. It reads from the robot, and a TPBot Classic that
+  is read from holds the bus until it is switched off and on, so a program
+  that may meet one asks `info()` first.
+- `info()` returns a table: `connected` is true when a robot answers, and
+  then `robot` is `"TPBot Classic"` or `"TPBot Edu"`.
+- `get_distance()` answers in mm, or `nil` when nothing within about 4 m
+  echoes back.
+- A switched-off Edu holds the bus. A command then waits about 5 s
+  (`NRF52I2C_TIMEOUT10US` in `codal.json`; CODAL's default is 14 s) and fails
+  with "The robot does not answer"; `info` waits as long and answers
+  `connected` false. `get_distance` does not use the bus.
+
+`tests/tpbot-host-tests.sh` checks every command over a stand-in bus: the
+bytes each writes, what it returns and the words of each error.
+
+
 # Where
 
 The project's home is at

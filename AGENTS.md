@@ -28,9 +28,11 @@
 - The build itself needs no host Lua. `tests/hextract-tests.sh` does: `utils/hextract`
   pins its interpreter with `#!/usr/bin/env lua5.1`, and the harness runs the script
   directly, so only the `lua5.1` package is required (no PATH or alternatives setup).
-- `bash tests/cstack-host-tests.sh` tests `source/lua-cstack.c`'s limit, and
-  `bash tests/lua-limits-host-tests.sh` the patched Lua's call limits; they
-  need `cc` and the Lua tarball a firmware build leaves in `libraries/`.
+- `bash tests/cstack-host-tests.sh` tests `source/lua-cstack.c`'s limit,
+  `bash tests/lua-limits-host-tests.sh` the patched Lua's call limits, and
+  `bash tests/tpbot-host-tests.sh` the frames `source/tpbot.c` writes over a
+  stand-in bus; they need `cc` and the Lua tarball a firmware build leaves in
+  `libraries/`.
 - CI runs every `tests/*-tests.sh`: `hextract-tests.sh` in the build job, the
   rest in a second job on a plain runner, with the tarball the build fetched,
   once the build job has passed. A host test named `tests/<name>-tests.sh`
