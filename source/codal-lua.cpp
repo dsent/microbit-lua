@@ -16,6 +16,7 @@ extern "C" {
 #include "neopixel.h"
 #include "stack-probe.h"
 #include "compass-track.h"
+#include "robot-hold.h"
 
 extern MicroBit uBit;
 
@@ -421,12 +422,15 @@ static void route(lua_State *L, int device, lua_CFunction handle) {
   lua_pop(L, 2);
 }
 
+static void hold_sample();
+
 static void track_loop(void *run) {
   while ((intptr_t)run == circle_run) {
     Sample3D s = uBit.compass.getSample();
     float raw[3] = { (float)s.x, (float)s.y, (float)s.z };
     int e = track_sample(&circle, raw);
     if (e) Event(DEVICE_ID_TRACK, e);
+    hold_sample();
     uBit.sleep(TRACK_PERIOD);
   }
 }
@@ -545,6 +549,96 @@ static int north(lua_State *L) {
 /* north() -> x, y, z of the unit vector to magnetic north, perpendicular
  * to up, or nothing while there is no circle or the field is off it */	\
     F(north,      { return north(L); })
+
+// robot.hold() steers after each compass sample of the track. The wheels'
+// speeds go out in an event that the script's handler table routes to
+// robot.drive(left, right); the end of a hold, to robot.done(lost).
+#define DEVICE_ID_ROBOT 3101
+#define ROBOT_EVT_DRIVE 1
+#define ROBOT_EVT_DONE 2
+#define ROBOT_EVT_LOST 3
+
+static Hold hold;
+static int holding;
+static float wheels[2];         // the speeds the drive event carries
+
+// Stop the wheels and, unless the script stopped the hold, report its end
+static void unhold(int end) {
+  holding = 0;
+  wheels[0] = wheels[1] = 0;
+  Event(DEVICE_ID_ROBOT, ROBOT_EVT_DRIVE);
+  if (end) Event(DEVICE_ID_ROBOT, end);
+}
+
+// The wheels stand while the field is off the circle; the hold ends when
+// its time is up or the circle is gone
+static void hold_sample() {
+  float n[3];
+  if (!holding) return;
+  if (!circle.found) {
+    unhold(ROBOT_EVT_LOST);
+    return;
+  }
+  if (!track_north(&circle, n)) {
+    wheels[0] = wheels[1] = 0;
+  } else if (!hold_step(&hold, circle.up, n, TRACK_PERIOD / 1000.0f, wheels)) {
+    unhold(ROBOT_EVT_DONE);
+    return;
+  }
+  Event(DEVICE_ID_ROBOT, ROBOT_EVT_DRIVE);
+}
+
+// Handler for the robot's events: calls robot.drive(left, right) or
+// robot.done(lost), if the script has defined it
+static int robot_event(lua_State *L) {
+  int e = luaL_checkint(L, 1);
+  lua_getglobal(L, "robot");
+  lua_getfield(L, -1, e == ROBOT_EVT_DRIVE ? "drive" : "done");
+  if (!lua_isfunction(L, -1)) return 0;
+  if (e == ROBOT_EVT_DRIVE) {
+    lua_pushinteger(L, lroundf(wheels[0]));
+    lua_pushinteger(L, lroundf(wheels[1]));
+    lua_call(L, 2, 0);
+  } else {
+    lua_pushboolean(L, e == ROBOT_EVT_LOST);
+    lua_call(L, 1, 0);
+  }
+  return 0;
+}
+
+static int robot_hold(lua_State *L) {
+  float forward[3], n[3];
+  for (int i = 0; i < 3; i++) forward[i] = luaL_checknumber(L, i + 1);
+  float c = luaL_checknumber(L, 4), s = luaL_checknumber(L, 5);
+  float speed = luaL_checknumber(L, 6);
+  int ms = luaL_checkint(L, 7);
+  if (!track_north(&circle, n)) return luaL_error(L, "no circle");
+  route(L, DEVICE_ID_ROBOT, robot_event);
+  if (!hold_start(&hold, circle.up, forward, c, s, speed,
+                  ms ? ms / TRACK_PERIOD : -1, n))
+    return luaL_argerror(L, 1, "forward is along up");
+  holding = 1;
+  return 0;
+}
+
+#define LUA_ROBOT_FUNCTIONS						\
+/* pid(kp, ki, kd) -- the gains of the heading hold, for the robot as it is \
+ * built */								\
+    F(pid,        { hold.kp = luaL_checknumber(L, 1);			\
+                    hold.ki = luaL_checknumber(L, 2);			\
+                    hold.kd = luaL_checknumber(L, 3);			\
+                    return 0;						\
+                  })							\
+/* hold(fx, fy, fz, c, s, speed, ms) -- turn to and hold the heading	\
+ * (cos, sin from magnetic north towards east) at mean wheel speed for ms \
+ * milliseconds, 0 for no end, with forward (fx, fy, fz) in the board's \
+ * axes; needs the compass's circle. Wheel speeds, here and in		\
+ * drive(left, right), are percent of full speed, -100 to 100 */	\
+    F(hold,       { return robot_hold(L); })				\
+/* stop() -- stop holding and stop the wheels */			\
+    F(stop,       { unhold(0);						\
+                    return 0;						\
+                  })
 
 #define LUA_AUDIO_FUNCTIONS						\
     F(getAudioPin, { lua_pushlightuserdata(L,				\
@@ -2044,6 +2138,10 @@ LUA_I2C_FUNCTIONS
 LUA_TPBOT_FUNCTIONS
 #undef F
 
+#define F(name, body) static int l_robot_##name(lua_State *L) body
+LUA_ROBOT_FUNCTIONS
+#undef F
+
 #define F(name, body) static int l_tpbot2_##name(lua_State *L) body
 LUA_TPBOT2_FUNCTIONS
 #undef F
@@ -2131,6 +2229,13 @@ static const LuaApi l_i2c[] = {
 #define F(name, body) {#name, l_tpbot_##name, 0},
 static const LuaApi l_tpbot[] = {
     LUA_TPBOT_FUNCTIONS
+    {NULL, NULL, 0}
+};
+#undef F
+
+#define F(name, body) {#name, l_robot_##name, 0},
+static const LuaApi l_robot[] = {
+    LUA_ROBOT_FUNCTIONS
     {NULL, NULL, 0}
 };
 #undef F
@@ -2293,6 +2398,7 @@ static const LuaModule lua_modules[] = {
 #endif
   {"planetx",                l_planetx},
   {"tpbot",                  l_tpbot},
+  {"robot",                  l_robot},
   {"tpbot2",                 l_tpbot2},
   {"nezha2",                 l_nezha2},
   {NULL, NULL}
