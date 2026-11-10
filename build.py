@@ -29,6 +29,7 @@ import platform
 import json
 import shutil
 import re
+import subprocess
 from utils.python.codal_utils import system, build, read_json, checkgit, read_config, update, revision, printstatus, status, get_next_version, lock, delete_build_folder, generate_docs, print_build_id, write_buildinfo
 
 parser = optparse.OptionParser(usage="usage: %prog target-name-or-url [options]", description="This script manages the build system for a codal device. Passing a target-name generates a codal.json for that devices, to list all devices available specify the target-name as 'ls'.")
@@ -47,10 +48,48 @@ parser.add_option('-d', '--dev', dest='dev', action="store_true", help='enable d
 parser.add_option('-g', '--generate-docs', dest='generate_docs', action="store_true", help='generate documentation for the current target', default=False)
 parser.add_option('-j', '--parallelism', dest='parallelism', action="store", help='Set the number of parallel threads to build with, if supported', default=10)
 parser.add_option('-n', '--lines', dest='detail_lines', action="store", help="Sets the number of detail lines to output (only relevant to --status)", default=3 )
+parser.add_option('--firmware-version', dest='firmware_version', action="store_true", help='Print the version a build here would carry, and stop', default=False)
 
 (options, args) = parser.parse_args()
 
+def firmware_version():
+    """The version the firmware reports: FIRMWARE_VERSION from the
+    environment when it is not empty, for a build where git cannot see the
+    checkout; else what git describe says of the commit, with "-drift" when
+    a tracked file differs from it or an untracked file sits in source/,
+    which the build compiles too; else "unknown". Only letters, digits and
+    . _ + / : - can go into the firmware's C string, so any other character
+    stops the build."""
+    version = os.environ.get("FIRMWARE_VERSION")
+    if not version:
+        here = os.path.dirname(os.path.abspath(__file__))
+        def git(*args):
+            return subprocess.check_output(
+                ("git",) + args, cwd=here,
+                stderr=subprocess.DEVNULL).decode().strip()
+        try:
+            version = git("describe", "--always", "--dirty=-drift")
+            if not version.endswith("-drift") and git(
+                    "ls-files", "--others", "--exclude-standard", "--",
+                    "source"):
+                version += "-drift"
+        except (OSError, subprocess.CalledProcessError):
+            version = "unknown"
+    if not re.fullmatch(r"[A-Za-z0-9._+/:-]+", version):
+        sys.exit("firmware version %r: only letters, digits and . _ + / : -"
+                 " can go into the firmware; set FIRMWARE_VERSION to one"
+                 " made of them" % version)
+    return version
+
+if options.firmware_version:
+    print(firmware_version())
+    exit(0)
+
 print_build_id()
+
+# CMake reads it from the environment and compiles it into the firmware.
+os.environ["FIRMWARE_VERSION"] = firmware_version()
+print("firmware version: " + os.environ["FIRMWARE_VERSION"], flush=True)
 
 if not os.path.exists("build"):
     os.mkdir("build")

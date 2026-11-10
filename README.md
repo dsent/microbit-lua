@@ -46,11 +46,40 @@ The current directory will be shared with the container under
 
 The build automatically downloads the dependencies into the
 `libraries/` directory when first invoked. The dependencies are listed
-and pinned in `codal.json`.
+in `codal.json`, some at a fixed commit and some following a branch.
 
 You can update them with `./build.py --update`; it should fail loudly
 if there are any pending changes in your checkouts and/or git pulling
 is not a fast-forward.
+
+### Firmware version
+
+`microbit.version()` returns the version the firmware was built as, and
+the REPL's greeting prints it on its third line, `firmware 86c8e16`.
+`build.py` takes it from `git describe --always --dirty=-drift`: the
+commit, or the latest annotated tag and the commits since it, such as
+`v1.0-3-g86c8e16`; a lightweight tag does not count. `-drift` marks a
+tracked file that differs from the commit, or an untracked file in
+`source/`, which the build compiles too. Outside git the version is
+`unknown`. `./build.py --firmware-version` prints it without building.
+
+The version names this repository's tree only. The CODAL libraries in
+`libraries/` are whatever was fetched for the branches `codal.json`
+names, so two builds of one version can hold different CODAL.
+
+A `FIRMWARE_VERSION` in the environment, when not empty, is taken as
+given, for a container where git cannot see the checkout, or refuses it
+as another user's:
+
+```
+podman run --tty --rm --volume "$(pwd)":/workspace --workdir /workspace \
+  -e FIRMWARE_VERSION="$(./build.py --firmware-version)" microbit -c ./build.py
+```
+
+Only letters, digits and `. _ + / : -` can go into the version; any
+other character stops the build. The image holds it after the text
+`microbit-lua firmware `, ended by a zero byte, so a tool can read it
+out of a `.hex` file.
 
 ## Flashing
 

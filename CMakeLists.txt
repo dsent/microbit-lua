@@ -433,6 +433,14 @@ lua_patch_apply()
 set_source_files_properties("${CMAKE_SOURCE_DIR}/source/lua-format.c"
     "${CMAKE_SOURCE_DIR}/source/lua-number2str.c"
     PROPERTIES COMPILE_OPTIONS "-Os")
+# The version microbit.version() reports, which build.py hands over in the
+# environment. Only codal-lua.cpp takes it, so a new version rebuilds the
+# application's own sources, not CODAL; without it the firmware says
+# "unknown".
+if(NOT "$ENV{FIRMWARE_VERSION}" STREQUAL "")
+    set_property(SOURCE "${CMAKE_SOURCE_DIR}/source/codal-lua.cpp" APPEND
+        PROPERTY COMPILE_DEFINITIONS "FIRMWARE_VERSION=\"$ENV{FIRMWARE_VERSION}\"")
+endif()
 
 set(LUA_CORE_SOURCES
     lapi.c lcode.c ldebug.c ldo.c ldump.c lfunc.c lgc.c llex.c lmem.c

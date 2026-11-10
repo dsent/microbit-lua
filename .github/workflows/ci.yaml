@@ -37,8 +37,11 @@ jobs:
           echo "===== Environment ====="
           env
 
-#      - name: Calm down Git
-#        run: git config --global --add safe.directory /__w/maru/maru
+      # The checkout belongs to the runner's user, not the container's, and
+      # git refuses to read it otherwise: build.py asks git for the
+      # firmware's version.
+      - name: Let git read the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Checkout code
         uses: actions/checkout@v4

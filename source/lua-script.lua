@@ -157,7 +157,7 @@ function print(...)
 end
 
 collectgarbage("setpause", 100)
-print("micro:bit\nLua 5.1 REPL")
+print("micro:bit\nLua 5.1 REPL\nfirmware " .. uBit.version())
 
 local function execute(chunk)
   local results = { pcall(chunk) }
