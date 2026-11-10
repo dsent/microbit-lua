@@ -1,0 +1,13 @@
+--- lauxlib.c
++++ lauxlib.c
+@@ -78,6 +78,10 @@
+       lua_pushfstring(L, "%s:%d: ", ar.short_src, ar.currentline);
+       return;
+     }
++    if (ar.currentline == 0) {  /* Lua code whose chunk has no line info */
++      lua_pushfstring(L, "%s: ", ar.short_src);
++      return;
++    }
+   }
+   lua_pushliteral(L, "");  /* else, no information available... */
+ }

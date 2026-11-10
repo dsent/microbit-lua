@@ -262,17 +262,22 @@ end
 -- Where what is typed goes: the console's own session, or the
 -- link while connect() has one open. The port is watched again
 -- only once it is empty: a piece is dealt with before the next
--- one is taken.
+-- one is taken. Then it is looked at once more: a character
+-- that came between the last look and the arming raises no
+-- event, and would wait there for the next key.
 local typed_to = to_console
 
 handler[uBit.DEVICE_ID_SERIAL] = function(value)
   if value == uBit.CODAL_SERIAL_EVT_HEAD_MATCH then
     local text = typing()
-    while #text > 0 do
-      typed_to(text)
+    repeat
+      while #text > 0 do
+        typed_to(text)
+        text = typing()
+      end
+      serial.eventAfterAsync(1)
       text = typing()
-    end
-    serial.eventAfterAsync(1)
+    until #text == 0
   end
 end
 
@@ -407,6 +412,11 @@ local listening = false
 local awaited   -- the board listen() waits for; nil for any
 
 function listen(name)
+  -- said before listening starts: a mistyped name would leave it on, and
+  -- every later listen() would only close the radio
+  if name ~= nil and (type(name) ~= "string" or #name ~= 5) then
+    error("a board name is five letters", 0)
+  end
   awaited = name
   if listening then
     radio.close()
@@ -491,11 +501,10 @@ end
 
 -- Script-level setup (runs once before the main fiber
 -- is released):
--- show prompt, initialise the serial RX buffer, and arm
--- the first per-char head-match event on both transports.
--- After this returns, release_fiber() in main() hands
--- control to the scheduler; on_event() handles all events 
--- from the bus.
+-- show the prompt, then take what was typed while the
+-- script ran, which also arms the port's per-char
+-- head-match event. After this returns, release_fiber() in
+-- main() hands control to the scheduler; on_event() handles
+-- all events from the bus, one at a time.
 serial_session.prompt()
-serial.getCharAsync()
-serial.eventAfterAsync(1)
+handler[uBit.DEVICE_ID_SERIAL](uBit.CODAL_SERIAL_EVT_HEAD_MATCH)
