@@ -23,9 +23,15 @@ extern "C" {
 #define TPBOT2_FUNCTIONS                                \
     X(set_car_light,    tpbot2_set_car_light)           \
     X(set_motors_speed, tpbot2_set_motors_speed)        \
+    X(speed_control,    tpbot2_speed_control)           \
+    X(set_speed,        tpbot2_set_speed)               \
     X(run_distance,     tpbot2_run_distance)            \
     X(turn,             tpbot2_turn)                    \
+    X(pivot,            tpbot2_pivot)                   \
     X(done,             tpbot2_done)                    \
+    X(set_servo,        tpbot2_set_servo)               \
+    X(adjust_motor_speed, tpbot2_adjust_motor_speed)    \
+    X(reset_motor_adjust, tpbot2_reset_motor_adjust)    \
     X(info,             tpbot_info)                     \
     X(get_distance,     tpbot_get_distance)
 
