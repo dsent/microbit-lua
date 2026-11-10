@@ -194,11 +194,14 @@ returns.
 - `tpbot`: `set_car_light(r, g, b)`, `set_motors_speed(left, right)`,
   `info()` and `get_distance()`.
 - `tpbot2`: `set_car_light(r, g, b)`, `set_motors_speed(left, right)`,
-  `run_distance(mm)`, `turn(degrees)`, `done()`, `info()` and
+  `speed_control(left, right)`, `set_speed(mm_per_s)`, `run_distance(mm)`,
+  `turn(degrees)`, `pivot(degrees)`, `done()`, `set_servo(servo, value)`,
+  `adjust_motor_speed()`, `reset_motor_adjust()`, `info()` and
   `get_distance()`.
 
-- Speeds go from -255 to 255 and light values from 0 to 255; a fraction is
-  dropped. `set_motors_speed` runs the motors until the next motor command.
+- A fraction is dropped. `set_motors_speed` takes speeds from -255 to 255,
+  and runs the motors until the next motor command; light values go from 0
+  to 255.
 - `run_distance` and `turn` return once the frame is sent, and the Edu
   drives or turns on; a distance or a turn sent before it is done cuts it
   short. A negative distance drives backward, and a positive angle turns
@@ -206,14 +209,36 @@ returns.
   does nothing. An Edu sent 1 or 2 mm drives on, and sent 1 degree spins on,
   without stopping by itself, until `set_motors_speed(0, 0)` stops it; a
   turn under 5 degrees happens only some of the time.
-- `done()` is true once the Edu's last distance or turn is over, or a motor
-  command has stopped it. It reads from the robot, and a TPBot Classic that
-  is read from holds the bus until it is switched off and on, so a program
-  that may meet one asks `info()` first.
+- `pivot` turns about one wheel, the left one for a positive angle and the
+  right one for a negative angle: the other wheel is given twice the angle a
+  `turn` gives each, as pxt-TPBot's left and right steering do. An angle of
+  32768 or more is refused, and one under 1 does nothing.
+- `speed_control` runs the wheels at speeds in mm/s by the Edu's own speed
+  control, a negative speed backward; pxt-TPBot sends 200 to 500 mm/s, or 0.
+  `set_speed` sets the speed of the Edu's distances and turns in mm/s, and
+  refuses a negative one. A speed of 65536 or more is refused.
+- `set_servo` sets the servo at S1 to S4, numbered 1 to 4, to a value of 0
+  to 255. pxt-TPBot sends 0 to 180: a 180 degree servo's angle, half a 360
+  degree servo's angle, or a continuous servo's speed, with 90 for still.
+- `adjust_motor_speed` starts the Edu's calibration of its motors,
+  pxt-TPBot's "Adjust motor speed". In three runs the Edu drove forward and
+  back a few times, or once only forward, and then its lights turned green;
+  meanwhile it answered nothing on the bus. Left alone, it answered again
+  20 s after the command; read from during the calibration, as `done()`
+  reads, it answered nothing until it was switched off and on.
+  `reset_motor_adjust` sends pxt-TPBot's "Reset motor adjust".
+- `done()` is true once the Edu's last distance, turn or pivot is over, or a
+  motor command has stopped it. It reads from the robot, and a TPBot Classic
+  that is read from holds the bus until it is switched off and on, so a
+  program that may meet one asks `info()` first.
 - `info()` returns a table: `connected` is true when a robot answers, and
   then `robot` is `"TPBot Classic"` or `"TPBot Edu"`.
 - `get_distance()` answers in mm, or `nil` when nothing within about 4 m
   echoes back.
+- The line sensors are pins P13, the left one, and P14, read through
+  `microbit.io`. pxt-TPBot sets them to no pull, as `setPullNone(getPin(13))`
+  does, and reads 0 over black and 1 over white, as
+  `getDigitalValue(getPin(13))` does.
 - A switched-off Edu holds the bus. A command then waits about 5 s
   (`NRF52I2C_TIMEOUT10US` in `codal.json`; CODAL's default is 14 s) and fails
   with "The robot does not answer"; `info` waits as long and answers

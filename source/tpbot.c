@@ -130,6 +130,67 @@ static int edu_move(lua_State *L, int turn) {
 int tpbot2_run_distance(lua_State *L) { return edu_move(L, 0); }
 int tpbot2_turn(lua_State *L) { return edu_move(L, 1); }
 
+// A number in two bytes, high first
+static void two_bytes(char *at, int value) {
+  at[0] = (char)(value >> 8);
+  at[1] = (char)(value & 255);
+}
+
+// A turn about one wheel, as pxt-TPBot's left and right steering: the
+// command of turn, with the outer wheel given twice the angle and the
+// inner one nothing, the right wheel for a positive angle, which turns
+// left. Twice the size must fit two bytes; under 1 does nothing.
+int tpbot2_pivot(lua_State *L) {
+  lua_Number x = luaL_checknumber(L, 1);
+  lua_Number size = x < 0 ? -x : x;
+  char params[5] = { 0, 0, 0, 0, 0 };
+  luaL_argcheck(L, size < 32768, 1, "out of range");
+  if (size < 1)
+    return 0;
+  two_bytes(params + (x < 0 ? 0 : 2), 2 * (int)size);
+  return sent(L, to_edu(66, params, 5));
+}
+
+// The wheels at the speeds at 1 and 2 in mm/s, by the Edu's own speed
+// control, pxt-TPBot's pidSpeedControl; a negative speed is backward.
+int tpbot2_speed_control(lua_State *L) {
+  char params[5];
+  int left = whole_at(L, 1, -65535, 65535);
+  int right = whole_at(L, 2, -65535, 65535);
+  two_bytes(params, abs(left));
+  two_bytes(params + 2, abs(right));
+  params[4] = (char)((left < 0) + 2 * (right < 0));
+  return sent(L, to_edu(64, params, 5));
+}
+
+// The speed of the Edu's distances and turns in mm/s, pxt-TPBot's
+// pidSetSpeed.
+int tpbot2_set_speed(lua_State *L) {
+  char params[2];
+  two_bytes(params, whole_at(L, 1, 0, 65535));
+  return sent(L, to_edu(79, params, 2));
+}
+
+// The servo at 1, S1 to S4 as 1 to 4, to the value at 2. pxt-TPBot's
+// setServo and setServo360 send 0 to 180: a 180 degree servo's angle, half
+// a 360 degree servo's angle, or a continuous servo's speed, 90 for still.
+int tpbot2_set_servo(lua_State *L) {
+  char params[2];
+  params[0] = (char)whole_at(L, 1, 0, 255);
+  params[1] = (char)whole_at(L, 2, 0, 255);
+  return sent(L, to_edu(32, params, 2));
+}
+
+// pxt-TPBot's adjustMotorSpeed and resetMotorAdjust, as they send them:
+// one parameter, 0, which "" holds
+int tpbot2_adjust_motor_speed(lua_State *L) {
+  return sent(L, to_edu(240, "", 1));
+}
+
+int tpbot2_reset_motor_adjust(lua_State *L) {
+  return sent(L, to_edu(241, "", 1));
+}
+
 // The Edu's done flag, as pxt-TPBot's pid_finish_delay asks for it: its
 // status query, then one byte read back, 1 once the Edu's last distance
 // or turn is over. For an Edu only: a TPBot Classic that is read from

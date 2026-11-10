@@ -162,6 +162,43 @@ static const struct test {
   {TPBOT2, "tpbot2.turn(-90)", EDU, "FF F9 42 05 00 5A 00 5A 02|", ""},
   {TPBOT2, "tpbot2.turn('left')", EDU, "",
    "bad argument #1 to 'turn' (number expected, got string)"},
+  // a pivot: the outer wheel, the right one for a positive angle, given
+  // twice the angle
+  {TPBOT2, "tpbot2.pivot(90)", EDU, "FF F9 42 05 00 00 00 B4 00|", ""},
+  {TPBOT2, "tpbot2.pivot(-90)", EDU, "FF F9 42 05 00 B4 00 00 00|", ""},
+  {TPBOT2, "tpbot2.pivot(0.5)", EDU, "", ""},
+  {TPBOT2, "tpbot2.pivot(32767)", EDU, "FF F9 42 05 00 00 FF FE 00|", ""},
+  {TPBOT2, "tpbot2.pivot(-32768)", EDU, "",
+   "bad argument #1 to 'pivot' (out of range)"},
+  {TPBOT2, "tpbot2.pivot(90)", NONE, "FF F9 42 05 00 00 00 B4 00 refused|",
+   robot_no_answer},
+
+  // speed control and the speed of moves, in mm/s, two bytes each
+  {TPBOT2, "tpbot2.speed_control(250, -300)", EDU,
+   "FF F9 40 05 00 FA 01 2C 02|", ""},
+  {TPBOT2, "tpbot2.speed_control(-65535, 0)", EDU,
+   "FF F9 40 05 FF FF 00 00 01|", ""},
+  {TPBOT2, "tpbot2.speed_control(65536, 0)", EDU, "",
+   "bad argument #1 to 'speed_control' (out of range)"},
+  {TPBOT2, "tpbot2.speed_control(0, 0/0)", EDU, "",
+   "bad argument #2 to 'speed_control' (out of range)"},
+  {TPBOT2, "tpbot2.set_speed(300)", EDU, "FF F9 4F 02 01 2C|", ""},
+  {TPBOT2, "tpbot2.set_speed(-1)", EDU, "",
+   "bad argument #1 to 'set_speed' (out of range)"},
+  {TPBOT2, "tpbot2.set_speed(300)", NONE, "FF F9 4F 02 01 2C refused|",
+   robot_no_answer},
+
+  // a servo, S1 to S4 as 1 to 4, and its value
+  {TPBOT2, "tpbot2.set_servo(1, 90)", EDU, "FF F9 20 02 01 5A|", ""},
+  {TPBOT2, "tpbot2.set_servo(4, 180)", EDU, "FF F9 20 02 04 B4|", ""},
+  {TPBOT2, "tpbot2.set_servo(1, 256)", EDU, "",
+   "bad argument #2 to 'set_servo' (out of range)"},
+
+  // the motors' adjustment
+  {TPBOT2, "tpbot2.adjust_motor_speed()", EDU, "FF F9 F0 01 00|", ""},
+  {TPBOT2, "tpbot2.reset_motor_adjust()", EDU, "FF F9 F1 01 00|", ""},
+  {TPBOT2, "tpbot2.adjust_motor_speed()", NONE, "FF F9 F0 01 00 refused|",
+   robot_no_answer},
 
   // done: the status query, then one byte read back
   {TPBOT2, "return tpbot2.done()", EDU, STATUS "|read 32:01|", "true"},
