@@ -249,6 +249,56 @@ returns.
 `tests/tpbot-host-tests.sh` checks every command over a stand-in bus: the
 bytes each writes, what it returns and the words of each error.
 
+## Events
+
+The firmware calls `on_event(source, value, timestamp)` for each event: a
+button, the serial port, the radio. `on_event` is a global set in `_G`
+itself; a metatable on `_G` plays no part. One Lua call runs at a time: the
+script at boot, a line typed at the REPL, or a handler. An event that comes
+while one runs waits, in the order the events came, up to 16; one that comes
+when 16 wait is dropped. Each listening board's beacon reaches every board
+with its radio on as a radio event, so with several listening boards near,
+the 16 can fill within seconds of a call that does not sleep. The script at
+boot and a line at the REPL handle the waiting events whenever they enter
+`microbit.sleep`, and every 10 ms while they sleep; what still waits when
+the call is over is handled then. A handler's own `microbit.sleep` handles
+nothing, so one handler always ends before the next starts, and a handler
+that sleeps long or loops holds every other handler and the REPL until it
+ends. Other waits handle nothing either: a button pressed while a handler
+scrolls is handled once that call is over. A handler runs on the stacks of
+the call whose sleep lets it in, so a handler run from a sleep deep in a
+program can stop with "stack overflow" or "C stack overflow".
+
+The serial port's event, which brings the REPL what was typed, is never
+dropped. It waits for the running call to end, and never runs at a sleep, so
+lines sent to the REPL run one after another, and the REPL answers only once
+the script at boot has ended: a script that keeps the REPL and then loops
+forever never answers. What is typed while a call runs waits in the port's
+buffer of 254 characters; past that it is lost, and nothing says so. The
+port's data-received and RX-full events never reach Lua. Neither do the
+samples of the accelerometer and the compass, about fifty a second each once
+a program uses them (a gesture reaches Lua as its own event), nor the pulse
+reader's timeout tick, every 10 ms once a program has called `getPulseUs`,
+nor the message bus's notes that a listener came or went, one or two each
+time a fiber waits for a device's event, as a blocking scroll waits for the
+display's.
+
+A mistake in a handler goes to the serial port as `Runtime error: ` and the
+message, on a line of its own, and scrolls by on the display if the display
+is free, while the running call goes on. A mistake whose value is neither a
+string nor a number, such as that of `error()` or `error({})`, is not said.
+
+On a radio link, a calling board's `tx` takes nothing from the link while it
+waits, since the radio's event waits for the running call, and the far
+board's echo waits in turn: of a line longer than one frame, 26 characters
+with its CR, as the Compy's terminal sends it, frames are lost.
+
+`tests/runtime-host-tests.sh` boots `source/lua-script.lua` in this
+firmware's Lua built for the host, over a stand-in board, with events
+through `source/lua-events.c`: lines at the REPL, presses while Lua sleeps
+or scrolls, mistakes in handlers, a program's own `on_event`, and a radio
+link whose other board the test plays.
+
 
 # Where
 

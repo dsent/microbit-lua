@@ -27,6 +27,7 @@ extern const LuaMeta __lua_meta;
 #include "MicroBitUARTService.h"
 #endif
 #include "codal-lua.h"
+#include "lua-events.h"
 #include "stack-probe.h"
 
 // Stack high-water reporting (see stack-probe.c). The probe is always active;
@@ -174,6 +175,9 @@ int main() {
         lua_strip_debug(L);
         LUA_MEM_REPORT(L, "stripped");
 
+        // Events that come while the script runs wait for its sleeps, or
+        // for its end (source/lua-events.c).
+        lua_call_begin();
         if (lua_pcall(L, 0, LUA_MULTRET, 0) != LUA_OK)
         {
             const char *err = lua_tostring(L, -1);
@@ -182,6 +186,7 @@ int main() {
                 uBit.display.scroll(err);
             }
         }
+        lua_call_end();
     }
     else
     {
