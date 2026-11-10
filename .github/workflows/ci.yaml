@@ -59,3 +59,46 @@ jobs:
 
       - name: Run hextract tests
         run: bash tests/hextract-tests.sh
+
+      - name: Keep the Lua tarball for the host tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lua tarball
+          path: libraries/lua-5.1.5.tar.gz
+
+  # The host tests build parts of the firmware for the runner itself, with a
+  # C compiler the build image has not, and the Lua tarball the build
+  # fetched, so they run once the build has passed. Every tests/*-tests.sh
+  # runs, but hextract's, which needs the firmware and runs above.
+  host-tests:
+    name: "host tests"
+    needs: build-linux-amd64
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          show-progress: false
+
+      - name: Get the Lua tarball the build fetched
+        uses: actions/download-artifact@v4
+        with:
+          name: Lua tarball
+          path: libraries
+
+      - name: Run the host tests
+        run: |
+          failed=0
+          for test in tests/*-tests.sh; do
+            [ "$test" = tests/hextract-tests.sh ] && continue
+            echo "::group::$test"
+            status=0
+            bash "$test" || status=$?
+            echo "::endgroup::"
+            if [ "$status" -ne 0 ]; then
+              echo "::error::$test failed"
+              failed=1
+            fi
+          done
+          exit "$failed"
