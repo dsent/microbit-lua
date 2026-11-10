@@ -132,6 +132,20 @@ void lua_event_arrived(LuaEvent e) {
   }
 }
 
+bool lua_event_waits(uint16_t source, uint16_t value) {
+  int i;
+  for (i = 0; i < waiting; i++) {
+    LuaEvent e = line[(first + i) % LINE];
+    if (e.source == source && e.value == value)
+      return true;
+  }
+  return false;
+}
+
+bool lua_event_room(void) {
+  return !running || waiting < LINE;
+}
+
 void lua_events_sleep(uint32_t ms) {
   uint32_t start = lua_events_now(), elapsed;
   bool paused = false;

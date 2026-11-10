@@ -283,6 +283,19 @@ nor the message bus's notes that a listener came or went, one or two each
 time a fiber waits for a device's event, as a blocking scroll waits for the
 display's.
 
+`robot.hold` raises a drive event with each compass sample, twenty a second.
+`robot.drive` is given the wheels' speeds as they are when it runs, so a new
+drive event is raised only when none waits. While a call runs that neither
+sleeps nor ends, `robot.drive` is not called and the robot keeps the speeds it
+was last given. The hold steers again once the script at boot or a line at the
+REPL enters `microbit.sleep`, or once the call ends; a handler's own sleep
+handles nothing, so during a handler the hold steers only once the handler has
+returned. A drive event or a hold's end that is dropped, when 16 events wait, is
+raised again with each compass sample until Lua takes it, so the stop at the
+hold's end, and then `robot.done`, come once the queue has room. The hold's PID
+goes on with each sample meanwhile, so with an integral gain its first steer
+after a long wait can be hard.
+
 A mistake in a handler goes to the serial port as `Runtime error: ` and the
 message, on a line of its own, and scrolls by on the display if the display
 is free, while the running call goes on. A mistake whose value is neither a
