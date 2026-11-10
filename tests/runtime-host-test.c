@@ -380,6 +380,25 @@ static void press_twenty(void) {
     press_a();
 }
 
+// A press, and what lua_event_waits sees then of A and of B
+static int a_waits, b_waits;
+static void press_a_and_look(void) {
+  press_a();
+  a_waits = lua_event_waits(ID_BUTTON_A, DOWN);
+  b_waits = lua_event_waits(ID_BUTTON_B, DOWN);
+}
+
+// Fifteen presses and sixteen, and whether Lua had room after each
+static int room_at_15, room_at_16;
+static void press_sixteen_and_look(void) {
+  int i;
+  for (i = 0; i < 15; i++)
+    press_a();
+  room_at_15 = lua_event_room();
+  press_a();
+  room_at_16 = lua_event_room();
+}
+
 // Handlers for A and B, set at the prompt, that say when they run
 static void say_the_buttons(void) {
   line("microbit.handler[microbit.DEVICE_ID_BUTTON_A] = "
@@ -472,6 +491,22 @@ static void one_call_at_a_time(void) {
   said = line("microbit.display.scroll('hi')");
   expect(count(said, "A\r\n") == 16,
          "of twenty presses while Lua is busy, sixteen wait and are handled");
+  fresh();
+  boot();
+  say_the_buttons();
+  plan(press_a_and_look);
+  line("microbit.display.scroll('hi')");
+  expect(a_waits && !b_waits && !lua_event_waits(ID_BUTTON_A, DOWN),
+         "lua_event_waits sees an event that waits, and only until it is "
+         "handled");
+  fresh();
+  boot();
+  say_the_buttons();
+  plan(press_sixteen_and_look);
+  line("microbit.display.scroll('hi')");
+  expect(room_at_15 && !room_at_16 && lua_event_room(),
+         "lua_event_room: room while fewer than 16 wait, none at 16, and "
+         "room once Lua is free");
   {
     static const char *const order[] = {
       "<sleep>", "</sleep>", "print(2)\r\n2\r\n> ", NULL };

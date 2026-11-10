@@ -581,20 +581,58 @@ static int north(lua_State *L) {
 static Hold hold;
 static int holding;
 static float wheels[2];         // the speeds the drive event carries
+// What robot.drive and robot.done have yet to hear of: set when their event
+// is raised, cleared once Lua takes it, to handle now or to wait
+static int drive_due, end_due;
 
-// Stop the wheels and, unless the script stopped the hold, report its end
+// The robot's event e, unless one waits for Lua already
+static void robot_raise(int e) {
+  if (!lua_event_waits(DEVICE_ID_ROBOT, e))
+    Event(DEVICE_ID_ROBOT, e);
+}
+
+// The wheels' speeds to robot.drive, which reads them when it runs: a drive
+// event that waits carries the latest, so another is raised, and is due,
+// only when none waits. A hold raises one with every sample, twenty a
+// second, which would fill the queue within a second of a call that
+// neither sleeps nor ends.
+static void drive() {
+  if (lua_event_waits(DEVICE_ID_ROBOT, ROBOT_EVT_DRIVE)) {
+    drive_due = 0;
+    return;
+  }
+  drive_due = 1;
+  Event(DEVICE_ID_ROBOT, ROBOT_EVT_DRIVE);
+}
+
+// One of the robot's events, which Lua takes now
+static void robot_taken(int e) {
+  if (e == ROBOT_EVT_DRIVE)
+    drive_due = 0;
+  else if (e == end_due)
+    end_due = 0;
+}
+
+// Stop the wheels and, unless the script stopped the hold, keep its end
+// for robot.done, which a sample raises once Lua has taken the stop
 static void unhold(int end) {
   holding = 0;
   wheels[0] = wheels[1] = 0;
-  Event(DEVICE_ID_ROBOT, ROBOT_EVT_DRIVE);
-  if (end) Event(DEVICE_ID_ROBOT, end);
+  drive();
+  if (end) end_due = end;
 }
 
 // The wheels stand while the field is off the circle; the hold ends when
-// its time is up or the circle is gone
+// its time is up or the circle is gone. An event the queue dropped, when
+// 16 waited, is raised again with each sample until Lua takes it, so the
+// stop at a hold's end and then robot.done come once the queue has room.
 static void hold_sample() {
   float n[3];
-  if (!holding) return;
+  if (end_due && !drive_due) robot_raise(end_due);
+  if (!holding) {
+    if (drive_due) drive();
+    return;
+  }
   if (!circle.found) {
     unhold(ROBOT_EVT_LOST);
     return;
@@ -605,7 +643,7 @@ static void hold_sample() {
     unhold(ROBOT_EVT_DONE);
     return;
   }
-  Event(DEVICE_ID_ROBOT, ROBOT_EVT_DRIVE);
+  drive();
 }
 
 // Handler for the robot's events: calls robot.drive(left, right) or
@@ -2433,6 +2471,10 @@ static void lua_event_handler_fiber(void *arg) {
   codal::Event *event = (codal::Event *)arg;
   LuaEvent e = { event->source, event->value, (uint32_t)event->timestamp };
   delete event;
+  // A robot's event that Lua takes is no longer due; one it drops is
+  // raised again with the track's next sample
+  if (e.source == DEVICE_ID_ROBOT && lua_event_room())
+    robot_taken(e.value);
   lua_event_arrived(e);
 }
 

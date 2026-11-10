@@ -23,6 +23,13 @@ void lua_events_open(lua_State *L, uint16_t port_source, uint16_t port_value);
 // An event, in a fiber of its own: handled now, or when Lua is free
 void lua_event_arrived(LuaEvent e);
 
+// Whether an event of source and value waits for Lua
+bool lua_event_waits(uint16_t source, uint16_t value);
+
+// Whether an event other than the serial port's that arrives now is taken,
+// to be handled now or to wait, rather than dropped
+bool lua_event_room(void);
+
 // Around a call into Lua that is no event's, the script at boot: events
 // that come meanwhile wait for its sleeps, or for its end
 void lua_call_begin(void);
