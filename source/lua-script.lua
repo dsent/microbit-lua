@@ -397,12 +397,15 @@ uBit.accelerometer.getSample()
 -- Ctrl+C or Ctrl+D on this board's own port ends it: the link
 -- is closed, and both boards are back at their consoles.
 --
--- connect(name, timeout) calls, then carries the port over:
--- what is typed here goes out, what comes back goes on the
--- port as it is, and the console here says no more. Ctrl+D
--- hands the port back to the console; the far end keeps
+-- connect(name, timeout, attempts) calls, then carries the
+-- port over: what is typed here goes out, what comes back goes
+-- on the port as it is, and the console here says no more.
+-- Ctrl+D hands the port back to the console; the far end keeps
 -- listening, so the link can be made again. A link whose far
--- end has gone quiet, with no beacon for a while, is over too.
+-- end has gone quiet, with no beacon for a while, is lost: it
+-- is called again, attempts times, or until Ctrl+D if attempts
+-- is negative, as it is unless given; with 0 a lost link is
+-- over. A link the far end closes is over at once.
 
 local radio_session = make_session(radio.tx)
 
@@ -448,6 +451,14 @@ end
 
 local peer       -- the board connect() reached
 local mid_line   -- what it sent last left a line open on the port
+local wait       -- connect()'s timeout, for each call
+local attempts   -- calls a lost link gets; negative: until Ctrl+D
+
+-- A line of this board's own on its port, whatever session a
+-- line at the console that sleeps may have muted
+local function notice(s)
+  serial.send((string.gsub(s, "\n", "\r\n")))
+end
 
 --- The link is closed, and the port and the console's voice
 --- go back to the console
@@ -478,26 +489,60 @@ local function to_link(text)
   to_console(after)
 end
 
---- What the link says goes to the port; false is the far end
---- closing it
+-- Whether a Ctrl+D was typed; what else was typed is dropped
+local function ctrl_d()
+  return typing():find("\4") ~= nil
+end
+
+--- The link was lost: the far end is called again, attempts
+--- times, or until Ctrl+D, read from the port before and after
+--- each call. This runs in the radio's handler, so no other
+--- handler runs until it returns: this board does nothing else
+--- meanwhile, but for a finalizer a program set up.
+local function call_again()
+  notice((mid_line and "\n" or "") .. peer
+         .. " lost; calling again, Ctrl+D stops.\n")
+  mid_line = false
+  local left, stop = attempts, ctrl_d()
+  while left ~= 0 and not stop do
+    local answered = radio.connect(peer, wait)
+    stop = ctrl_d()
+    if answered and not stop then
+      notice(peer .. " connected.\n")
+      return
+    end
+    left = left - 1
+  end
+  disconnect()
+end
+
+--- What the link says goes to the port; false is the link
+--- over, lost or closed by the far end
 local function link_to_port()
-  local piece = radio.rx()
+  local piece, closed = radio.rx()
   if piece then
     serial.send(piece)
     mid_line = piece:sub(-1) ~= "\n"
   elseif piece == false then
-    disconnect()
+    if closed or attempts == 0 then
+      disconnect()
+    else
+      call_again()
+    end
   end
 end
 
-function connect(name, timeout)
+function connect(name, timeout, tries)
+  if tries ~= nil and type(tries) ~= "number" then
+    error("attempts must be a number", 2)
+  end
   radio.enable()
   if not radio.connect(name, timeout) then
     print("Connection timed out.")
     return
   end
   print(name .. " connected.")
-  peer = name
+  peer, wait, attempts = name, timeout, math.floor(tries or -1)
   mid_line = false
   typed_to = to_link
   handler[uBit.DEVICE_ID_RADIO] = link_to_port
