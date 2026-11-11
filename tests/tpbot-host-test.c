@@ -200,16 +200,16 @@ static const struct test {
   {TPBOT2, "tpbot2.adjust_motor_speed()", NONE, "FF F9 F0 01 00 refused|",
    robot_no_answer},
 
-  // done: the status query, then one byte read back
-  {TPBOT2, "return tpbot2.done()", EDU, STATUS "|read 32:01|", "true"},
-  {TPBOT2, "return tpbot2.done()", EDU_BUSY, STATUS "|read 32:00|", "false"},
-  {TPBOT2, "return tpbot2.done()", EDU_SILENT, STATUS "|read 32:none|",
+  // busy: the status query, then one byte read back, the done flag
+  {TPBOT2, "return tpbot2.busy()", EDU, STATUS "|read 32:01|", "false"},
+  {TPBOT2, "return tpbot2.busy()", EDU_BUSY, STATUS "|read 32:00|", "true"},
+  {TPBOT2, "return tpbot2.busy()", EDU_SILENT, STATUS "|read 32:none|",
    robot_no_answer},
-  {TPBOT2, "return tpbot2.done()", NONE, STATUS " refused|", robot_no_answer},
+  {TPBOT2, "return tpbot2.busy()", NONE, STATUS " refused|", robot_no_answer},
   // a plain read, whatever robot is there: a real Classic then holds the
   // bus, so a program that may meet one asks info() first
-  {TPBOT2, "return tpbot2.done()", CLASSIC, STATUS "|CLASSIC read 32:01|",
-   "true"},
+  {TPBOT2, "return tpbot2.busy()", CLASSIC, STATUS "|CLASSIC read 32:01|",
+   "false"},
 };
 
 // What the call left on the stack, as the tests write it
