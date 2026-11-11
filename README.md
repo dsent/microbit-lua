@@ -195,7 +195,7 @@ returns.
   `info()` and `get_distance()`.
 - `tpbot2`: `set_car_light(r, g, b)`, `set_motors_speed(left, right)`,
   `speed_control(left, right)`, `set_speed(mm_per_s)`, `run_distance(mm)`,
-  `turn(degrees)`, `pivot(degrees)`, `done()`, `set_servo(servo, value)`,
+  `turn(degrees)`, `pivot(degrees)`, `busy()`, `set_servo(servo, value)`,
   `adjust_motor_speed()`, `reset_motor_adjust()`, `info()` and
   `get_distance()`.
 
@@ -203,7 +203,7 @@ returns.
   and runs the motors until the next motor command; light values go from 0
   to 255.
 - `run_distance` and `turn` return once the frame is sent, and the Edu
-  drives or turns on; a distance or a turn sent before it is done cuts it
+  drives or turns on; a distance or a turn sent while it runs cuts it
   short. A negative distance drives backward, and a positive angle turns
   left. A distance or an angle of 65536 or more is refused, and one under 1
   does nothing. An Edu sent 1 or 2 mm drives on, and sent 1 degree spins on,
@@ -224,13 +224,15 @@ returns.
   pxt-TPBot's "Adjust motor speed". In three runs the Edu drove forward and
   back a few times, or once only forward, and then its lights turned green;
   meanwhile it answered nothing on the bus. Left alone, it answered again
-  20 s after the command; read from during the calibration, as `done()`
+  20 s after the command; read from during the calibration, as `busy()`
   reads, it answered nothing until it was switched off and on.
   `reset_motor_adjust` sends pxt-TPBot's "Reset motor adjust".
-- `done()` is true once the Edu's last distance, turn or pivot is over, or a
-  motor command has stopped it. It reads from the robot, and a TPBot Classic
-  that is read from holds the bus until it is switched off and on, so a
-  program that may meet one asks `info()` first.
+- `busy()` is true while the Edu's last distance, turn or pivot runs, and
+  false once it is over or a motor command has stopped it. A program waits
+  for a move with `while tpbot2.busy() do microbit.sleep(20) end`. It reads
+  from the robot, and a TPBot Classic that is read from holds the bus until
+  it is switched off and on, so a program that may meet one asks `info()`
+  first.
 - `info()` returns a table: `connected` is true when a robot answers, and
   then `robot` is `"TPBot Classic"` or `"TPBot Edu"`.
 - `get_distance()` answers in mm, or `nil` when nothing within about 4 m

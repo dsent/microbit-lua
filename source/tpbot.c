@@ -104,9 +104,9 @@ int tpbot2_set_motors_speed(lua_State *L) {
 }
 
 // A distance (turn 0) or a turn (turn 1) of the number at 1, mm or
-// degrees, its sign the way. It goes on after its frame is sent, until
-// done() says it is over, and a distance or a turn sent before then cuts
-// it short. Its size must fit the Edu's two bytes: what they cannot carry
+// degrees, its sign the way. It goes on after its frame is sent, as long
+// as busy() says it runs, and a distance or a turn sent meanwhile cuts it
+// short. Its size must fit the Edu's two bytes: what they cannot carry
 // is refused, not a number and infinity included. Under 1 does nothing,
 // as upstream's did.
 static int edu_move(lua_State *L, int turn) {
@@ -191,16 +191,16 @@ int tpbot2_reset_motor_adjust(lua_State *L) {
   return sent(L, to_edu(241, "", 1));
 }
 
-// The Edu's done flag, as pxt-TPBot's pid_finish_delay asks for it: its
-// status query, then one byte read back, 1 once the Edu's last distance
-// or turn is over. For an Edu only: a TPBot Classic that is read from
-// holds the bus until it is switched off and on, so a program that may
-// meet one asks info() first.
-int tpbot2_done(lua_State *L) {
+// Whether the Edu's last distance or turn still runs, from its done flag,
+// as pxt-TPBot's pid_finish_delay asks for it: its status query, then one
+// byte read back, 1 once the move is over. For an Edu only: a TPBot
+// Classic that is read from holds the bus until it is switched off and
+// on, so a program that may meet one asks info() first.
+int tpbot2_busy(lua_State *L) {
   char flag = 0;
   sent(L, to_robot("\xff\xf9\xa0\x01\x00", 5)
        || tpbot_i2c_read(32, &flag, 1) != 0);
-  lua_pushboolean(L, flag == 1);
+  lua_pushboolean(L, flag != 1);
   return 1;
 }
 

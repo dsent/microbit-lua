@@ -19,7 +19,7 @@ extern "C" {
     X(get_distance,     tpbot_get_distance)
 
 // The tpbot2 module: the TPBot Edu's commands, each sending one Edu frame
-// and returning, and its done flag.
+// and returning, and whether its last move still runs.
 #define TPBOT2_FUNCTIONS                                \
     X(set_car_light,    tpbot2_set_car_light)           \
     X(set_motors_speed, tpbot2_set_motors_speed)        \
@@ -28,7 +28,7 @@ extern "C" {
     X(run_distance,     tpbot2_run_distance)            \
     X(turn,             tpbot2_turn)                    \
     X(pivot,            tpbot2_pivot)                   \
-    X(done,             tpbot2_done)                    \
+    X(busy,             tpbot2_busy)                    \
     X(set_servo,        tpbot2_set_servo)               \
     X(adjust_motor_speed, tpbot2_adjust_motor_speed)    \
     X(reset_motor_adjust, tpbot2_reset_motor_adjust)    \
