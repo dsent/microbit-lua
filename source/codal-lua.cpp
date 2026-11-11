@@ -170,6 +170,18 @@ Image luaL_checkimage(lua_State *L, int narg) {
   return r;
 }
 
+// Whether an animation runs on the display. CODAL keeps its state to
+// itself; printAsync answers DEVICE_BUSY while an animation runs, and
+// otherwise pastes its image with no delay, starting nothing. The empty
+// image is CODAL's shared one, so nothing is allocated, and pasted just
+// past the display's right edge, an image of any size changes no pixel:
+// Image::paste returns at once when x is at least the width of the image
+// pasted onto, the display's.
+static bool display_busy(void) {
+  return uBit.display.printAsync(Image(), uBit.display.getWidth(), 0, 0, 0)
+    == DEVICE_BUSY;
+}
+
 // see https://rneacy.dev/mbv2/ubit/display/
 #define LUA_DISPLAY_FUNCTIONS						\
     F(getWidth,   { lua_pushinteger(L, uBit.display.getWidth());	\
@@ -220,6 +232,9 @@ Image luaL_checkimage(lua_State *L, int narg) {
                     uBit.display.NRF52LEDMatrix::setSleep(		\
                       lua_toboolean(L, 1) != 0);			\
                     return 0;						\
+                  })							\
+    F(busy,       { lua_pushboolean(L, display_busy());			\
+                    return 1;						\
                   })							\
     F(stopAnimation, { uBit.display.stopAnimation();			\
                     return 0;						\

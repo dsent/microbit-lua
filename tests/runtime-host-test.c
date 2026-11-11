@@ -190,6 +190,66 @@ static int l_scroll(lua_State *L) {
   return 0;
 }
 
+// The display: an animation runs on it until the clock passes its end.
+// What the Async calls show goes in shown[], apart from the port.
+static int animating;
+static uint32_t animation_ends;
+static char shown[1024];
+
+static int display_free(void) {
+  if (animating && clock_ms >= animation_ends)
+    animating = 0;
+  return !animating;
+}
+
+// scrollAsync: a scroll of 100 ms, unless an animation runs
+static int l_scroll_async(lua_State *L) {
+  const char *text = luaL_checkstring(L, 1);
+  int free = display_free();
+  if (free) {
+    animating = 1;
+    animation_ends = clock_ms + 100;
+    append(shown, sizeof shown, "<scroll ");
+    append(shown, sizeof shown, text);
+    append(shown, sizeof shown, ">");
+  }
+  lua_pushboolean(L, free);
+  return 1;
+}
+
+// showAsync(image, x, y, alpha, delay): it shows, unless an animation
+// runs; with a delay, which is 400 ms when none is given, as the binding
+// has it, the picture is an animation that lasts that long
+static int l_show_async(lua_State *L) {
+  int delay = luaL_optint(L, 5, 400);
+  int free;
+  if (delay < 0) {            // DEVICE_INVALID_PARAMETER: nothing shown
+    lua_pushboolean(L, 0);
+    return 1;
+  }
+  free = display_free();
+  if (free && delay > 0) {
+    animating = 1;
+    animation_ends = clock_ms + delay;
+  }
+  append(shown, sizeof shown,
+         !free ? "<face busy>" : delay > 0 ? "<face for a while>" : "<face>");
+  lua_pushboolean(L, free);
+  return 1;
+}
+
+// show, which would wait for a running animation to end
+static int l_show(lua_State *L) {
+  (void)L;
+  append(shown, sizeof shown, "<show>");
+  return 0;
+}
+
+static int l_busy(lua_State *L) {
+  lua_pushboolean(L, !display_free());
+  return 1;
+}
+
 // microbit.sleep, as the firmware binds it
 static int l_sleep(lua_State *L) {
   uint32_t ms = (uint32_t)luaL_checkinteger(L, 1);
@@ -231,8 +291,9 @@ static const struct { const char *name; int value; } constants[] = {
   {"ACCELEROMETER_EVT_SHAKE", 11}, {NULL, 0}
 };
 static const luaL_Reg l_display[] = {
-  {"animate", l_nothing}, {"scrollAsync", l_nothing}, {"show", l_nothing},
-  {"scroll", l_scroll}, {NULL, NULL}
+  {"animate", l_nothing}, {"scrollAsync", l_scroll_async}, {"show", l_show},
+  {"showAsync", l_show_async}, {"busy", l_busy}, {"scroll", l_scroll},
+  {NULL, NULL}
 };
 static const luaL_Reg l_serial[] = {
   {"send", l_send}, {"getCharAsync", l_get_char},
@@ -288,6 +349,9 @@ static void fresh(void) {
   caller_hears[0] = far_heard[0] = 0;
   listening = looks = linked = 0;
   far_says = NULL;
+  animating = 0;
+  animation_ends = 0;
+  shown[0] = 0;
 }
 
 // Boot the board with text as its script, loaded and stripped as main()
@@ -738,6 +802,45 @@ static void the_radio_link(void) {
   expect(strstr(said, "=> 42\r\n> ") != NULL, "... which answers again");
 }
 
+// The firmware's faces, and a program that waits for an Async call with
+// display.busy()
+static void the_display(void) {
+  const char *said;
+  fresh();
+  boot();
+  press_a();                  // while the board's name scrolls
+  clock_ms = animation_ends;
+  press_a();
+  expect(strcmp(shown, "<scroll zezop><face busy><face>") == 0
+         && display_free(),
+         "the firmware's button handler leaves a busy display alone, and "
+         "shows its face on a free one, with no animation");
+  post(ID_DISPLAY, 1);
+  expect(strcmp(shown, "<scroll zezop><face busy><face><face>") == 0
+         && display_free(),
+         "... and so does its smiley at an animation's end");
+
+  {
+    static const char *const order[] = { "A\r\n", "done\r\n", "> ", NULL };
+    uint32_t start;
+    size_t n;
+    fresh();
+    boot();
+    clock_ms = animation_ends;  // the board's name has scrolled by
+    say_the_buttons();
+    plan(press_a);
+    start = clock_ms;
+    said = line("microbit.display.scrollAsync('hi') "
+                "while microbit.display.busy() do microbit.sleep(10) end "
+                "print('done')");
+    n = strlen(shown);
+    expect(in_order(said, order) && clock_ms - start >= 100
+           && n >= 11 && strcmp(shown + n - 11, "<scroll hi>") == 0,
+           "a press during scrollAsync and a loop that sleeps while "
+           "display.busy() is handled in the loop");
+  }
+}
+
 static char *slurp(const char *path, size_t *length) {
   FILE *f = fopen(path, "rb");
   char *text;
@@ -766,6 +869,7 @@ int main(int argc, char **argv) {
   a_program_that_guards_its_globals();
   mistakes_named();
   the_radio_link();
+  the_display();
   printf("%d checks, %d failed\n", checks, failures);
   return failures != 0;
 }

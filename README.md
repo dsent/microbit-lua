@@ -249,6 +249,39 @@ returns.
 `tests/tpbot-host-tests.sh` checks every command over a stand-in bus: the
 bytes each writes, what it returns and the words of each error.
 
+## Display
+
+`microbit.display.scroll`, `print`, `animate` and `show` block: each waits
+for an animation that runs to end, then starts its own, and all but `show`
+with no delay and a one-letter `print` wait for theirs to end. While one
+waits, no handler runs: a button pressed meanwhile is handled once the call
+is over, and a `robot.hold` does not steer, so the robot keeps the speeds it
+was last given. The Async forms, `scrollAsync`, `printAsync`, `animateAsync`
+and `showAsync`, start their animation and return at once, `false` when one
+already runs. `microbit.display.busy()` is `true` while an animation runs,
+so the script at boot or a line at the REPL can wait for one and keep
+handlers running:
+
+```lua
+microbit.display.scrollAsync("Hello, I'm not blocking the steering!")
+while microbit.display.busy() do microbit.sleep(10) end
+```
+
+`microbit.sleep(0)` in such a loop handles the events that wait, then lets
+the other fibers run, which takes up to a scheduler tick of 4 ms. The loop
+lasts as long as animations follow one another: a handler that starts one at
+each end keeps it going, as does an `on_event` that raises an error at each
+event, whose message scrolls by, and `animateAsync` with a negative stride
+can run for a very long time or show the wrong frames, since CODAL keeps the
+stride in 8 bits and the position in 16. The firmware's own script plays its
+heart at boot with the blocking `animate`, so an event during the heart
+waits for the script's end. Its faces, when a button is pressed or let go
+and when an animation ends, use `showAsync` with no delay, and are left out
+while an animation runs. That smiley shows when an animation's end is
+handled, which can come just after `busy()` turns false, so an image a
+program shows right after the loop can give way to the smiley at its next
+sleep or once its call ends.
+
 ## Events
 
 The firmware calls `on_event(source, value, timestamp)` for each event: a
@@ -261,13 +294,16 @@ with its radio on as a radio event, so with several listening boards near,
 the 16 can fill within seconds of a call that does not sleep. The script at
 boot and a line at the REPL handle the waiting events whenever they enter
 `microbit.sleep`, and every 10 ms while they sleep; what still waits when
-the call is over is handled then. A handler's own `microbit.sleep` handles
-nothing, so one handler always ends before the next starts, and a handler
-that sleeps long or loops holds every other handler and the REPL until it
-ends. Other waits handle nothing either: a button pressed while a handler
-scrolls is handled once that call is over. A handler runs on the stacks of
-the call whose sleep lets it in, so a handler run from a sleep deep in a
-program can stop with "stack overflow" or "C stack overflow".
+the call is over is handled then. `microbit.sleep(0)` handles what waits,
+then lets the other fibers run, which takes up to a scheduler tick of 4 ms,
+and returns. A handler's own `microbit.sleep` handles nothing, so one
+handler always ends before the next starts, and a handler that sleeps long
+or loops holds every other handler and the REPL until it ends. Other waits
+handle nothing either, a blocking display call among them: a button pressed
+while a scroll runs is handled once the call is over, and Display says how
+to keep handlers running while the display is busy. A handler runs on the
+stacks of the call whose sleep lets it in, so a handler run from a sleep
+deep in a program can stop with "stack overflow" or "C stack overflow".
 
 The serial port's event, which brings the REPL what was typed, is never
 dropped. It waits for the running call to end, and never runs at a sleep, so
@@ -290,11 +326,13 @@ sleeps nor ends, `robot.drive` is not called and the robot keeps the speeds it
 was last given. The hold steers again once the script at boot or a line at the
 REPL enters `microbit.sleep`, or once the call ends; a handler's own sleep
 handles nothing, so during a handler the hold steers only once the handler has
-returned. A drive event or a hold's end that is dropped, when 16 events wait, is
-raised again with each compass sample until Lua takes it, so the stop at the
-hold's end, and then `robot.done`, come once the queue has room. The hold's PID
-goes on with each sample meanwhile, so with an integral gain its first steer
-after a long wait can be hard.
+returned. A blocking scroll is a call that neither sleeps nor ends until the
+scroll is over; `scrollAsync` and a loop that sleeps while
+`microbit.display.busy()` let the hold steer. A drive event or a hold's end that
+is dropped, when 16 events wait, is raised again with each compass sample until
+Lua takes it, so the stop at the hold's end, and then `robot.done`, come once
+the queue has room. The hold's PID goes on with each sample meanwhile, so with
+an integral gain its first steer after a long wait can be hard.
 
 A mistake in a handler goes to the serial port as `Runtime error: ` and the
 message, on a line of its own, and scrolls by on the display if the display
@@ -315,8 +353,11 @@ them, arrive whole.
 `tests/runtime-host-tests.sh` boots `source/lua-script.lua` in this
 firmware's Lua built for the host, over a stand-in board, with events
 through `source/lua-events.c`: lines at the REPL, presses while Lua sleeps
-or scrolls, mistakes in handlers, a program's own `on_event`, and a radio
-link whose other board the test plays.
+or scrolls, mistakes in handlers, a program's own `on_event`, a radio link
+whose other board the test plays, the script's faces on a busy display, and
+a press during a loop that sleeps while `display.busy()`. The stand-in
+display answers `busy` as an animation's time runs; `source/codal-lua.cpp`
+is not built for the host.
 
 
 # Where

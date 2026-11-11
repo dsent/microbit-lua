@@ -320,11 +320,16 @@ local squint = {
   )
 }
 
+-- never waits for an animation, and with no delay starts none
+local function face(image)
+  display.showAsync(image, 0, 0, 0, 0)
+end
+
 local function button(value, wink)
   if value == uBit.DEVICE_BUTTON_EVT_DOWN then
-    display.show(wink)
+    face(wink)
   elseif value == uBit.DEVICE_BUTTON_EVT_UP then
-    display.show(smiley)
+    face(smiley)
   end
 end
 
@@ -353,7 +358,7 @@ end
 
 handler[uBit.DEVICE_ID_DISPLAY] = function(value)
   if value == uBit.DISPLAY_EVT_ANIMATION_COMPLETE then
-    display.show(smiley)
+    face(smiley)
   end
 end
 
