@@ -120,6 +120,50 @@ If `/dev/ttyACM0` is not present, then look at `dmesg --follow` while
 you plug in your board.
 
 
+## Radio link
+
+Two boards can carry a console over the radio: one listens, the other
+calls it and hands its own serial port over to the link.
+
+- `listen(name)` waits for the board with that five-letter name to call,
+  or for any board when no name is given, and serves only the board that
+  called. It sends a beacon every one to two seconds, saying who it is
+  and whom it waits for. Ctrl+C or Ctrl+D on its own port ends it.
+- `connect(name, timeout, attempts)` calls the board `name`, waiting up to
+  `timeout` ms (5000 when not given), and says `<name> connected.` From
+  then on, what is typed on this board's port goes to the far board, and
+  what it answers comes back. Ctrl+D hands the port back to this board's
+  console and says `<name> disconnected.`; the far board keeps listening.
+  A first call that is not answered says `Connection timed out.`
+- A link whose far board sends no beacon for six seconds is lost, as when
+  that board is switched off or runs a long command. `attempts` says what
+  happens then:
+  - negative, which it is when not given: the console says `<name> lost;
+    calling again, Ctrl+D stops.` and calls the far board again, each
+    call waiting `timeout`, until it answers (`<name> connected.`) or
+    Ctrl+D is typed (`<name> disconnected.`);
+  - 0: the link is over, `<name> disconnected.`, as before `attempts`
+    was added;
+  - a positive number: that many calls after each loss, then
+    `<name> disconnected.` if none was answered.
+- While it calls, the console takes no keys but Ctrl+D, which is noticed
+  between calls; whatever else is typed is dropped, and a Ctrl+D typed
+  after more than 254 other characters during one call can be lost. A
+  listening board that is called again starts its session over.
+- While it calls, the calling board runs none of its own handlers: their
+  events wait until the link is back, the calls run out, or Ctrl+D.
+- A far board that restarts into `listen()` without a name, as a robot's
+  board can at every start, is called again and answers. One that
+  restarts into `listen(name)` with this board's name sends beacons that
+  this board takes as the link alive, so the loss is not noticed.
+- A link the far board closes, by Ctrl+C or Ctrl+D on its port or by a
+  `listen()` typed over the link, is over at once, without calls.
+- `microbit.radio.rx()` returns `false` once the link is over, and then
+  `true` if the far board closed it, `false` if it was lost.
+- The link has no protection: a board that calls with the name of a
+  listening board's partner is served.
+
+
 ## Debugging
 
 The `codal.json` file has two variables:

@@ -1625,6 +1625,19 @@ static bool radio_called_us(const char *from)
     return true;
 }
 
+/* Whether something the far end sent may still wait: a DATA
+ * frame of this link held, or any frame not yet read. The
+ * calling end judges silence only once they are read, so a
+ * close that waits behind data is seen as a close, and a beacon
+ * behind it as a sign of life. */
+static bool radio_pending()
+{
+    if (radio_held_len >= RADIO_HEAD && radio_held[0] == RADIO_DATA
+        && radio_held[1] == radio_link)
+        return true;
+    return uBit.radio.dataReady() > 0;
+}
+
 /* A DATA frame of this link, answered: its length, or -1 when
  * none has come, or when it came before, since the far end did
  * not hear the first answer; then it is answered again and
@@ -1758,10 +1771,10 @@ static bool radio_one(uint8_t kind, const char *body, int len)
                     lua_pushboolean(L, 1);				\
                     return 1;						\
                   })							\
-/* rx() -> string, nil, or false once the link is over: the
- * far end has closed it, or, at the calling end, has sent no
- * beacon for too long. All a tx took while it waited, or one
- * piece, acknowledged. */						\
+/* rx() -> string, nil, or false once the link is over, and
+ * then true if the far end has closed it, false if, at the
+ * calling end, it has sent no beacon for too long. All a tx
+ * took while it waited, or one piece, acknowledged. */					\
     F(rx,         { uint8_t body[RADIO_BODY];				\
                     uint8_t num;					\
                     int len;						\
@@ -1781,10 +1794,12 @@ static bool radio_one(uint8_t kind, const char *body, int len)
                       radio_put(RADIO_ACK, radio_link, num, NULL, 0);	\
                     }							\
                     if (bye || (radio_calling && uBit.systemTime()	\
-                                - radio_heard > RADIO_SILENCE)) {	\
+                                - radio_heard > RADIO_SILENCE		\
+                                && !radio_pending())) {		\
                       radio_drop();					\
                       lua_pushboolean(L, 0);				\
-                      return 1;						\
+                      lua_pushboolean(L, bye);				\
+                      return 2;						\
                     }							\
                     len = radio_data(body);				\
                     if (len < 0) {					\
