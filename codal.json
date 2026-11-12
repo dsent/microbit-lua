@@ -7,15 +7,17 @@
         // "branch": "34bf4b004a1b6c54abd60201a35b1985c25d4730",
 
 	"url": "https://github.com/attila-lendvai-patches/codal-microbit-v2",
-        "branch": "master",
+        "branch": "compy",
 
         "branches": {
             // "https://github.com/lancaster-university/codal-core": "3d485abf65d7e692aa51e9611d37689ebaa59e00",
-            "https://github.com/attila-lendvai-patches/codal-core.git": "master",
+            "https://github.com/attila-lendvai-patches/codal-core.git": "compy",
 
 	    // "https://github.com/lancaster-university/codal-nrf52": "140d1be19b0f9a9e3c8901928b57d64fc0f7a8a3",
-            "https://github.com/attila-lendvai-patches/codal-nrf52.git": "master",
+            "https://github.com/attila-lendvai-patches/codal-nrf52.git": "compy",
 
+	    // we have no fork of this one, so we depend on a
+	    // specicific commit to remain reproducible.
             "https://github.com/microbit-foundation/codal-microbit-nrf5sdk": "4b8abc690f6c9fca6132e6db5ee13a795a263f88"
         }
     },
