@@ -211,14 +211,12 @@ int tpbot2_busy(lua_State *L) {
 // take any.
 int tpbot_info(lua_State *L) {
   int connected;
-  lua_createtable(L, 0, 2);
   connected = tpbot_i2c_write(32, "\xff\xf9\xa0\x01\x00", 5) == 0;
   lua_pushboolean(L, connected);
-  lua_setfield(L, -2, "connected");
   if (connected) {
     lua_pushstring(L, tpbot_i2c_write(240, "", 0) == 0
                    ? "TPBot Classic" : "TPBot Edu");
-    lua_setfield(L, -2, "robot");
+    return 2;
   }
   return 1;
 }
