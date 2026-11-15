@@ -79,11 +79,11 @@ static const struct test {
 } tests[] = {
   // tpbot, the Classic. info: the Edu's status query, which the Classic
   // ignores, then the Classic's address
-  {TPBOT, "return tpbot.info()", NONE, STATUS " refused|", "connected=false"},
+  {TPBOT, "return tpbot.info()", NONE, STATUS " refused|", "false"},
   {TPBOT, "return tpbot.info()", EDU, STATUS "|240: refused|",
-   "connected=true robot=TPBot Edu"},
+   "true \"TPBot Edu\""},
   {TPBOT, "return tpbot.info()", CLASSIC, STATUS "|240:|",
-   "connected=true robot=TPBot Classic"},
+   "true \"TPBot Classic\""},
 
   {TPBOT, "tpbot.set_car_light(255, 0, 128)", CLASSIC, "20 FF 00 80|", ""},
   {TPBOT, "tpbot.set_car_light(256, 0, 0)", CLASSIC, "",
@@ -124,7 +124,7 @@ static const struct test {
 
   // tpbot2, the Edu: one Edu frame each, and info as tpbot's
   {TPBOT2, "return tpbot2.info()", EDU, STATUS "|240: refused|",
-   "connected=true robot=TPBot Edu"},
+   "true \"TPBot Edu\""},
   {TPBOT2, "tpbot2.set_car_light(255, 0, 128)", EDU,
    "FF F9 30 03 FF 00 80|", ""},
   {TPBOT2, "tpbot2.set_car_light(0, 0, 256)", EDU, "",
@@ -212,23 +212,30 @@ static const struct test {
    "false"},
 };
 
-// What the call left on the stack, as the tests write it
+// What the call left on the stack, as the tests write it: each value,
+// separated by a space, a string in quotes, so that a value's type and the
+// number of values both show
 static void result_of(lua_State *L, char *out, size_t size) {
-  if (lua_gettop(L) == 0) {
-    snprintf(out, size, "%s", "");
-  } else if (lua_istable(L, 1)) {
-    lua_getfield(L, 1, "connected");
-    lua_getfield(L, 1, "robot");
-    snprintf(out, size, "connected=%s%s%s",
-             lua_toboolean(L, -2) ? "true" : "false",
-             lua_isstring(L, -1) ? " robot=" : "",
-             lua_isstring(L, -1) ? lua_tostring(L, -1) : "");
-  } else if (lua_isnil(L, 1)) {
-    snprintf(out, size, "nil");
-  } else if (lua_isboolean(L, 1)) {
-    snprintf(out, size, "%s", lua_toboolean(L, 1) ? "true" : "false");
-  } else {
-    snprintf(out, size, "%.4g", (double)lua_tonumber(L, 1));
+  size_t used = 0;
+  int i;
+  out[0] = '\0';
+  for (i = 1; i <= lua_gettop(L) && used < size; i++) {
+    const char *gap = i > 1 ? " " : "";
+    if (lua_isnil(L, i))
+      snprintf(out + used, size - used, "%snil", gap);
+    else if (lua_isboolean(L, i))
+      snprintf(out + used, size - used, "%s%s", gap,
+               lua_toboolean(L, i) ? "true" : "false");
+    else if (lua_type(L, i) == LUA_TSTRING) {
+      // a byte 0 inside the string shows as \0, which %s would hide
+      size_t length;
+      const char *text = lua_tolstring(L, i, &length);
+      snprintf(out + used, size - used, "%s\"%s%s\"", gap, text,
+               strlen(text) == length ? "" : "\\0");
+    } else
+      snprintf(out + used, size - used, "%s%.4g", gap,
+               (double)lua_tonumber(L, i));
+    used = strlen(out);
   }
 }
 

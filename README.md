@@ -277,8 +277,9 @@ returns.
   from the robot, and a TPBot Classic that is read from holds the bus until
   it is switched off and on, so a program that may meet one asks `info()`
   first.
-- `info()` returns a table: `connected` is true when a robot answers, and
-  then `robot` is `"TPBot Classic"` or `"TPBot Edu"`.
+- `info()` returns whether a robot answers, and when one does, which one:
+  `true, "TPBot Classic"`, `true, "TPBot Edu"` or `false`, as in
+  `local connected, robot = tpbot.info()`.
 - `get_distance()` answers in mm, or `nil` when nothing within about 4 m
   echoes back.
 - The line sensors are pins P13, the left one, and P14, read through
@@ -287,8 +288,8 @@ returns.
   `getDigitalValue(getPin(13))` does.
 - A switched-off Edu holds the bus. A command then waits about 5 s
   (`NRF52I2C_TIMEOUT10US` in `codal.json`; CODAL's default is 14 s) and fails
-  with "The robot does not answer"; `info` waits as long and answers
-  `connected` false. `get_distance` does not use the bus.
+  with "The robot does not answer"; `info` waits as long and returns
+  `false`. `get_distance` does not use the bus.
 
 `tests/tpbot-host-tests.sh` checks every command over a stand-in bus: the
 bytes each writes, what it returns and the words of each error.
