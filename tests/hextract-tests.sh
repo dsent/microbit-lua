@@ -293,15 +293,15 @@ else
   pass "output hex uses LF line endings"
 fi
 
-# Test 17: Metadata start address unchanged after embed
+# Test 17: The script's Start address unchanged after embed
 cp "$FIRMWARE" "$TMPDIR/fw-meta.hex"
 "$HEXTRACT" embed "$TMPDIR/fw-meta.hex" "$TMPDIR/small.dat" --overwrite
 ORIG_META=$("$HEXTRACT" structure "$FIRMWARE" 2>&1 | grep "Start:" | head -1)
 NEW_META=$("$HEXTRACT" structure "$TMPDIR/fw-meta.hex" 2>&1 | grep "Start:" | head -1)
 if [ "$ORIG_META" = "$NEW_META" ]; then
-  pass "metadata start address unchanged after embed"
+  pass "script Start address unchanged after embed"
 else
-  fail "metadata start address unchanged after embed" "start changed: $ORIG_META -> $NEW_META"
+  fail "script Start address unchanged after embed" "start changed: $ORIG_META -> $NEW_META"
 fi
 
 # Test 18: Round-trip produces identical hex file
