@@ -71,8 +71,9 @@ Located immediately after the `.data` LMA in FLASH, 20 bytes (5 little-endian 32
 | 0x0C | Size | Size of the Lua script in bytes |
 | 0x10 | Space | Total FLASH space available for the script (from Start to end of FLASH region) |
 
-**Invariant**: `Size == End - Start`. The `embed` command maintains
-this invariant and `extract` reports a warning when it's broken.
+**Invariants**: `Start < End`, `Size == End - Start`, `0 < Size < Space`
+and `Space < 512 KB`. The `embed` command rejects a script whose size
+would break them.
 
 The `.lua_meta` block and `.lua_script` section are placed as the last
 pieces in FLASH, so that all remaining space is available for embedding
@@ -144,7 +145,9 @@ Output:
 - Resizes the containing block to match the new script length
 - If `<output.hex>` is omitted and `--overwrite` is not set, prompts for confirmation
 - If `<output.hex>` is omitted and `--overwrite` is set, writes back to the input file
-- Rejects scripts larger than `Space`, the space the metadata reports
+- Rejects an empty script and one of `Space` bytes or more, where `Space` is
+  the space the metadata reports: the metadata of either would break an
+  invariant, and detection would skip it
 
 ### Example
 
@@ -193,6 +196,9 @@ The suite covers:
 - Embed idempotency (same data twice produces identical output)
 - Embed smaller/larger scripts with round-trip verification
 - Rejection of oversized scripts
+- The size bounds: scripts of 1 and `Space - 1` bytes round-trip with valid
+  checksums, and a script of `Space` bytes and an empty script are rejected
+  without writing a hex
 - Checksum validity after embed
 - Sequential embeds (shrink -> grow -> shrink)
 - Round-trip integrity (embed then extract matches source)
