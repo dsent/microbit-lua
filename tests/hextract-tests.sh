@@ -287,7 +287,7 @@ else
 fi
 
 # Test 16: LF line endings in output hex
-if grep -qP '\r\n' "$TMPDIR/fw-out.hex"; then
+if grep -q $'\r' "$TMPDIR/fw-out.hex"; then
   fail "output hex uses LF line endings" "CRLF found"
 else
   pass "output hex uses LF line endings"
