@@ -22,8 +22,11 @@ the firmware image.
 The hextract tool requires a known layout of the firmware. For that we
 need to edit the linker script, but that lives in the
 `codal-microbit-v2` repo. To avoid having to patch CODAL itself, we
-introduce a phase in our build script that applies the
-`source/nrf52833-softdevice.ld.patch` patch to CODAL's linker script.
+introduce a phase in our build script that patches CODAL's linker
+script: `source/nrf52833.ld.patch` patches `nrf52833.ld`, and when
+`codal.json` sets `DEVICE_BLE` to 1,
+`source/nrf52833-softdevice.ld.patch` patches
+`nrf52833-softdevice.ld` instead.
 
 ## Building
 

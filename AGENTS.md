@@ -12,11 +12,18 @@
 ## Build
 - Use `python3 build.py --clean` as the entry point (not cmake directly)
 - Outputs `MICROBIT.hex` and `MICROBIT.bin` in the project root (`build/` holds the ELF + map)
-- Dependencies are pinned via `"branches"` in `codal.json`: each key is the repo URL to
-  clone from (may be a fork) and each value the ref (SHA or branch). Entries are matched
-  to `target.json` dependencies by repo NAME — same semantics in the CMake fresh-clone
-  path (`find_dependency_override`) and `build.py --update`. Update those SHAs to bump.
-- `build.py --clean` only wipes `build/`; `libraries/` is reused as-is. Run
+- `codal.json` names the target's repo and ref (`"url"`, `"branch"`), and `"branches"`
+  overrides where each dependency comes from: each key is the repo URL to clone from
+  (may be a fork) and each value the ref, a SHA (a pin) or a branch. The target and two
+  of the three dependencies follow the `compy` branch. The dependencies are the ones the
+  target lists in `target-locked.json`, or in `target.json` when the target in
+  `codal.json` sets `"dev": true`. CMake takes any non-empty value as dev, `false`
+  included, while `build.py --update` reads `false` as not dev. Overrides are matched
+  to the dependencies by repo NAME — same semantics in the CMake fresh-clone path
+  (`find_dependency_override`) and `build.py --update`. Update a SHA to bump a pin.
+- `build.py --clean` configures, then runs `make clean` (or `ninja clean`) in `build/`:
+  it removes what the build compiled, while CMake's cache and the configuration it
+  generated stay. Delete `build/` to start afresh. `libraries/` is reused as-is. Run
   `./build.py --update` after changing pins (the build warns if a 40-hex pin differs).
 - Patches to the Lua sources live in `source/` and are listed in order with
   `lua_patch(FILE PATCH)` in `CMakeLists.txt`, before `lua_patch_apply()`. Every
@@ -35,7 +42,7 @@
 - `bash tests/cstack-host-tests.sh` tests `source/lua-cstack.c`'s limit,
   `bash tests/lua-limits-host-tests.sh` the patched Lua's call limits, and
   `bash tests/tpbot-host-tests.sh` the frames `source/tpbot.c` writes over a
-  stand-in bus; they need `cc` and the Lua tarball a firmware build leaves in
+  stand-in bus; they need `cc`, `patch` and the Lua tarball a firmware build leaves in
   `libraries/`.
 - `bash tests/lua-float-math-tests.sh` tests Lua's math in float
   (`source/lua-float-math.h`); it needs `cc`, `nm`, `patch` and the Lua
