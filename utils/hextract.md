@@ -37,8 +37,8 @@ programming flash memory. Each line is a record with the structure:
 The 16-bit `AAAA` field is relative to a base set by type `02` or `04` records.
 Type `02` uses segment addressing (base = segment << 4), giving a 20-bit
 address space. Type `04` uses linear addressing (base = upper << 16), giving a
-32-bit address space. Once a type `04` record appears, it takes precedence over
-type `02`.
+32-bit address space. The last `02` or `04` record before a data record sets
+its base.
 
 ### Checksum
 
@@ -77,9 +77,14 @@ would break them.
 
 The `.lua_meta` block and `.lua_script` section are placed as the last
 pieces in FLASH, so that all remaining space is available for embedding
-larger Lua scripts later. The `hextract` tool auto-detects the metadata
-location by searching for the `LUA1` magic value at 4-byte aligned
-offsets, so it works with any linker layout without hardcoded addresses.
+larger Lua scripts later. The `hextract` tool finds the metadata
+without a hardcoded address: it scans each block (see Parsing) for the
+`LUA1` magic value in steps of four bytes from the block's start, and
+takes the first match whose fields hold the invariants. It finds
+metadata that starts a multiple of four bytes into its block and lies
+whole within it. It skips a match that breaks an invariant; when no
+match holds them, every command reports that the hex holds no Lua
+metadata.
 
 ## Architecture
 
@@ -111,7 +116,9 @@ A gap in addresses or a change in addressing mode starts a new block.
 
 `serialize_blocks()` writes blocks back to Intel HEX format:
 - Type 02 (segment) or Type 04 (linear) records are emitted when the base changes
-- Data records use 16-byte chunks
+- Data records reuse the lengths the block was read with, in order from its
+  start, until the block ends, so a smaller script can cut the last one short;
+  bytes past them, which a larger script adds, go in records of up to 16 bytes
 - Output uses LF line endings
 - Ends with `:00000001FF` (EOF record)
 
@@ -205,4 +212,4 @@ The suite covers:
 - `--overwrite` flag behavior
 - Output file isolation (original preserved when writing to different file)
 - LF line endings in output
-- Metadata start address stability after embed
+- The script's `Start` address unchanged after embed
