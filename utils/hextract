@@ -696,10 +696,17 @@ local function cmd_embed(args)
     script_file:close()
     local script_len = #script_data
 
-    if script_len > avail_space then
+    -- find_meta_addr() accepts only 0 < Size < Space, so a script
+    -- outside those bounds would leave metadata it skips.
+    if script_len == 0 then
+        io.stderr:write("Error: script is empty\n")
+        return 1
+    end
+
+    if script_len >= avail_space then
         io.stderr:write(string.format(
             "Error: script too large: %d bytes, max %d bytes\n",
-            script_len, avail_space))
+            script_len, avail_space - 1))
         return 1
     end
 

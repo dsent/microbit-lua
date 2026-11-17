@@ -51,6 +51,23 @@ generate_data() {
   "
 }
 
+# Generate exactly <size> bytes; generate_data also writes a newline after
+# every 64 bytes
+generate_exact_data() {
+  local size=$1
+  local output=$2
+  generate_data "$size" "$output.full"
+  head -c "$size" "$output.full" > "$output"
+}
+
+# Succeed when structure reports every record of a hex valid and no errors
+checksums_valid() {
+  local output
+  output=$("$HEXTRACT" structure "$1" 2>&1)
+  ! echo "$output" | grep -q "^=== CHECKSUM / FORMAT ERRORS ===$" \
+    && echo "$output" | grep -qE "^  Checksums: ([0-9]+)/\1 valid$"
+}
+
 # Verify prerequisites
 if [ ! -f "$FIRMWARE" ]; then
   echo "Error: $FIRMWARE not found. Build the project first."
@@ -161,6 +178,55 @@ if ! "$HEXTRACT" embed "$FIRMWARE" "$TMPDIR/huge.dat" "$TMPDIR/fw-huge.hex" 2>/d
   pass "embed rejects data too large"
 else
   fail "embed rejects data too large" "should have failed"
+fi
+
+# The bounds embed enforces must match the ones metadata detection checks
+# (0 < Size < Space), or embed writes metadata that detection skips, and
+# the hex then reads back only if it holds another valid candidate.
+SPACE=$("$HEXTRACT" structure "$FIRMWARE" | sed -n 's/^  Space: 0x[0-9A-F]* (\([0-9]*\))$/\1/p')
+if [ -z "$SPACE" ]; then
+  echo "Error: cannot read Space from $FIRMWARE."
+  exit 1
+fi
+
+# Test 10a: Embed a script of Space - 1 bytes, the largest that fits
+generate_exact_data $((SPACE - 1)) "$TMPDIR/space-1.dat"
+if "$HEXTRACT" embed "$FIRMWARE" "$TMPDIR/space-1.dat" "$TMPDIR/fw-space-1.hex" > /dev/null \
+   && "$HEXTRACT" extract "$TMPDIR/fw-space-1.hex" "$TMPDIR/extracted-space-1.dat" \
+   && cmp -s "$TMPDIR/space-1.dat" "$TMPDIR/extracted-space-1.dat" \
+   && checksums_valid "$TMPDIR/fw-space-1.hex"; then
+  pass "embed Space - 1 bytes round-trip"
+else
+  fail "embed Space - 1 bytes round-trip" "embed or extract failed, data differs, or a checksum is bad"
+fi
+
+# Test 10b: Embed a script of exactly Space bytes (should fail)
+generate_exact_data "$SPACE" "$TMPDIR/space.dat"
+if ! "$HEXTRACT" embed "$FIRMWARE" "$TMPDIR/space.dat" "$TMPDIR/fw-space.hex" 2>/dev/null \
+   && [ ! -e "$TMPDIR/fw-space.hex" ]; then
+  pass "embed rejects Space bytes"
+else
+  fail "embed rejects Space bytes" "should have failed without writing a hex"
+fi
+
+# Test 10c: Embed an empty script (should fail)
+: > "$TMPDIR/empty.dat"
+if ! "$HEXTRACT" embed "$FIRMWARE" "$TMPDIR/empty.dat" "$TMPDIR/fw-empty.hex" 2>/dev/null \
+   && [ ! -e "$TMPDIR/fw-empty.hex" ]; then
+  pass "embed rejects an empty script"
+else
+  fail "embed rejects an empty script" "should have failed without writing a hex"
+fi
+
+# Test 10d: Embed a one-byte script, the smallest that fits
+printf 'x' > "$TMPDIR/one.dat"
+if "$HEXTRACT" embed "$FIRMWARE" "$TMPDIR/one.dat" "$TMPDIR/fw-one.hex" > /dev/null \
+   && "$HEXTRACT" extract "$TMPDIR/fw-one.hex" "$TMPDIR/extracted-one.dat" \
+   && cmp -s "$TMPDIR/one.dat" "$TMPDIR/extracted-one.dat" \
+   && checksums_valid "$TMPDIR/fw-one.hex"; then
+  pass "embed one byte round-trip"
+else
+  fail "embed one byte round-trip" "embed or extract failed, data differs, or a checksum is bad"
 fi
 
 # Test 11: All checksums valid after embed
