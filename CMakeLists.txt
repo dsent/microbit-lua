@@ -432,6 +432,11 @@ lua_patch(luaconf.h luaconf-float.patch)
 # sprintf has no float support.
 lua_patch(luaconf.h luaconf-number-text.patch)
 lua_patch(lstrlib.c lstrlib-number-text.patch)
+# With LUA_BASE_NO_STDIO, which the firmware's Lua sets below, the base
+# library has no print, dofile or loadfile. The board has no stdout and no
+# files, and the firmware's script defines its own print; the C ones linked
+# stdio for output that went nowhere.
+lua_patch(lbaselib.c lbaselib-no-stdio.patch)
 lua_patch_apply()
 # Application sources build at -O2; the number files and the TPBot driver,
 # which waits on the I2C bus, are smaller at -Os.
@@ -470,6 +475,10 @@ target_include_directories(lua PUBLIC
 # target_compile_definitions(lua PRIVATE
 #     LUA_ANSI
 # )
+
+target_compile_definitions(lua PRIVATE
+    LUA_BASE_NO_STDIO
+)
 
 target_compile_options(lua PRIVATE
     -Os

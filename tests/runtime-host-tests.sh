@@ -16,7 +16,10 @@ sed -n -E 's/^lua_patch\([^ ]+ ([^)]+)\)$/\1/p' "$ROOT/CMakeLists.txt" |
   done
 # The host's stack lies far above this, so the C stack check never fires.
 printf 'char stand_in[16] __asm__("__StackLimit");\n' > "$DIR/stack-limit.c"
-FLAGS=(-std=gnu99 -O2 -DLUA_NUMBER_IS_FLOAT=1 -I"$SRC" -I"$ROOT/source")
+# The firmware's Lua: float numbers, and a base library with no print,
+# dofile or loadfile of C's
+FLAGS=(-std=gnu99 -O2 -DLUA_NUMBER_IS_FLOAT=1 -DLUA_BASE_NO_STDIO
+       -I"$SRC" -I"$ROOT/source")
 # Lua's own sources, the ones the firmware builds, their warnings aside
 LUA=(lapi lcode ldebug ldo ldump lfunc lgc llex lmem lobject lopcodes
      lparser lstate lstring ltable ltm lundump lvm lzio

@@ -106,6 +106,13 @@ LLMs, compatible with Lua 5.1.
 Some technical details are documented in
 [utils/hextract.md](utils/hextract.md).
 
+A payload that replaces the firmware's whole script brings its own
+`print` if it prints: Lua's base library here has no `print`, `dofile` or
+`loadfile` (`source/lbaselib-no-stdio.patch`), since the board has no
+stdout and no files. The firmware's script defines the `print` the REPL
+and programs call, writing to the serial port, or over the radio link
+while one is up.
+
 
 ## Serial connection
 

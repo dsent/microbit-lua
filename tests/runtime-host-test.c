@@ -855,6 +855,24 @@ static char *slurp(const char *path, size_t *length) {
   return text;
 }
 
+// The firmware's base library has no print, dofile or loadfile of C's;
+// the script's own print is the one the REPL and programs call
+static void the_base_library(void) {
+  const char *said;
+  fresh();
+  boot_alone("require('microbit')\n"
+             "local send = require('microbit.serial').send\n"
+             "send(type(print) .. ' ' .. type(dofile) .. ' ' .. "
+             "type(loadfile) .. ' ' .. type(loadstring))\n");
+  expect(strstr(out, "nil nil nil function") != NULL,
+         "a whole-script program finds no print, dofile or loadfile");
+  fresh();
+  boot();
+  said = line("print('hi', 2, nil)");
+  expect(strstr(said, "hi\t2\tnil\r\n> ") != NULL,
+         "... and the firmware's script prints with a print of its own");
+}
+
 int main(int argc, char **argv) {
   if (argc != 2) {
     fprintf(stderr, "usage: %s source/lua-script.lua\n", argv[0]);
@@ -870,6 +888,7 @@ int main(int argc, char **argv) {
   mistakes_named();
   the_radio_link();
   the_display();
+  the_base_library();
   printf("%d checks, %d failed\n", checks, failures);
   return failures != 0;
 }
