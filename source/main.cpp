@@ -81,6 +81,19 @@ void onBLEDisconnected(MicroBitEvent)
 }
 #endif
 
+// Lua's allocator, the one luaL_newstate uses: realloc and free on CODAL's
+// heap. luaL_newstate also sets a panic handler that prints with fprintf,
+// which links stdio; main sets its own handler right after.
+static void *lua_alloc(void *ud, void *ptr, size_t osize, size_t nsize) {
+    (void)ud;
+    (void)osize;
+    if (nsize == 0) {
+        free(ptr);
+        return NULL;
+    }
+    return realloc(ptr, nsize);
+}
+
 static int lua_panic_handler(lua_State *L) {
     (void)L;
     while (true) {
@@ -141,7 +154,7 @@ int main() {
     LUA_MEM_REPORT(NULL, "boot");
 
     /* Create Lua state using CODAL heap */
-    lua_State *L = luaL_newstate();
+    lua_State *L = lua_newstate(lua_alloc, NULL);
     if (!L) {
         lua_panic_handler(NULL);
     }
