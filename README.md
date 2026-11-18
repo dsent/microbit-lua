@@ -175,6 +175,12 @@ port. You can also add `DMESG("hello");` lines to your own C++ code.
  - 1: general debug info
  - 2: heap allocation info
 
+The firmware stops the board with panic 080 when the C library calls
+`abort` or an `assert` in it fails (`source/runtime-stubs.cpp`), a code
+CODAL leaves free; a program can show the same code with
+`microbit.panic(80)`. CODAL's codes, such as 020 for a full heap, are
+listed in its `ErrorNo.h`.
+
 
 ## Stack usage
 
