@@ -6,11 +6,13 @@
 // the double one rounded to float by up to 3 ulp, as newlib's sinhf and
 // coshf do near where they overflow; at the top of the float range a result
 // can be the largest finite float where the double one rounded to infinity
-// (tests/lua-float-math-tests.sh measures it). % takes only its floor in
-// float, which gives the same value; source/luaconf-nummod.patch keeps its
-// product and difference in double. math.rad and math.deg still multiply
-// and divide by a double constant. Constant folding in lcode calls the same
-// functions as the VM, so compiled and run-time results agree.
+// (tests/lua-float-math-tests.sh measures it). % takes fmodf's exact
+// remainder (source/luaconf-nummod.patch), and math.random scales its draw
+// in 64-bit integers (source/lmathlib-random.patch). math.rad and math.deg
+// still multiply and divide by a double constant.
+// Constant folding in lcode calls the same functions as the VM, so compiled
+// and run-time results agree, but for the sign of a zero, which Lua 5.1's
+// constant table does not keep apart.
 //
 // CMakeLists.txt forces this header into Lua's own sources only, after
 // codal_extra_definitions.h, so CODAL's and the firmware's own calls keep

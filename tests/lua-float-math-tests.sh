@@ -38,9 +38,10 @@ fi
 echo "ok   Lua's sources call no double math function but modf"
 (cd "$DIR" && cc "${FLAGS[@]}" -w -c "$ROOT/source/lua-cstack.c" \
   "$ROOT/source/lua-number2str.c" "$ROOT/source/lua-format.c" \
-  "$DIR/stack-limit.c")
+  "$ROOT/tests/lua-random-stub.c" "$DIR/stack-limit.c")
 cc -o "$DIR/lua" "$DIR"/*.o -lm
 "$DIR/lua" "$ROOT/tests/lua-float-math-test.lua"
-cc -std=gnu99 -O2 -Wall -Wextra -Werror -o "$DIR/float-math" \
-  "$ROOT/tests/lua-float-math-test.c" -lm
+# with Lua's patched luaconf.h, for the % it measures
+cc -std=gnu99 -O2 -Wall -Wextra -Werror -DLUA_CORE -DLUA_NUMBER_IS_FLOAT=1 \
+  -I"$SRC" -o "$DIR/float-math" "$ROOT/tests/lua-float-math-test.c" -lm
 "$DIR/float-math" 3

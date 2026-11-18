@@ -248,9 +248,14 @@ only. A result can differ from the double function's, rounded to float,
 in its last bits: by 1 ulp for most functions, 2 for `math.tanh` and
 `math.log10`, and up to 3 for `math.sinh` and `math.cosh` near where they
 overflow. At the top of the float range a result can be the largest
-finite float where the double one rounded to `math.huge`. `%` takes its floor in float and keeps
-the rest in double (`source/luaconf-nummod.patch`), so its results are as
-before; `math.modf`, `math.rad` and `math.deg` also still work in double.
+finite float where the double one rounded to `math.huge`. `%` takes
+`fmodf`'s exact remainder (`source/luaconf-nummod.patch`): through a
+quotient, which rounds, `57357096 % 7` gave -1 instead of 6. `math.random`
+scales its draw in 64-bit integers (`source/lmathlib-random.patch`):
+divided by `RAND_MAX` in float, its number rounded to 1 about once in 33
+million draws, and `math.random(n)` then answered `n + 1`;
+`math.random()` keeps 24 bits of the draw, which a float holds exactly.
+`math.modf`, `math.rad` and `math.deg` also still work in double.
 `tests/lua-float-math-tests.sh` measures each function on the host.
 
 
