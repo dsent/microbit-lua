@@ -432,6 +432,9 @@ lua_patch(luaconf.h luaconf-float.patch)
 # sprintf has no float support.
 lua_patch(luaconf.h luaconf-number-text.patch)
 lua_patch(lstrlib.c lstrlib-number-text.patch)
+# % keeps its product and difference in double, so that Lua's math in float
+# (source/lua-float-math.h) leaves % as it was: 16777228 % 3 stays 1.
+lua_patch(luaconf.h luaconf-nummod.patch)
 # With LUA_BASE_NO_STDIO, which the firmware's Lua sets below, the base
 # library has no print, dofile or loadfile. The board has no stdout and no
 # files, and the firmware's script defines its own print; the C ones linked
@@ -480,7 +483,10 @@ target_compile_definitions(lua PRIVATE
     LUA_BASE_NO_STDIO
 )
 
+# Lua's math in single precision when its numbers are floats; the header
+# says why, and its own check reads LUA_NUMBER_IS_FLOAT.
 target_compile_options(lua PRIVATE
+    -include ${CMAKE_SOURCE_DIR}/source/lua-float-math.h
     -Os
     -ffunction-sections
     -fdata-sections
