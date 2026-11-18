@@ -41,6 +41,17 @@ void abort(void)
     }
 }
 
+// A failed assert in newlib, such as rand's check of its state, stops the
+// board as abort does. newlib's __assert_func printed with fiprintf, which
+// kept stdio's whole write path in the image, to a stderr no _write leads
+// anywhere.
+void __assert_func(const char *file, int line, const char *func,
+                   const char *expr)
+{
+    (void)file; (void)line; (void)func; (void)expr;
+    abort();
+}
+
 // The firmware never returns from main, so a global object's destructor
 // never runs. Registering none keeps newlib's atexit list out.
 int __aeabi_atexit(void *object, void (*destructor)(void *), void *dso)
