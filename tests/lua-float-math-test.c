@@ -4,15 +4,17 @@
 // overflows, and reports the largest difference in units in the last place
 // (ulp); infinity counts as one ulp past the largest finite float. It fails
 // when one exceeds the bound given as the first argument, or when the two
-// disagree on a NaN. luai_nummod and luai_numpow, the VM's % and ^, are
-// measured as luaconf.h writes them, with source/luaconf-nummod.patch: %
-// is measured in ulp of its larger operand or result, as near a result of
-// zero any rounding of the product shows as a large distance in ulp.
+// disagree on a NaN. luai_nummod, the VM's %, is taken from Lua's patched
+// luaconf.h, which tests/lua-float-math-tests.sh puts on the include path,
+// and measured in ulp of its larger operand or result; luai_numpow, ^, as
+// luaconf.h writes it.
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "luaconf.h"
 
 static int failures, checks;
 static long bound;
@@ -159,15 +161,17 @@ static void two(const binary *b) {
   end(&r);
 }
 
-// luai_nummod with float numbers: after the header, the floor in float
-// and the product and difference in double (source/luaconf-nummod.patch);
-// before it, the quotient in float and the rest in double, through floor
-static float mod_f(float a, float b) {
-  return (float)(a - floorf(a / b) * (double)b);
-}
+// luai_nummod from Lua's patched luaconf.h (source/luaconf-nummod.patch),
+// against the remainder in double, exact for float operands, moved by one
+// divisor when its sign differs from the divisor's; an infinite divisor
+// gives nan, as Lua 5.1's a - floor(a/b)*b does
+static float mod_f(float a, float b) { return luai_nummod(a, b); }
 static double mod_d(double a, double b) {
-  float q = (float)a / (float)b;
-  return a - floor(q) * b;
+  double m;
+  if (isinf(b)) return NAN;
+  m = fmod(a, b);
+  if (m != 0 && (m < 0) != (b < 0)) m += b;
+  return m + 0.0;
 }
 
 // ^ with a whole exponent, as in 2^10
@@ -225,6 +229,12 @@ int main(int argc, char **argv) {
     every(&tops[i]);
   for (i = 0; i < sizeof binaries / sizeof binaries[0]; i++)
     two(&binaries[i]);
+  // the grid's divisors are finite: % by an infinity on its own
+  checks++;
+  if (!isnan(mod_f(5, INFINITY)) || !isnan(mod_f(-5, -INFINITY))) {
+    failures++;
+    printf("FAIL %% by an infinity is not nan\n");
+  }
   printf("%d functions within %ld ulp, %d failed\n", checks, bound, failures);
   return failures != 0;
 }

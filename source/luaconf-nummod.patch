@@ -1,14 +1,26 @@
 --- luaconf.h
 +++ luaconf.h
-@@ -592,7 +592,10 @@
+@@ -592,7 +592,23 @@
  #define luai_numsub(a,b)	((a)-(b))
  #define luai_nummul(a,b)	((a)*(b))
  #define luai_numdiv(a,b)	((a)/(b))
--#define luai_nummod(a,b)	((a) - floor((a)/(b))*(b))
-+/* the product and the difference in double, so that with float numbers
-+   (LUA_NUMBER_IS_FLOAT) a product past float's precision or range does
-+   not round or overflow before the subtraction */
-+#define luai_nummod(a,b)	((a) - floor((a)/(b))*(double)(b))
++#if defined(LUA_NUMBER_IS_FLOAT) && LUA_NUMBER_IS_FLOAT
++/* % with float numbers: fmodf's remainder is exact, where a - floor(a/b)*b
++   rounds its quotient (57357096 % 7 gave -1, and 2^59 % 49 gave 64, not
++   46); a remainder whose sign differs from the divisor's moves by one
++   divisor, as floor does, and a zero comes out +0, as it did. An infinite
++   divisor gives nan, as the formula does. */
++static inline float luai_nummodf (float a, float b) {
++  float m;
++  if (isinf(b)) return (a - a) * b;
++  m = fmodf(a, b);
++  if (m != 0 && (m < 0) != (b < 0)) m += b;
++  return m + 0.0f;
++}
++#define luai_nummod(a,b)	(luai_nummodf((a),(b)))
++#else
+ #define luai_nummod(a,b)	((a) - floor((a)/(b))*(b))
++#endif
  #define luai_numpow(a,b)	(pow(a,b))
  #define luai_numunm(a)		(-(a))
  #define luai_numeq(a,b)		((a)==(b))

@@ -1,0 +1,52 @@
+--- lmathlib.c
++++ lmathlib.c
+@@ -178,6 +178,41 @@
+ }
+ 
+ 
++#if defined(LUA_NUMBER_IS_FLOAT) && LUA_NUMBER_IS_FLOAT
++/* With float numbers, rand() over RAND_MAX rounded to 1 for rand() of
++   2^31-64 and more, about once in 33 million draws, and random(n) then
++   gave n+1. Here a draw k, from 0 to RAND_MAX, falls in one of w equal
++   parts, k*w/(RAND_MAX+1), in 64-bit integers: a multiply and a shift,
++   which never reach w nor overflow for any int range, and leave no part
++   of a range up to RAND_MAX+1 wide out. random() takes w = 2^24, which a
++   float holds exactly, and a range its width. */
++#define random_part(k,w) \
++  ((long long)((k)*(unsigned long long)(w)/((unsigned long long)RAND_MAX+1)))
++static int math_random (lua_State *L) {
++  unsigned long long k = (unsigned)rand() % ((unsigned long long)RAND_MAX+1);
++  switch (lua_gettop(L)) {  /* check number of arguments */
++    case 0: {  /* no arguments */
++      lua_pushnumber(L, (lua_Number)random_part(k, 16777216) / 16777216);
++      break;
++    }
++    case 1: {  /* only upper limit */
++      int u = luaL_checkint(L, 1);
++      luaL_argcheck(L, 1<=u, 1, "interval is empty");
++      lua_pushnumber(L, (lua_Number)(random_part(k, u) + 1));
++      break;
++    }
++    case 2: {  /* lower and upper limits */
++      int l = luaL_checkint(L, 1);
++      int u = luaL_checkint(L, 2);
++      luaL_argcheck(L, l<=u, 2, "interval is empty");
++      lua_pushnumber(L, (lua_Number)(random_part(k, (long long)u-l+1) + l));
++      break;
++    }
++    default: return luaL_error(L, "wrong number of arguments");
++  }
++  return 1;
++}
++#else
+ static int math_random (lua_State *L) {
+   /* the `%' avoids the (rare) case of r==1, and is needed also because on
+      some systems (SunOS!) `rand()' may return a value larger than RAND_MAX */
+@@ -204,6 +239,7 @@
+   }
+   return 1;
+ }
++#endif
+ 
+ 
+ static int math_randomseed (lua_State *L) {

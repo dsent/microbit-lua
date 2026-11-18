@@ -432,9 +432,12 @@ lua_patch(luaconf.h luaconf-float.patch)
 # sprintf has no float support.
 lua_patch(luaconf.h luaconf-number-text.patch)
 lua_patch(lstrlib.c lstrlib-number-text.patch)
-# % keeps its product and difference in double, so that Lua's math in float
-# (source/lua-float-math.h) leaves % as it was: 16777228 % 3 stays 1.
+# % takes fmodf's exact remainder, so that with float numbers 57357096 % 7
+# is 6, not -1, and 16777228 % 3 is 1.
 lua_patch(luaconf.h luaconf-nummod.patch)
+# math.random scales its draw in 64-bit integers, so that math.random()
+# stays below 1 and math.random(n) never answers n+1.
+lua_patch(lmathlib.c lmathlib-random.patch)
 # With LUA_BASE_NO_STDIO, which the firmware's Lua sets below, the base
 # library has no print, dofile or loadfile. The board has no stdout and no
 # files, and the firmware's script defines its own print; the C ones linked
