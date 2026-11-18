@@ -37,6 +37,9 @@
   `bash tests/tpbot-host-tests.sh` the frames `source/tpbot.c` writes over a
   stand-in bus; they need `cc` and the Lua tarball a firmware build leaves in
   `libraries/`.
+- `bash tests/lua-float-math-tests.sh` tests Lua's math in float
+  (`source/lua-float-math.h`); it needs `cc`, `nm`, `patch` and the Lua
+  tarball a firmware build leaves in `libraries/`.
 - CI runs every `tests/*-tests.sh`: `hextract-tests.sh` in the build job, the
   rest in a second job on a plain runner, with the tarball the build fetched,
   once the build job has passed. A host test named `tests/<name>-tests.sh`

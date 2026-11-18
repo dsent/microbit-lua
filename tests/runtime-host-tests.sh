@@ -24,7 +24,10 @@ FLAGS=(-std=gnu99 -O2 -DLUA_NUMBER_IS_FLOAT=1 -DLUA_BASE_NO_STDIO
 LUA=(lapi lcode ldebug ldo ldump lfunc lgc llex lmem lobject lopcodes
      lparser lstate lstring ltable ltm lundump lvm lzio
      lauxlib lbaselib lmathlib lstrlib ltablib)
-(cd "$DIR" && cc "${FLAGS[@]}" -w -c $(printf "$SRC/%s.c " "${LUA[@]}") \
+# with Lua's math in float, as CMakeLists.txt builds them
+(cd "$DIR" && cc "${FLAGS[@]}" -include "$ROOT/source/lua-float-math.h" -w \
+  -c $(printf "$SRC/%s.c " "${LUA[@]}"))
+(cd "$DIR" && cc "${FLAGS[@]}" -w -c \
   "$ROOT/source/lua-cstack.c" "$ROOT/source/lua-number2str.c" \
   "$ROOT/source/lua-format.c" "$ROOT/source/lua-strip-debug.c" \
   "$DIR/stack-limit.c")

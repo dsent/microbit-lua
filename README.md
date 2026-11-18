@@ -241,6 +241,18 @@ ignored.
 
 `tests/lua-format-tests.sh` checks it with the host's C compiler.
 
+Numbers are 32-bit floats (`LUA_NUMBER_IS_FLOAT` in `codal.json`), and
+`^` and the `math` functions that call C's math library compute in float
+too (`source/lua-float-math.h`), on the FPU, which does single precision
+only. A result can differ from the double function's, rounded to float,
+in its last bits: by 1 ulp for most functions, 2 for `math.tanh` and
+`math.log10`, and up to 3 for `math.sinh` and `math.cosh` near where they
+overflow. At the top of the float range a result can be the largest
+finite float where the double one rounded to `math.huge`. `%` takes its floor in float and keeps
+the rest in double (`source/luaconf-nummod.patch`), so its results are as
+before; `math.modf`, `math.rad` and `math.deg` also still work in double.
+`tests/lua-float-math-tests.sh` measures each function on the host.
+
 
 ## TPBot
 

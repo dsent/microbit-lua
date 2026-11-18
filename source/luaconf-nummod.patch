@@ -1,0 +1,14 @@
+--- luaconf.h
++++ luaconf.h
+@@ -592,7 +592,10 @@
+ #define luai_numsub(a,b)	((a)-(b))
+ #define luai_nummul(a,b)	((a)*(b))
+ #define luai_numdiv(a,b)	((a)/(b))
+-#define luai_nummod(a,b)	((a) - floor((a)/(b))*(b))
++/* the product and the difference in double, so that with float numbers
++   (LUA_NUMBER_IS_FLOAT) a product past float's precision or range does
++   not round or overflow before the subtraction */
++#define luai_nummod(a,b)	((a) - floor((a)/(b))*(double)(b))
+ #define luai_numpow(a,b)	(pow(a,b))
+ #define luai_numunm(a)		(-(a))
+ #define luai_numeq(a,b)		((a)==(b))
