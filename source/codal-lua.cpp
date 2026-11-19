@@ -713,6 +713,14 @@ static int robot_hold(lua_State *L) {
                     return 0;						\
                   })
 
+// The temperature inside the processor, in whole degrees Celsius: close
+// to the air's while the board does little
+#define LUA_THERMOMETER_FUNCTIONS					\
+    F(getTemperature, { lua_pushinteger(L,				\
+                          uBit.thermometer.getTemperature());		\
+                        return 1;					\
+                      })
+
 #define LUA_AUDIO_FUNCTIONS						\
     F(getAudioPin, { lua_pushlightuserdata(L,				\
                       &uBit.audio.virtualOutputPin);			\
@@ -2174,6 +2182,7 @@ const int digitalRJ[] = { 8, 12, 14, 16 };
 LUA_MICROBIT_FUNCTIONS
 LUA_DISPLAY_FUNCTIONS
 LUA_ACCELEROMETER_FUNCTIONS
+LUA_THERMOMETER_FUNCTIONS
 LUA_AUDIO_FUNCTIONS
 LUA_IO_FUNCTIONS
 LUA_SERIAL_FUNCTIONS
@@ -2232,6 +2241,10 @@ static const LuaApi l_display[] = {
 };
 static const LuaApi l_accelerometer[] = {
     LUA_ACCELEROMETER_FUNCTIONS
+    {NULL, NULL, 0}
+};
+static const LuaApi l_thermometer[] = {
+    LUA_THERMOMETER_FUNCTIONS
     {NULL, NULL, 0}
 };
 static const LuaApi l_audio[] = {
@@ -2442,6 +2455,7 @@ static const LuaModule lua_modules[] = {
   {"microbit.display",       l_display},
   {"microbit.accelerometer", l_accelerometer},
   {"microbit.compass",       l_compass},
+  {"microbit.thermometer",   l_thermometer},
   {"microbit.audio",         l_audio},
   {"microbit.io",            l_io},
   {"microbit.serial",        l_serial},
