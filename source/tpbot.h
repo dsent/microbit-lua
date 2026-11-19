@@ -16,7 +16,8 @@ extern "C" {
     X(set_car_light,    tpbot_set_car_light)            \
     X(set_motors_speed, tpbot_set_motors_speed)         \
     X(info,             tpbot_info)                     \
-    X(get_distance,     tpbot_get_distance)
+    X(get_distance,     tpbot_get_distance)             \
+    X(echo,             tpbot_echo)
 
 // The tpbot2 module: the TPBot Edu's commands, each sending one Edu frame
 // and returning, and whether its last move still runs.
@@ -33,7 +34,8 @@ extern "C" {
     X(adjust_motor_speed, tpbot2_adjust_motor_speed)    \
     X(reset_motor_adjust, tpbot2_reset_motor_adjust)    \
     X(info,             tpbot_info)                     \
-    X(get_distance,     tpbot_get_distance)
+    X(get_distance,     tpbot_get_distance)             \
+    X(echo,             tpbot_echo)
 
 #define X(name, function) int function(lua_State *L);
 TPBOT_FUNCTIONS
@@ -60,6 +62,15 @@ int tpbot_i2c_read(int address, char *data, size_t length);
 
 // The sonar's echo in microseconds, or -1 when none came.
 int tpbot_echo_us(void);
+
+// The longest a sonar's echo lasts, with nothing in front of it.
+#define ECHO_LONGEST_US 60000
+
+// Milliseconds since the board started.
+unsigned long tpbot_now_ms(void);
+
+// Wait ms milliseconds, while the board's other work runs.
+void tpbot_sleep_ms(long ms);
 
 #ifdef __cplusplus
 }

@@ -4,7 +4,8 @@
 // stand-in bus and checks the frames written, in order, and what the call
 // returned or the message it stopped on, matched at its end, after the
 // position Lua puts in front of a bad argument. A frame is written as its
-// bytes in hex, with its address in front when that is not the robots' 32.
+// bytes in hex, with its address in front when that is not the robots' 32,
+// and a wait as its milliseconds after "sleep".
 //
 // Usage: tpbot-host-test
 
@@ -23,7 +24,9 @@ enum plan { CLASSIC, EDU, EDU_BUSY, EDU_SILENT, NONE };
 
 static struct {
   enum plan plan;
-  int echo;            // the sonar's echo in microseconds, -1 for none
+  const int *echoes;   // the sonar's echoes in microseconds, -1 for none,
+  int count, taken;    // taken in turn and from the first again
+  unsigned long clock; // milliseconds, moved on only by a wait
   char log[512];
 } bus;
 
@@ -62,7 +65,18 @@ int tpbot_i2c_read(int address, char *data, size_t length) {
 }
 
 int tpbot_echo_us(void) {
-  return bus.echo;
+  return bus.echoes[bus.taken++ % bus.count];
+}
+
+unsigned long tpbot_now_ms(void) {
+  return bus.clock;
+}
+
+void tpbot_sleep_ms(long ms) {
+  char text[24];
+  snprintf(text, sizeof text, "sleep %ld|", ms);
+  say(text);
+  bus.clock += ms;
 }
 
 // Which module's require a case runs under
@@ -118,6 +132,15 @@ static const struct test {
    robot_no_answer},
 
   {TPBOT, "return tpbot.get_distance()", CLASSIC, "", "171.5"},
+  {TPBOT, "return tpbot.get_distance(340)", CLASSIC, "", "170"},
+  {TPBOT, "return tpbot.echo()", CLASSIC, "", "1000"},
+  {TPBOT, "return tpbot.echo(3)", CLASSIC, "sleep 60|sleep 60|sleep 60|",
+   "1000"},
+  {TPBOT, "return tpbot.echo(2, 0)", CLASSIC, "", "1000"},
+  {TPBOT, "return tpbot.echo(0)", CLASSIC, "",
+   "bad argument #1 to 'echo' (out of range)"},
+  {TPBOT, "return tpbot.echo(1, -1)", CLASSIC, "",
+   "bad argument #2 to 'echo' (out of range)"},
   // the Edu's commands are tpbot2's: Lua says so, and nothing goes out
   {TPBOT, "tpbot.run_distance(145)", CLASSIC, "",
    "attempt to call field 'run_distance' (a nil value)"},
@@ -139,6 +162,7 @@ static const struct test {
   {TPBOT2, "tpbot2.set_motors_speed(30, 30)", NONE,
    "FF F9 10 03 1E 1E 00 refused|", robot_no_answer},
   {TPBOT2, "return tpbot2.get_distance()", EDU, "", "171.5"},
+  {TPBOT2, "return tpbot2.echo()", EDU, "", "1000"},
 
   // a distance or a turn returns once its frame is sent, under 1 does
   // nothing, and the size must fit two bytes
@@ -239,12 +263,14 @@ static void result_of(lua_State *L, char *out, size_t size) {
   }
 }
 
-static int run(lua_State *L, const struct test *t, int echo) {
+static int run(lua_State *L, const struct test *t, const int *echoes,
+               int count) {
   char result[256];
   size_t at;
   memset(&bus, 0, sizeof bus);
   bus.plan = t->plan;
-  bus.echo = echo;
+  bus.echoes = echoes;
+  bus.count = count;
   lua_settop(L, 0);
   if (luaL_loadstring(L, t->code) != 0
       || lua_pcall(L, 0, LUA_MULTRET, 0) != 0)
@@ -280,18 +306,39 @@ static lua_State *state(enum module module) {
   return L;
 }
 
+// Cases over echoes of their own: no echo at all, and echoes around 1000,
+// one of them more than a period from the median and one far out
+static const int none[] = {-1};
+static const int scattered[] = {1000, 1010, 1030, 980, 5000, -1};
+static const struct echo_test {
+  const int *echoes;
+  int count;
+  struct test test;
+} echo_tests[] = {
+  {none, 1, {TPBOT, "return tpbot.get_distance()", CLASSIC, "", "nil"}},
+  {none, 1, {TPBOT, "return tpbot.echo()", CLASSIC, "", "nil"}},
+  {none, 1, {TPBOT, "return tpbot.echo(2, 20)", CLASSIC,
+             "sleep 20|sleep 20|", "nil"}},
+  // median 1010: 1000, 1010 and 1030 are kept
+  {scattered, 6, {TPBOT, "return tpbot.echo(6, 10)", CLASSIC,
+                  "sleep 10|sleep 10|sleep 10|sleep 10|sleep 10|sleep 10|",
+                  "1013"}},
+};
+
 int main(void) {
-  static const struct test no_echo =
-    {TPBOT, "return tpbot.get_distance()", CLASSIC, "", "nil"};
+  static const int thousand[] = {1000};
   lua_State *states[2];
   size_t i, n = sizeof tests / sizeof tests[0];
+  size_t m = sizeof echo_tests / sizeof echo_tests[0];
   int failed = 0;
   states[TPBOT] = state(TPBOT);
   states[TPBOT2] = state(TPBOT2);
   for (i = 0; i < n; i++)
-    failed += run(states[tests[i].module], &tests[i], 1000);
-  failed += run(states[TPBOT], &no_echo, -1);
-  printf("tpbot: %d of %d cases failed\n", failed, (int)n + 1);
+    failed += run(states[tests[i].module], &tests[i], thousand, 1);
+  for (i = 0; i < m; i++)
+    failed += run(states[TPBOT], &echo_tests[i].test, echo_tests[i].echoes,
+                  echo_tests[i].count);
+  printf("tpbot: %d of %d cases failed\n", failed, (int)(n + m));
   lua_close(states[TPBOT]);
   lua_close(states[TPBOT2]);
   return failed != 0;

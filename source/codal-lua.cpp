@@ -1288,9 +1288,6 @@ static int pulse_width(Pin &pin, uint32_t timeout) {
   return system_timer_current_time_us() - rise;
 }
 
-// The longest a sonar's echo lasts, with nothing in front of it.
-#define ECHO_LONGEST_US 60000
-
 // What source/tpbot.c needs of the board.
 
 extern "C" int tpbot_i2c_write(int address, const char *data, size_t length) {
@@ -1314,6 +1311,14 @@ extern "C" int tpbot_echo_us(void) {
   system_timer_wait_us(10);
   trigger.setDigitalValue(0);
   return pulse_width(echo, 25000);
+}
+
+extern "C" unsigned long tpbot_now_ms(void) {
+  return uBit.systemTime();
+}
+
+extern "C" void tpbot_sleep_ms(long ms) {
+  uBit.sleep(ms);
 }
 
 // Nezha 2 takes 8-byte commands: 255, 249, the motor (argument 1), then

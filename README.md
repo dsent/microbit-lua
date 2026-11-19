@@ -269,12 +269,12 @@ Edu (`source/tpbot.c`). Each command sends its robot's I2C frame and
 returns.
 
 - `tpbot`: `set_car_light(r, g, b)`, `set_motors_speed(left, right)`,
-  `info()` and `get_distance()`.
+  `info()`, `get_distance(speed)` and `echo(n, interval)`.
 - `tpbot2`: `set_car_light(r, g, b)`, `set_motors_speed(left, right)`,
   `speed_control(left, right)`, `set_speed(mm_per_s)`, `run_distance(mm)`,
   `turn(degrees)`, `pivot(degrees)`, `busy()`, `set_servo(servo, value)`,
-  `adjust_motor_speed()`, `reset_motor_adjust()`, `info()` and
-  `get_distance()`.
+  `adjust_motor_speed()`, `reset_motor_adjust()`, `info()`,
+  `get_distance(speed)` and `echo(n, interval)`.
 
 - A fraction is dropped. `set_motors_speed` takes speeds from -255 to 255,
   and runs the motors until the next motor command; light values go from 0
@@ -313,8 +313,14 @@ returns.
 - `info()` returns whether a robot answers, and when one does, which one:
   `true, "TPBot Classic"`, `true, "TPBot Edu"` or `false`, as in
   `local connected, robot = tpbot.info()`.
-- `get_distance()` answers in mm, or `nil` when nothing within about 4 m
-  echoes back.
+- `get_distance(speed)` answers in mm, or `nil` when nothing within about
+  4 m echoes back: the time of one echo times half the speed of sound in
+  m/s, 343 unless given.
+- `echo()` answers the time of one echo in microseconds. `echo(n,
+  interval)` times n echoes, one every interval ms, 60 unless given, and
+  answers the mean of those within 25 microseconds, one period of the
+  sonar's sound, of their median. It returns after n intervals however many
+  echoes came. Each answers `nil` when none came.
 - The line sensors are pins P13, the left one, and P14, read through
   `microbit.io`. pxt-TPBot sets them to no pull, as `setPullNone(getPin(13))`
   does, and reads 0 over black and 1 over white, as

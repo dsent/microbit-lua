@@ -222,14 +222,75 @@ int tpbot_info(lua_State *L) {
 }
 
 // The sonar, the same on both robots: the echo's microseconds times half
-// the speed of sound. It answers in mm, the unit run_distance takes, so a
-// reading can go straight into a move. Upstream answered in cm; the
-// change to mm was previously discussed with its maintainer.
+// the speed of sound, 343 m/s unless given. It answers in mm, the unit
+// run_distance takes, so a reading can go straight into a move. Upstream
+// answered in cm; the change to mm was previously discussed with its
+// maintainer.
 int tpbot_get_distance(lua_State *L) {
   int width = tpbot_echo_us();
+  lua_Number speed = luaL_optnumber(L, 1, 343);
   if (width < 0)
     lua_pushnil(L);
   else
-    lua_pushnumber(L, (lua_Number)width * (lua_Number)0.1715);
+    lua_pushnumber(L, (lua_Number)width * speed / 2000);
+  return 1;
+}
+
+// One period of the sonar's 40 kHz sound, how far apart the echo times of
+// one distance fall
+#define ECHO_PERIOD_US 25
+
+static int ascending(const void *a, const void *b) {
+  return *(const int *)a - *(const int *)b;
+}
+
+// The sonar's echo in microseconds. echo() times one echo. echo(n,
+// interval) times n, one every interval ms, and answers the mean of those
+// within one period of their median. The interval is by default as long as
+// an echo with nothing in front lasts, so that a late echo of one ping is
+// not timed as the next one's. It returns after n intervals however many
+// echoes came. Each answers nil when none came.
+int tpbot_echo(lua_State *L) {
+  int n, interval, i, median, count = 0, kept = 0;
+  int *echoes;
+  unsigned long next;
+  long sum = 0;
+  if (lua_isnoneornil(L, 1)) {
+    int width = tpbot_echo_us();
+    if (width < 0)
+      lua_pushnil(L);
+    else
+      lua_pushinteger(L, width);
+    return 1;
+  }
+  n = luaL_checkint(L, 1);
+  interval = luaL_optint(L, 2, ECHO_LONGEST_US / 1000);
+  luaL_argcheck(L, n > 0 && (size_t)n <= (size_t)-1 / sizeof *echoes, 1,
+                "out of range");
+  luaL_argcheck(L, interval >= 0, 2, "out of range");
+  echoes = lua_newuserdata(L, n * sizeof *echoes);
+  next = tpbot_now_ms();
+  for (i = 0; i < n; i++) {
+    int width = tpbot_echo_us();
+    long left;
+    if (width >= 0)
+      echoes[count++] = width;
+    next += interval;
+    left = (long)(next - tpbot_now_ms());
+    if (left > 0)
+      tpbot_sleep_ms(left);
+  }
+  if (count == 0) {
+    lua_pushnil(L);
+    return 1;
+  }
+  qsort(echoes, count, sizeof *echoes, ascending);
+  median = echoes[count / 2];
+  for (i = 0; i < count; i++)
+    if (abs(echoes[i] - median) <= ECHO_PERIOD_US) {
+      sum += echoes[i];
+      kept++;
+    }
+  lua_pushnumber(L, (lua_Number)sum / kept);
   return 1;
 }
