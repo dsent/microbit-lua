@@ -247,10 +247,14 @@ local handler = { }
 
 uBit.handler = handler
 
--- Whatever has been typed since the last look
+-- Whatever has been typed since the last look; a look at an empty port
+-- makes no garbage, as listen() looks 200 times a second
 local function typing()
-  local chars = { }
   local c = serial.getCharAsync()
+  if not c then
+    return ""
+  end
+  local chars = { }
   while c do
     chars[#chars + 1] = c
     c = serial.getCharAsync()
@@ -428,11 +432,16 @@ function listen(name)
   if name ~= nil and (type(name) ~= "string" or #name ~= 5) then
     error("a board name is five letters", 0)
   end
-  awaited = name
   if listening then
+    awaited = name
     radio.close()
     return
   end
+  -- A long loop starts with the collector's mark set anew (see the
+  -- script's end), and first, so that a finalizer that fails or calls
+  -- listen() leaves nothing of this call's set
+  collectgarbage("collect")
+  awaited = name
   listening = true
   radio.enable()
   while not typing():find("[\3\4]") do
@@ -551,6 +560,15 @@ function connect(name, timeout, tries)
   handler[uBit.DEVICE_ID_RADIO] = link_to_port
   serial_session.send = function() end
 end
+
+-- The collector takes its next step once Lua's heap reaches a mark, which
+-- the end of a cycle sets at what the cycle found alive, times the pause.
+-- Cycles that ended before setpause(100) above set it at twice that, which
+-- can lie past the heap's end; a loop that makes garbage, as listen() at
+-- boot did, then stops the board with panic 020. A full collection sets
+-- the mark anew for what runs from here on: a line typed while the script
+-- ran, or a program added below.
+collectgarbage("collect")
 
 -- Script-level setup (runs once before the main fiber
 -- is released):
