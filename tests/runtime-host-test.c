@@ -20,6 +20,8 @@
 #include "lualib.h"
 #include "lua-events.h"
 #include "lua-strip-debug.h"
+// The collector's own state, for where its next cycle starts
+#include "lstate.h"
 
 enum {
   ID_BUTTON_A = 1, ID_BUTTON_B = 2, ID_DISPLAY = 7, ID_RADIO = 9,
@@ -86,8 +88,31 @@ static void plan(Action a) {
   pauses[pauses_planned++] = a;
 }
 
-// The radio link's other board, which the test plays. Once listen() is
-// called, a board that calls this one on its first look, types the keys
+// Whether the collector takes its next step within one step of what Lua
+// holds. A full collection under the script's pause of 100 sets the mark
+// at what it found alive, and a step under way at most one step above;
+// a stopped collector's mark is the largest there is.
+enum { STEP = 1024 };           // GCSTEPSIZE, which lgc.c keeps to itself
+
+static int mark_near(lua_State *L) {
+  return G(L)->GCthreshold <= G(L)->totalbytes + STEP;
+}
+
+static long lua_heap(lua_State *L) {
+  return lua_gc(L, LUA_GCCOUNT, 0) * 1024L + lua_gc(L, LUA_GCCOUNTB, 0);
+}
+
+// Whether the mark was near when listen() first looked for a caller and
+// when microbit.sleep was called, -1 for not seen; whom each listen() first
+// looked for; and, while measuring, Lua's heap at the first two looks after
+// that, with the collector stopped between them
+static int near_at_answer, near_at_sleep;
+static char looked_for[64];
+static int measuring;
+static long heap_at_look[3];
+
+// The radio link's other board, which the test plays. Once listen() turns
+// the radio on, a board that calls this one on its first look, types the keys
 // the test gives it and hears what this one says; after a few looks the
 // test presses Ctrl+C on the port, which ends listen(). Once connect() is
 // called, a board that is linked: it hears what tx sends and answers with
@@ -110,13 +135,30 @@ static int l_connect(lua_State *L) {
   return 1;
 }
 
+// Each listen() turns the radio on, and meets a caller anew
+static int l_enable(lua_State *L) {
+  (void)L;
+  listening = looks = 0;
+  return 0;
+}
+
 static int l_answered(lua_State *L) {
   if (!listening) {
     listening = 1;
+    near_at_answer = mark_near(L);
+    append(looked_for, sizeof looked_for, luaL_optstring(L, 1, "any"));
+    append(looked_for, sizeof looked_for, " ");
     lua_pushliteral(L, "gigat");
     return 1;
   }
-  if (++looks == 3)
+  ++looks;
+  if (measuring && looks == 1)
+    lua_gc(L, LUA_GCSTOP, 0);
+  if (measuring && looks <= 2)
+    heap_at_look[looks] = lua_heap(L);
+  if (measuring && looks == 2)
+    lua_gc(L, LUA_GCRESTART, 0);
+  if (looks == 3)
     type_in("\3");
   lua_pushnil(L);
   return 1;
@@ -253,6 +295,7 @@ static int l_busy(lua_State *L) {
 // microbit.sleep, as the firmware binds it
 static int l_sleep(lua_State *L) {
   uint32_t ms = (uint32_t)luaL_checkinteger(L, 1);
+  near_at_sleep = mark_near(L);
   note("<sleep>");
   lua_events_sleep(ms);
   note("</sleep>");
@@ -300,7 +343,7 @@ static const luaL_Reg l_serial[] = {
   {"eventAfterAsync", l_arm}, {NULL, NULL}
 };
 static const luaL_Reg l_radio[] = {
-  {"enable", l_nothing}, {"beacon", l_nothing}, {"connect", l_connect},
+  {"enable", l_enable}, {"beacon", l_nothing}, {"connect", l_connect},
   {"answered", l_answered}, {"tx", l_tx}, {"rx", l_rx}, {"close", l_close},
   {NULL, NULL}
 };
@@ -352,7 +395,15 @@ static void fresh(void) {
   animating = 0;
   animation_ends = 0;
   shown[0] = 0;
+  near_at_answer = near_at_sleep = -1;
+  looked_for[0] = 0;
+  measuring = 0;
+  heap_at_look[1] = heap_at_look[2] = -1;
 }
+
+// Whether the script loads and runs with the collector stopped, its mark
+// as high as can be until a full collection
+static int load_stopped;
 
 // Boot the board with text as its script, loaded and stripped as main()
 // does
@@ -361,6 +412,8 @@ static void boot_script(const char *text, size_t length) {
   if (board_L)
     lua_close(board_L);
   board_L = L = luaL_newstate();
+  if (load_stopped)
+    lua_gc(L, LUA_GCSTOP, 0);
   luaopen_base(L);
   luaopen_table(L);
   luaopen_string(L);
@@ -802,6 +855,79 @@ static void the_radio_link(void) {
   expect(strstr(said, "=> 42\r\n> ") != NULL, "... which answers again");
 }
 
+// Lua and the board share one heap, and Lua 5.1 never collects when an
+// allocation fails: the collector's next cycle has to start before a long
+// loop fills the heap, at boot as at the prompt
+static void the_collector(void) {
+  // Where the cycles of the script's loading leave the mark depends on the
+  // sizes of Lua's objects and on when a cycle ends, which differ here: on
+  // the board it lay past the heap's end. The script loads with the
+  // collector stopped, its mark past any end.
+  load_stopped = 1;
+  fresh();
+  boot();
+  expect(mark_near(board_L),
+         "what runs after the script at boot finds the collector's mark set "
+         "anew, whatever the script's load left");
+  fresh();
+  type_in("microbit.sleep(1)\r");
+  boot();
+  load_stopped = 0;
+  expect(near_at_sleep == 1,
+         "... and so does a line typed while the script ran");
+
+  fresh();
+  boot();
+  line("collectgarbage('stop') listen()");
+  expect(near_at_answer == 1,
+         "listen() starts with the collector's mark set anew");
+
+  // 200 looks a second, while nothing is typed and no board calls
+  fresh();
+  boot();
+  measuring = 1;
+  line("listen()");
+  expect(heap_at_look[1] != -1 && heap_at_look[2] == heap_at_look[1],
+         "listen()'s look while nothing happens takes nothing from Lua's "
+         "heap");
+
+  // A finalizer in listen()'s collection that listens itself: once it is
+  // over, the call it interrupted waits for its own board. The collector
+  // is stopped first, so that no step finalizes it before.
+  fresh();
+  boot();
+  lua_gc(board_L, LUA_GCSTOP, 0);
+  if (luaL_dostring(board_L, "local p = newproxy(true) "
+                    "getmetatable(p).__gc = function() listen('inner') end")) {
+    fprintf(stderr, "the finalizer was not set: %s\n",
+            lua_tostring(board_L, -1));
+    exit(2);
+  }
+  line("listen('outer')");
+  expect(strcmp(looked_for, "inner outer ") == 0,
+         "a finalizer that calls listen() in listen()'s collection leaves the "
+         "call it interrupted waiting for its own board");
+
+  // A finalizer that fails in listen()'s collection: the call is over, and
+  // the next one serves
+  fresh();
+  boot();
+  lua_gc(board_L, LUA_GCSTOP, 0);
+  if (luaL_dostring(board_L, "local p = newproxy(true) "
+                    "getmetatable(p).__gc = function() error('fin') end")) {
+    fprintf(stderr, "the finalizer was not set: %s\n",
+            lua_tostring(board_L, -1));
+    exit(2);
+  }
+  line("listen('gigat')");
+  caller_types = "6*7\r";
+  line("listen('gigat')");
+  expect(strstr(out, "]:1: fin\r\n> ") != NULL
+         && strcmp(caller_hears, "> 6*7\r\n=> 42\r\n> ") == 0,
+         "a finalizer that fails in listen()'s collection is said, and the "
+         "next listen() serves");
+}
+
 // The firmware's faces, and a program that waits for an Async call with
 // display.busy()
 static void the_display(void) {
@@ -887,6 +1013,7 @@ int main(int argc, char **argv) {
   a_program_that_guards_its_globals();
   mistakes_named();
   the_radio_link();
+  the_collector();
   the_display();
   the_base_library();
   printf("%d checks, %d failed\n", checks, failures);
