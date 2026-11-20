@@ -1329,6 +1329,75 @@ extern "C" void tpbot_sleep_ms(long ms) {
   uBit.sleep(ms);
 }
 
+// The line sensors, P13 the left and P14 the right, each read 0 over a
+// line. getLine() gives them as 0 to 3: 1 for a line under the left, 2
+// under the right, 3 under both. watchLine(on) turns their edges into
+// events of their own, which the script's handler table routes to
+// onLineChange(state, time) of the module watching, time in microseconds
+// since watching began.
+#define DEVICE_ID_LINE 3102
+
+static int line_watched;
+static int line_state;
+static uint32_t line_start;
+static const char *line_module;
+
+static int line() {
+  int left = !uBit.io.P13.getDigitalValue();
+  int right = !uBit.io.P14.getDigitalValue();
+  return left | right << 1;
+}
+
+static int get_line(lua_State *L) {
+  lua_pushinteger(L, line());
+  return 1;
+}
+
+// A watched sensor's edge as a line event: a fall is a line coming under
+// the sensor, a rise one going
+static codal::Event line_edge(codal::Event e) {
+  int sensor = e.source == uBit.io.P13.id ? 1 : 2;
+  if (e.value == DEVICE_PIN_EVT_FALL)
+    line_state |= sensor;
+  else
+    line_state &= ~sensor;
+  return codal::Event(DEVICE_ID_LINE, line_state,
+                      (uint32_t)e.timestamp - line_start, CREATE_ONLY);
+}
+
+// Handler for the line events: calls onLineChange(state, time) of the
+// module watching, if the script has defined it
+static int line_event(lua_State *L) {
+  lua_getglobal(L, line_module);
+  lua_getfield(L, -1, "onLineChange");
+  if (!lua_isfunction(L, -1)) return 0;
+  lua_pushvalue(L, 1);
+  lua_pushvalue(L, 2);
+  lua_call(L, 2, 0);
+  return 0;
+}
+
+static int watch_line(lua_State *L, const char *module) {
+  int on = lua_toboolean(L, 1);
+  int events = on ? DEVICE_PIN_EVENT_ON_EDGE : DEVICE_PIN_EVENT_NONE;
+  route(L, DEVICE_ID_LINE, line_event);
+  line_module = module;
+  uBit.io.P13.eventOn(events);
+  uBit.io.P14.eventOn(events);
+  line_start = system_timer_current_time_us();
+  line_state = line();
+  line_watched = on;
+  return 0;
+}
+
+static int tpbot_watch_line(lua_State *L) {
+  return watch_line(L, "tpbot");
+}
+
+static int tpbot2_watch_line(lua_State *L) {
+  return watch_line(L, "tpbot2");
+}
+
 // Nezha 2 takes 8-byte commands: 255, 249, the motor (argument 1), then
 // five bytes.
 static int nezha2_send(lua_State *L, int b3, int b4, int b5, int b6, int b7) {
@@ -2295,15 +2364,19 @@ static const LuaApi l_i2c[] = {
 };
 #undef F
 
-// The TPBot commands, from source/tpbot.c
+// The TPBot commands, from source/tpbot.c, and the line sensors
 #define X(name, function) {#name, function, 0},
 static const LuaApi l_tpbot[] = {
     TPBOT_FUNCTIONS
+    {"getLine", get_line, 0},
+    {"watchLine", tpbot_watch_line, 0},
     {NULL, NULL, 0}
 };
 
 static const LuaApi l_tpbot2[] = {
     TPBOT2_FUNCTIONS
+    {"getLine", get_line, 0},
+    {"watchLine", tpbot2_watch_line, 0},
     {NULL, NULL, 0}
 };
 #undef X
@@ -2582,6 +2655,9 @@ static void on_codal_event(codal::Event e, void *arg) {
       || (e.source == DEVICE_ID_PULSE_IN
           && e.value == DEVICE_EVT_PULSE_IN_TIMEOUT))
     return;
+  if (line_watched
+      && (e.source == uBit.io.P13.id || e.source == uBit.io.P14.id))
+    e = line_edge(e);
   codal::Event *copy = new codal::Event(e);
   create_fiber(lua_event_handler_fiber, copy);
 }

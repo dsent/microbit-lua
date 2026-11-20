@@ -269,12 +269,14 @@ Edu (`source/tpbot.c`). Each command sends its robot's I2C frame and
 returns.
 
 - `tpbot`: `set_car_light(r, g, b)`, `set_motors_speed(left, right)`,
-  `info()`, `get_distance(speed)` and `echo(n, interval)`.
+  `info()`, `get_distance(speed)`, `echo(n, interval)`, `getLine()` and
+  `watchLine(on)`.
 - `tpbot2`: `set_car_light(r, g, b)`, `set_motors_speed(left, right)`,
   `speed_control(left, right)`, `set_speed(mm_per_s)`, `run_distance(mm)`,
   `turn(degrees)`, `pivot(degrees)`, `busy()`, `set_servo(servo, value)`,
   `adjust_motor_speed()`, `reset_motor_adjust()`, `info()`,
-  `get_distance(speed)` and `echo(n, interval)`.
+  `get_distance(speed)`, `echo(n, interval)`, `getLine()` and
+  `watchLine(on)`.
 
 - A fraction is dropped. `set_motors_speed` takes speeds from -255 to 255,
   and runs the motors until the next motor command; light values go from 0
@@ -321,6 +323,11 @@ returns.
   answers the mean of those within 25 microseconds, one period of the
   sonar's sound, of their median. It returns after n intervals however many
   echoes came. Each answers `nil` when none came.
+- `getLine()` answers the line sensors, 0 to 3: 1 when a line is under the
+  left one, 2 under the right, 3 under both. `watchLine(true)` calls
+  `onLineChange(state, time)` of the same module, if the script has defined
+  it, on each change, with the state as `getLine()` answers it and the time
+  in microseconds since watching began; `watchLine(false)` stops it.
 - The line sensors are pins P13, the left one, and P14, read through
   `microbit.io`. pxt-TPBot sets them to no pull, as `setPullNone(getPin(13))`
   does, and reads 0 over black and 1 over white, as
