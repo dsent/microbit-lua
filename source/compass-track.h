@@ -8,11 +8,12 @@ extern "C" {
 // As the board turns about up, the field runs round a circle centred on
 // the field the board itself adds. From that centre the field points
 // north. Every sample goes into the sums of a least-squares circle, found
-// once the centre is known well enough for the heading noise wanted and
-// the field has since gone round it once: a fit to part of a turn takes
-// the field's unevenness for the circle's shape. Turning keeps the field
-// on the circle; a field that leaves it, disturbed, loses it until it
-// comes back, and the circle is sought anew if it does not come back soon.
+// when the field has gone round it and come back to where it stood before
+// the turn, with the centre known well enough for the heading noise
+// wanted: a fit to anything but whole turns takes the field's unevenness
+// for the circle's shape. Turning keeps the field on the circle; a field
+// that leaves it, disturbed, loses it until it comes back, and the circle
+// is sought anew if it does not come back soon.
 // Only the field across up counts: the heading does not depend on the
 // field along up, which on a floor changes from place to place.
 
@@ -35,9 +36,13 @@ typedef struct {
   int samples;
   float noise;                  // variance of a sample on one axis
   float origin[2];              // the sums' first sample
+  float start[2];               // the field before the turn, averaged
+  int still;                    // whether it has stayed there
+  int octant;                   // the last sample's round the centre,
+                                // counted from the start's
   double n, sx, sy, sxx, sxy, syy, sxr, syr, sr, srr;
   float cx, cy, radius;
-  unsigned seen;                // octants passed since the centre was known
+  unsigned seen;                // octants passed since the start
   float play;                   // variance of centre and radius per noise
   float misfit;                 // mean square off the circle
   float dr;                     // filtered offset from the circle

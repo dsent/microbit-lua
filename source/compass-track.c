@@ -20,6 +20,7 @@ static void seek(Track *t) {
   t->sxx = t->sxy = t->syy = 0;
   t->sxr = t->syr = t->sr = t->srr = 0;
   t->seen = 0;
+  t->still = 1;
   t->found = 0;
   t->away = 0;
   t->alpha = 1;
@@ -56,6 +57,19 @@ static void measure(Track *t, const float h[2]) {
   memmove(t->last[1], t->last[0], 2 * sizeof t->last[0]);
   memcpy(t->last[0], h, sizeof t->last[0]);
   t->samples++;
+}
+
+// Average the field, the first samples of the sums, until it moves from
+// the mean by more than the noise: the start, where the turn is to end
+static void stand(Track *t, const float h[2]) {
+  float dx = h[0] - t->start[0], dy = h[1] - t->start[1];
+  if (t->n > 0 && t->samples > 3
+      && dx * dx + dy * dy > 2 * SPREAD * t->noise) {
+    t->still = 0;
+    return;
+  }
+  t->start[0] += dx / (t->n + 1);
+  t->start[1] += dy / (t->n + 1);
 }
 
 // Add a sample to the sums, taken from the first one for precision
@@ -105,6 +119,14 @@ static int octant(float x, float y) {
   return y > x ? o + 1 : o;
 }
 
+// Octant of the field round the centre, counted from the start's: 0 just
+// past it one way, 7 just past it the other
+static int around(const Track *t, const float h[2]) {
+  float sx = t->start[0] - t->cx, sy = t->start[1] - t->cy;
+  float x = h[0] - t->cx, y = h[1] - t->cy;
+  return octant(sx * x + sy * y, sx * y - sy * x);
+}
+
 // Squared offset from the circle of a field moved by eps radians of
 // heading: a field moved by d turns the heading by about d / radius
 static float slack(const Track *t) {
@@ -147,11 +169,12 @@ static void tune(Track *t) {
 }
 
 // Filter the sample and add it to the sums. Nothing is fitted before the
-// noise is measured, from the fourth sample. A circle known well enough is
-// found once the field has passed every octant round it, unless the
-// samples scatter from it. A found circle is lost while the field is off
-// it by more than the slack, and found again once the field is back within
-// half of it; the samples off it stay out of the sums.
+// noise is measured, from the fourth sample. The circle is found when the
+// field, having passed every octant round it, comes back across the start
+// while the circle is known well enough, unless the samples scatter from
+// it. A found circle is lost while the field is off it by more than the
+// slack, and found again once the field is back within half of it; the
+// samples off it stay out of the sums.
 int track_sample(Track *t, const float raw[3]) {
   float h[2] = { dot(raw, t->u), dot(raw, t->v) };
   measure(t, h);
@@ -172,18 +195,18 @@ int track_sample(Track *t, const float raw[3]) {
       return TRACK_LOST;
     }
   }
+  if (t->still) stand(t, h);
   gather(t, h);
   if (t->samples <= 3 || !fit(t)) return 0;
   if (t->found) {
     tune(t);
     return 0;
   }
-  if (!certain(t)) {
-    t->seen = 0;
-    return 0;
-  }
-  t->seen |= 1u << octant(h[0] - t->cx, h[1] - t->cy);
-  if (t->seen != 0xff) return 0;
+  int o = around(t, h);
+  int back = (o == 0 && t->octant == 7) || (o == 7 && t->octant == 0);
+  t->octant = o;
+  t->seen |= 1u << o;
+  if (t->seen != 0xff || !back || !certain(t)) return 0;
   if (scattered(t)) {
     seek(t);
     return 0;
