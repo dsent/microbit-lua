@@ -451,7 +451,9 @@ static intptr_t circle_run;     // which call of track() the fiber serves
 // handler table
 static void route(lua_State *L, int device, lua_CFunction handle) {
   lua_getglobal(L, "microbit");
-  lua_getfield(L, -1, "handler");
+  if (lua_istable(L, -1)) lua_getfield(L, -1, "handler");
+  if (!lua_istable(L, -1))
+    luaL_error(L, "script needs a microbit.handler table");
   lua_pushcfunction(L, handle);
   lua_rawseti(L, -2, device);
   lua_pop(L, 2);

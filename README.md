@@ -114,7 +114,10 @@ A payload that replaces the firmware's whole script brings its own
 `loadfile` (`source/lbaselib-no-stdio.patch`), since the board has no
 stdout and no files. The firmware's script defines the `print` the REPL
 and programs call, writing to the serial port, or over the radio link
-while one is up.
+while one is up. To use `compass.track` or `robot.hold`, it needs a
+`microbit.handler` table; without one they raise an error. Their events
+reach their callbacks only through an `on_event` that calls
+`microbit.handler[source](value, timestamp)`.
 
 
 ## Serial connection
