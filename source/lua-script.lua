@@ -416,9 +416,19 @@ uBit.accelerometer.getSample()
 
 local radio_session = make_session(radio.tx)
 
+-- Handler output between commands: to the caller while live, else the port
+local listen_session = { }
+
+local function to_caller(s)
+  if not radio.tx(s) then
+    listen_session.send = nil
+    serial.send(s)
+  end
+end
 
 --- A fresh session for a caller that has just arrived
 local function greet()
+  listen_session.send = to_caller
   radio_session.buffer = ""
   radio_session.run(radio_session.prompt)
 end
@@ -444,6 +454,9 @@ function listen(name)
   awaited = name
   listening = true
   radio.enable()
+  local saved = active_session
+  listen_session.send = nil
+  active_session = listen_session
   while not typing():find("[\3\4]") do
     radio.beacon(awaited)
     local caller = radio.answered(awaited)
@@ -453,10 +466,12 @@ function listen(name)
     end
     local piece = radio.rx()
     if piece then
+      listen_session.send = to_caller
       radio_session.run(function() radio_session.keys(piece) end)
     end
     uBit.sleep(5)
   end
+  active_session = saved
   listening = false
   radio.close()
 end

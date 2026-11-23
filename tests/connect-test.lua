@@ -16,6 +16,7 @@ end
 -- The stand-in board. A name in capitals is a constant with a number of
 -- its own; any other function the script calls does nothing.
 local out, keys, calls, answers, sent, rx_queue = {}, {}, {}, {}, {}, {}
+local caller, tx_ok, tx_tried = nil, true, {}
 local on_call -- run at each call: what is typed while it waits stays in
 -- the port, since no handler runs until the calls end (#40's engine)
 local closes = 0
@@ -60,6 +61,11 @@ local radio = quiet({
     if on_call then on_call(#calls) end
     return table.remove(answers, 1) or false
   end,
+  answered = function()
+    local c = caller
+    caller = nil
+    return c
+  end,
   close = function() closes = closes + 1 end,
   rx = function()
     local r = table.remove(rx_queue, 1)
@@ -67,6 +73,8 @@ local radio = quiet({
     return nil
   end,
   tx = function(s)
+    tx_tried[#tx_tried + 1] = s
+    if not tx_ok then return false end
     sent[#sent + 1] = s
     return true
   end,
@@ -261,6 +269,128 @@ check(#calls == 1, "a first call is made once: " .. #calls)
 local ok, err = pcall(connect, "puzup", nil, "x")
 check(not ok and has(tostring(err), "attempts must be a number"),
       "a wrong attempts is refused: " .. tostring(err))
+
+-- Handler output between commands while listen() runs: over the link
+-- when a caller takes it, to the port when radio.tx returns false (no
+-- caller, or caller gone), and back to the port once listen() ends.
+local note
+uBit.handler[uBit.DEVICE_ID_BUTTON_A] = function() print(note) end
+
+-- Caller linked: a linked command runs, then a handler fires in
+-- listen()'s sleep between commands; its print goes over the radio and
+-- not to the port. After listen() ends, the rest of the line and later
+-- prints go back to the port.
+out, keys, sent, tx_tried, rx_queue = {}, {}, {}, {}, { { "print('cmd')\r" } }
+caller, tx_ok, note = "puzup", true, "between"
+on_sleep = function()
+  on_event(uBit.DEVICE_ID_BUTTON_A, uBit.DEVICE_BUTTON_EVT_DOWN)
+  keys[#keys + 1] = "\3"
+end
+type_keys('listen("puzup") print("same-line")\r')
+o = output()
+local tx = table.concat(sent)
+check(has(tx, "between\r\n") and not has(o, "between"),
+      "listen() with a caller sends handler output over the radio: tx="
+      .. tx .. " port=" .. o)
+check(has(tx, "cmd\r\n") and not has(o, "cmd"),
+      "linked command output stays on the radio: tx=" .. tx)
+check(has(o, "same-line\r\n") and not has(tx, "same-line"),
+      "print right after listen() on the same line goes to the port: port="
+      .. o .. " tx=" .. tx)
+check(o:sub(-2) == "> ", "console prompt returns after listen(): " .. o)
+
+-- After listen() ends, print (from a handler or the REPL) goes to the
+-- port and does not try the radio even when radio.tx would return true
+out, keys, sent, tx_tried, tx_ok, note = {}, {}, {}, {}, true, "after"
+on_event(uBit.DEVICE_ID_BUTTON_A, uBit.DEVICE_BUTTON_EVT_DOWN)
+type_keys('print("repl")\r')
+o = output()
+check(has(o, "after\r\n") and has(o, "repl\r\n") and #tx_tried == 0,
+      "after listen() ends, print goes to the port: port=" .. o
+      .. " tx_tried=" .. #tx_tried)
+
+-- No caller yet: listen() sends handler output to the port without
+-- calling radio.tx (even when radio.tx would return true, e.g. an
+-- outbound peer opened before listen(), and even after an earlier
+-- listen() had a caller)
+out, keys, sent, tx_tried, rx_queue = {}, {}, {}, {}, {}
+caller, tx_ok, note = nil, true, "no-caller"
+on_sleep = function()
+  on_event(uBit.DEVICE_ID_BUTTON_A, uBit.DEVICE_BUTTON_EVT_DOWN)
+  keys[#keys + 1] = "\3"
+end
+type_keys("listen()\r")
+o = output()
+check(has(o, "no-caller\r\n") and #tx_tried == 0,
+      "listen() before any caller goes to the port without calling radio.tx: "
+      .. "port=" .. o .. " tx_tried=" .. #tx_tried)
+
+-- Failed send, then quiet, then caller sends a piece again: the failed
+-- print falls back to the port, the next print does not call radio.tx,
+-- and after a piece arrives from the caller, handler print goes over
+-- the radio again
+out, keys, sent, tx_tried, rx_queue = {}, {}, {}, {}, {}
+caller, tx_ok = "puzup", true
+local tried_after_fail
+on_sleep = function()
+  tx_tried, sent = {}, {}
+  tx_ok = false
+  note = "first"
+  on_event(uBit.DEVICE_ID_BUTTON_A, uBit.DEVICE_BUTTON_EVT_DOWN)
+  note = "second"
+  on_event(uBit.DEVICE_ID_BUTTON_A, uBit.DEVICE_BUTTON_EVT_DOWN)
+  tried_after_fail = table.concat(tx_tried)
+  tx_ok = true
+  rx_queue = { { "1+1\r" } }
+  on_sleep = function()
+    note = "again"
+    on_event(uBit.DEVICE_ID_BUTTON_A, uBit.DEVICE_BUTTON_EVT_DOWN)
+    keys[#keys + 1] = "\3"
+  end
+end
+type_keys('listen("puzup")\r')
+o = output()
+tx = table.concat(sent)
+check(tried_after_fail == "first\r\n"
+      and o == 'listen("puzup")\r\nfirst\r\nsecond\r\n> '
+      and not has(tx, "first") and not has(tx, "second"),
+      "after a failed send, the next print skips radio.tx: tried="
+      .. tostring(tried_after_fail) .. " port=" .. o)
+check(has(tx, "again\r\n") and not has(o, "again"),
+      "after the caller sends a piece, handler output uses radio.tx again: "
+      .. "tx=" .. tx .. " port=" .. o)
+
+-- Linked command output, Runtime error and prompt reach radio.tx and do
+-- not fall back to the port when radio.tx returns false
+out, keys, sent, tx_tried = {}, {}, {}, {}
+rx_queue = { { "print('linked') error('boom')\r" } }
+caller, tx_ok = "puzup", false
+on_sleep = function() keys[#keys + 1] = "\3" end
+type_keys('listen("puzup")\r')
+o = output()
+local tried = table.concat(tx_tried)
+check(has(tried, "linked\r\n")
+      and has(tried, "Runtime error: ") and has(tried, "boom\r\n")
+      and tried:sub(-2) == "> "
+      and o == 'listen("puzup")\r\n> ',
+      "linked command output, error and prompt reach radio.tx and not the "
+      .. "port: tried=" .. tried .. " port=" .. o)
+
+-- Direct listen() (active_session nil, as at boot) restores nil on exit
+out, keys, sent, tx_tried, rx_queue = {}, {}, {}, {}, {}
+caller, tx_ok, note = "puzup", true, "at-boot"
+on_sleep = function()
+  on_event(uBit.DEVICE_ID_BUTTON_A, uBit.DEVICE_BUTTON_EVT_DOWN)
+  keys[#keys + 1] = "\3"
+end
+listen("puzup")
+check(has(table.concat(sent), "at-boot\r\n") and not has(output(), "at-boot"),
+      "direct listen() sends handler output over the radio")
+out, sent, tx_tried = {}, {}, {}
+print("after-direct")
+o = output()
+check(has(o, "after-direct\r\n") and #tx_tried == 0,
+      "after direct listen() ends, print goes to the port: " .. o)
 
 say(checks .. " checks, " .. failed .. " failed")
 os.exit(failed == 0 and 0 or 1)

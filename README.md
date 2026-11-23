@@ -138,7 +138,10 @@ calls it and hands its own serial port over to the link.
 - `listen(name)` waits for the board with that five-letter name to call,
   or for any board when no name is given, and serves only the board that
   called. It sends a beacon every one to two seconds, saying who it is
-  and whom it waits for. Ctrl+C or Ctrl+D on its own port ends it.
+  and whom it waits for. Ctrl+C or Ctrl+D on its own port ends it. What a
+  handler prints on a listening board goes to the board that called, and
+  to the board's own port while no caller is there or after a send to it
+  failed, until the caller sends again.
 - `connect(name, timeout, attempts)` calls the board `name`, waiting up to
   `timeout` ms (5000 when not given), and says `<name> connected.` From
   then on, what is typed on this board's port goes to the far board, and
