@@ -45,14 +45,18 @@ static float clamp(float x) {
   return x > WHEEL_FULL ? WHEEL_FULL : x < -WHEEL_FULL ? -WHEEL_FULL : x;
 }
 
+// The integral grows only while neither wheel is at full speed: what it
+// gathers while the wheels can go no faster carries the robot past the
+// heading.
 int hold_step(Hold *h, const float up[3], const float north[3], float dt,
               float wheels[2]) {
   if (h->steps == 0) return 0;
   if (h->steps > 0) h->steps--;
   float e = error(h, up, north);
-  h->sum += e * dt;
-  float u = h->kp * e + h->ki * h->sum + h->kd * (e - h->last) / dt;
+  float sum = h->sum + e * dt;
+  float u = h->kp * e + h->ki * sum + h->kd * (e - h->last) / dt;
   h->last = e;
+  if (fabsf(h->speed) + fabsf(u) <= WHEEL_FULL) h->sum = sum;
   wheels[0] = clamp(h->speed + u);
   wheels[1] = clamp(h->speed - u);
   return 1;
